@@ -29,7 +29,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SmartPumpDatabase =
         Room.databaseBuilder(context, SmartPumpDatabase::class.java, "smartpump.db")
-            .fallbackToDestructiveMigration() // TODO: replace with proper migrations before production
+            .fallbackToDestructiveMigration(dropAllTables = true) // TODO: replace with proper migrations before production
             .build()
 
     @Provides

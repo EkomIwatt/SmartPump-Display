@@ -23,6 +23,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SmartPumpDisplay">
 
+        <!-- Disable Sentry's auto-init ContentProvider until a real DSN is wired in.
+             Without this, Sentry crashes the app on startup with "DSN is required". -->
+        <meta-data android:name="io.sentry.auto-init" android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
