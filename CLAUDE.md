@@ -2,14 +2,36 @@
 
 ## At the start of every session
 
-Before responding to the user's first request, read the contents of `docs/specs/` to ground yourself in the current project state. This folder contains:
+Before responding to the user's first request, read these in order to ground yourself in the current project state:
 
-- `PROJECT_LOG.md` — append-only log of completed phases. Read this first; it is the fastest way to understand what has been built and what is next.
-- `Screen spec *.pdf` — UI/screen specifications for the app.
-- Any other design docs (`design-system.md`, `OPEN_QUESTIONS.md`, `scaffolding-prompt.md` live in `docs/`).
+1. `docs/specs/PROJECT_LOG.md` — append-only log of completed phases. Fastest way to see what has been built and what is next.
+2. `docs/flows.md` — the five transaction flows: customer screen sequence, state list, payload examples.
+3. `docs/state-machine.md` — sealed-class hierarchy + transition table per flow.
+4. `docs/design-system.md` — visual language (colors, typography, components, layout rules).
+5. `docs/OPEN_QUESTIONS.md` — open decisions.
 
-Do not summarise the specs back to the user unsolicited — just load them as context.
+Skim the screenshots in `docs/Strict design screens/` when the work touches a specific flow.
+
+Do not summarise these docs back to the user unsolicited — just load them as context.
+
+## Authority order
+
+When sources disagree, this is the priority:
+
+1. **`docs/Strict design screens/*.png`** — authoritative for visual layout, copy, and state labels. Build exactly what is shown. If a constraint makes it impossible to match, flag it before deviating.
+2. `docs/flows.md` and `docs/state-machine.md` — authoritative for state transitions and business logic.
+3. `docs/design-system.md` — authoritative for tokens (color, type, spacing).
+4. Any other doc — secondary.
+
+Old design materials live under `docs/_archive/` and `docs/specs/_archive/`. Treat them as historical reference only — do not use them to make implementation decisions.
 
 ## After every completed phase / stage / run / milestone
 
 Append a new entry to `docs/specs/PROJECT_LOG.md` following the template and rules at the top of that file. The log is append-only — never rewrite or delete prior entries.
+
+## House rules
+
+- Wait for an explicit "go" before starting a new phase. Each phase should be self-contained and leave the build green.
+- The user works in well-defined stages; do not roll multiple phases into one without permission.
+- Commit per logical sub-deliverable. Phase 3 in particular is committed flow-by-flow (3a, 3b, ...).
+- Rebuild work happens on `rebuild/strict-design`. Merge to `main` only when a phase is verified.
