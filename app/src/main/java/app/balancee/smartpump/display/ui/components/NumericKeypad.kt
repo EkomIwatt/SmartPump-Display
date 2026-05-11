@@ -1,5 +1,5 @@
 // 4×3 numeric keypad for amount entry. Bottom row is C / 0 / ⌫.
-// Fixed 72 dp button height; spacing matches Dimensions.itemSpacing scaled up.
+// Fixed 56 dp button height so all four rows fit above CONFIRM/BACK on a medium tablet.
 package app.balancee.smartpump.display.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
@@ -31,12 +31,12 @@ fun NumericKeypad(
     )
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         rows.forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 row.forEach { key ->
                     OutlinedButton(
@@ -49,7 +49,7 @@ fun NumericKeypad(
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .height(72.dp),
+                            .height(56.dp),
                         shape = RoundedCornerShape(Dimensions.cornerButton),
                     ) {
                         Text(

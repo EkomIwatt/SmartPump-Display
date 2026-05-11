@@ -93,11 +93,21 @@ fun AmountSelectScreen(
             onClear = { amountKobo = 0L },
         )
         Spacer(Modifier.weight(1f))
-        BalanceeButtonPrimary(
-            text = "CONFIRM",
-            onClick = { onConfirm(amountKobo) },
-            enabled = amountKobo > 0,
-        )
-        BalanceeButtonSecondary(text = "BACK", onClick = onBack)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            BalanceeButtonSecondary(
+                text = "BACK",
+                onClick = onBack,
+                modifier = Modifier.weight(1f),
+            )
+            BalanceeButtonPrimary(
+                text = "CONFIRM",
+                onClick = { onConfirm(amountKobo) },
+                enabled = amountKobo > 0,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
