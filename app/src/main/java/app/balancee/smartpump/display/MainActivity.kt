@@ -1,20 +1,19 @@
-// Single-activity host. Phase 1 placeholder body — the customer + attendant UI
-// is rebuilt in Phases 2–4 against docs/Strict design screens/.
+// Single-activity host. Bottom layer is the customer state host driven by [CustomerViewModel].
+// The attendant overlay + debug screen are wired back in during Phase 4.
 package app.balancee.smartpump.display
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import app.balancee.smartpump.display.ui.theme.Background
+import androidx.hilt.navigation.compose.hiltViewModel
+import app.balancee.smartpump.display.ui.customer.CustomerStateHost
+import app.balancee.smartpump.display.ui.customer.CustomerViewModel
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -25,23 +24,23 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             SmartPumpDisplayTheme {
-                PhaseOnePlaceholder()
+                SmartPumpRoot()
             }
         }
     }
 }
 
 @Composable
-private fun PhaseOnePlaceholder() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Background),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "SmartPump Display — rebuild in progress",
-            style = MaterialTheme.typography.headlineMedium,
-        )
-    }
+private fun SmartPumpRoot(
+    customerVm: CustomerViewModel = hiltViewModel(),
+) {
+    val state by customerVm.state.collectAsState()
+    CustomerStateHost(
+        state = state,
+        onStartTransaction = customerVm::onStartTransaction,
+        onSelectPrePay = customerVm::onSelectPrePay,
+        onSelectFillUp = customerVm::onSelectFillUp,
+        onCancel = customerVm::onCancel,
+        modifier = Modifier.fillMaxSize(),
+    )
 }

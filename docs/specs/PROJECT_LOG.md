@@ -149,3 +149,28 @@ Phase 3 — Customer flows + Idle/ModeSelect. One phase committed flow-by-flow:
 - **3f** — Flow 5 (USSD Offline): USSD code display, awaiting SMS, dispensing on parsed SMS.
 
 Each sub-deliverable leaves the build green, ends with a commit, and matches the corresponding strict-design screenshot.
+
+---
+
+### Phase 3a (rebuild) — Idle + ModeSelect + customer state host
+**Date:** 2026-05-12
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+The app now actually shows something other than a placeholder. On launch you land on the Idle screen with the "Start transaction" button. Tap it and you go to the mode-select screen, where two cards offer PRE-PAY (gold) and FILL UP (cyan) — each with a short explainer. Picking either one moves the app forward to a state whose screen will be built in the next sub-phases (3b–3f); for now those states show a "wiring in progress" card with a "Back to idle" button so the kiosk never gets stuck. The whole flow is driven by a single state machine in a view-model — the screens are just dispatched by it.
+
+**Technical notes:**
+- New `ui/theme/StateColors.kt` — `TransactionState.borderColor()` extension mapping every variant to its design-system border colour (idle/menu → `BorderSubtle`, waiting/cash → `PrimaryAmber`, fill-up → `ActiveCyan`, complete/confirmed/digital-paid → `SuccessGreen`, error → `WarningRed`). `FixedDispensing` branches on `flow` so the cash-fixed flavour stays gold while pre-pay/USSD goes green.
+- New `ui/customer/CustomerViewModel.kt` — `@HiltViewModel`, in-memory `MutableStateFlow<TransactionState>(Idle)`. Methods `onStartTransaction`, `onSelectPrePay`, `onSelectFillUp`, `onCancel`. Each transition guards on the expected source state. Persistence (PulseRepository) is intentionally not wired yet — that lands in Phase 5.
+- New `ui/customer/IdleScreen.kt` — full-bleed dark canvas, `PumpHeader` at top, centered `BalanceeCard(BorderSubtle)` with `HeroSerifText "balanceè"`, tagline, `LabelText "Tap to fuel"`, primary `BalanceeButton`.
+- New `ui/customer/ModeSelectScreen.kt` — `PumpHeader` → headline → two `BalanceeCard` mode tiles in a `Row(weight 1f)` with `Dimensions.threeCardGap`. PRE-PAY card uses gold accent + serif italic "Fixed amount, pay before fuel flows.", FILL UP uses cyan + "Open-ended fill. Pay after the nozzle shuts." Each card is wholly clickable and also hosts a "Choose …" button. Cancel sits at the bottom as a secondary button.
+- New `ui/customer/CustomerStateHost.kt` — single `when` on `state`. `Idle` → `IdleScreen`, `ModeSelect` → `ModeSelectScreen`, every other variant → an inline `NotYetImplementedScreen` (state-coloured card naming the variant + "Back to idle"). Three previews: idle, mode select, placeholder (against `PrepayAmountSelect`).
+- `MainActivity` rewritten: `SmartPumpRoot()` injects `CustomerViewModel` via `hiltViewModel()` and forwards `state` + four callbacks to `CustomerStateHost`. The Phase 1 placeholder is gone.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL. KSP re-ran for the new `@HiltViewModel`.
+
+**Next:**
+Phase 3b — Flow 1 (Fixed Pre-pay Digital). Wire the customer side end-to-end:
+`PrepayAmountSelect` (₦2k/₦5k/₦10k/₦20k/₦50k/Custom tiles + numeric keypad on Custom),
+`PrepayMethodSelect`, `PrepayAwaitingPayment` (gold QR card, 5-min expiry → Idle),
+`FixedDispensing` (green border, live `LitresDisplay`), `Complete` (green border, ledger rows, share-receipt). Add the use-case the VM consumes for "is price-per-litre set?" (block transactions if not), wire a mocked webhook trigger via the existing `PaymentProcessor` so the QR state advances on the timed mock success. Keep persistence out for now.
