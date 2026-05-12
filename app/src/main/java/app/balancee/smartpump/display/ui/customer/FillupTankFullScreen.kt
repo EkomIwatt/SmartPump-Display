@@ -133,7 +133,7 @@ fun FillupTankFullScreen(
                 modifier = Modifier.weight(1f),
             )
             BalanceeButton(
-                label = if (digitalEnabled) "Pay digitally · scan QR" else "Pay digitally · phase 3e",
+                label = "Pay digitally · scan QR",
                 onClick = onPayDigital,
                 enabled = digitalEnabled,
                 variant = BalanceeButtonVariant.Secondary,

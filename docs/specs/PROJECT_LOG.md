@@ -297,3 +297,32 @@ The most common Nigerian scenario now runs in the app. The customer says "fill a
 
 **Next:**
 Phase 3e — Flow 3 (Fill-up Digital). From `FillupTankFull` the "Pay digitally" branch enables: transition to `FillupDigitalAwaitingPayment(qrContent)` showing a dynamic NIP QR encoding the exact verified amount against the station's `virtualAccountNumber` from `DeviceConfig`, gold border + 5-min expiry → fallback to `FillupAwaitingCashConfirm` (cash collected anyway). On webhook (mock `PaymentProcessor`) success the state goes to `Complete(flow = FILLUP_DIGITAL, method = BANK_QR_TRANSFER)`.
+
+---
+
+### Phase 3e (rebuild) — Flow 3 (Fill-up Digital), end-to-end
+**Date:** 2026-05-12
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+The fill-up journey now has a digital payment option that works without the attendant ever touching cash. After the nozzle shuts and the gold "Amount due" screen comes up, the "Pay digitally" button — which was greyed out until this phase — is now live. Tapping it generates a fresh QR code encoding a bank transfer to the station's account for the exact verified amount, with the transaction reference baked in. The customer scans with any bank app (GTBank, Opay, PalmPay, etc.), and when the (simulated) payment confirms the screen flips to a green "Done." receipt logged as a digital fill-up. If the customer wanders off and the 5-minute timer runs out, the screen falls back to the cash-collection hold so the attendant can still collect — the fuel already flowed and the audit row must reflect what actually came in. There's also a "Cancel · collect cash instead" button for explicit fallback. The four other flows are unchanged; the USSD flow (3f) is the last one left.
+
+**Technical notes:**
+- New screen `ui/customer/FillupDigitalAwaitingPaymentScreen.kt` — gold-bordered two-card row. Left card: centred `QrCodeView(220dp)` of the dynamic NIP payload + "Open any bank app · scan · confirm" caption + bank-list subline ("GTBank · Opay · PalmPay · any bank"). Right card: `AmountDisplay` for the exact amount due in gold, verified-litres line ("38.10 L · verified"), ledger rows (Method = Bank QR · NIP, Price / L, Txn, Expires-in `mm:ss`), explainer paragraph. Bottom: "Cancel · collect cash instead" secondary button.
+- `ui/theme/StateColors.kt` — fixed an existing miscolour: `FillupDigitalAwaitingPayment` was returning `SuccessGreen` from before this phase landed. Per `docs/design-system.md` (and the strict-design screen 225038) the waiting QR card is gold; green is the *Paid* card that lives on `Complete(FILLUP_DIGITAL)` instead. Moved the variant into the existing amber branch alongside the other "waiting" states.
+- `ui/customer/CustomerViewModel.kt`:
+  - `CustomerUiState` gained `fillupDigitalExpiresInSeconds: Int` so the QR card can render the 5-min countdown without leaking the timer into the canonical state.
+  - New constant `FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60`.
+  - New companion constant `DEFAULT_VIRTUAL_ACCOUNT = "0123456789"` — fallback NIP destination if `DeviceConfig.virtualAccountNumber` is null. Real provisioning still tracked in `docs/OPEN_QUESTIONS.md` #6.
+  - `onFillupPayDigital()` rewritten — no longer routes to an error. Reads the live `DeviceConfig.virtualAccountNumber` (with the fallback), composes `nip://transfer?account=…&amount=…&ref=…` for the QR, transitions to `FillupDigitalAwaitingPayment`, then launches sibling jobs: a `PaymentProcessor` collector and the 5-min expiry countdown.
+  - `startFillupDigitalPayment(source)` — calls `paymentProcessor.process(BANK_QR_TRANSFER, amountKobo).collect`. Ignores `Pending` (the QR is already on-screen with our own txnId; the backend ref only matters once a webhook actually fires). On `Success`, guards `currentState() is FillupDigitalAwaitingPayment` (a late webhook after cancel or expiry must not retrigger), cancels the expiry job, then `completeAndRecord(Complete(flow = FILLUP_DIGITAL, method = BANK_QR_TRANSFER))` — same audit helper from the Phase-3 hardening pass writes the transactions row. On `Failed`, drops back to `FillupAwaitingCashConfirm` because the litres already flowed and cash must still be collectable; the failure reason is logged.
+  - `startFillupDigitalExpiry(source)` — 1Hz countdown updating `fillupDigitalExpiresInSeconds`. On hitting zero (while still in the digital-awaiting state), cancels the payment collector and transitions to `FillupAwaitingCashConfirm` — matches the `docs/state-machine.md` fallback rule.
+  - `onCancel()` now also resets `fillupDigitalExpiresInSeconds` so a fresh transaction starts with a clean countdown.
+- `ui/customer/CustomerStateHost.kt` — added `FillupDigitalAwaitingPayment → FillupDigitalAwaitingPaymentScreen(...)` branch passing through the QR content + ui-state expiry seconds. Header comment updated; `FillupTankFullScreen` now wired with `digitalEnabled = true`.
+- `ui/customer/FillupTankFullScreen.kt` — relabelled the digital button to "Pay digitally · scan QR" unconditionally (the host controls `enabled`).
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+- Persistence (PulseRepository round-trip) still deferred to Phase 5; the in-memory state is enough until then.
+
+**Next:**
+Phase 3f — Flow 5 (USSD Offline). From `PrepayMethodSelect` with method = USSD: transition to `UssdAwaitingSms(amount, txnRef, txnId, pricePerLitre)` showing the per-bank USSD codes (`*737*amount*ref#` for GTBank, plus Access / Zenith / UBA) and a "waiting for SMS" hold. The mock SMS path uses a debug-screen injector (lands in Phase 4) so testers can trigger the parser. On parse success → `FixedDispensing(flow = USSD_OFFLINE, …)` then `Complete(flow = USSD_OFFLINE, method = USSD)`. Default 5-min SMS timeout returns to `Idle`.

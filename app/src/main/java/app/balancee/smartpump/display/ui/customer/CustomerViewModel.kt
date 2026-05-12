@@ -1,8 +1,11 @@
 // Customer-side state machine. Phase 3b wired Flow 1 (Fixed Pre-pay Digital);
 // Phase 3c added Flow 4 (Cash Fixed): Idle → CashFixedAmountEntry → CashFixedDispensing → Complete.
-// Phase 3d adds Flow 2 (Fill-up Cash): Idle/FillupAwaitingAttendantAuth → FillupDispensing →
+// Phase 3d added Flow 2 (Fill-up Cash): Idle/FillupAwaitingAttendantAuth → FillupDispensing →
 // (3s pulse-timeout watchdog) → FillupTankFull → FillupAwaitingCashConfirm → Complete.
-// The cash-fixed and fill-up entries both stand in for the Phase 4 attendant swipe-up overlay.
+// Phase 3e adds Flow 3 (Fill-up Digital): FillupTankFull → FillupDigitalAwaitingPayment
+// (dynamic NIP QR for the verified amount) → Complete on webhook; 5-min expiry falls back
+// to FillupAwaitingCashConfirm so cash can still be collected.
+// The cash-fixed and fill-up entries stand in for the Phase 4 attendant swipe-up overlay.
 //
 // Wiring notes:
 //  - Price guard (CanStartTransactionUseCase) blocks any new transaction when koboPerLitre is unset.
@@ -50,6 +53,7 @@ import javax.inject.Inject
 
 private const val PULSES_PER_LITRE = 100
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
+private const val FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60
 private const val FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L
 private const val FILLUP_WATCHDOG_POLL_MS = 500L
 
@@ -57,6 +61,7 @@ private const val FILLUP_WATCHDOG_POLL_MS = 500L
 data class CustomerUiState(
     val state: TransactionState = TransactionState.Idle,
     val prepayExpiresInSeconds: Int = 0,
+    val fillupDigitalExpiresInSeconds: Int = 0,
     val pricePerLitre: Int = 0,
 )
 
@@ -228,17 +233,111 @@ class CustomerViewModel @Inject constructor(
     }
 
     fun onFillupPayDigital() {
-        // Branches to Flow 3 — wired in Phase 3e. Until then the UI keeps the button
-        // disabled, but route to a recoverable error if the host calls anyway so we
-        // never silently no-op.
-        if (currentState() !is TransactionState.FillupTankFull) return
-        setState(
-            TransactionState.Error(
-                message = "Digital fill-up payment lands in Phase 3e.",
-                recoverable = true,
+        val current = currentState() as? TransactionState.FillupTankFull ?: return
+        viewModelScope.launch {
+            val account = deviceConfig()?.virtualAccountNumber
+                ?: DEFAULT_VIRTUAL_ACCOUNT
+            val qrContent = buildNipTransferQr(
+                account = account,
+                amountNaira = current.amountDueNaira,
+                txnId = current.txnId,
+            )
+            cancelInFlightJobs()
+            setState(
+                TransactionState.FillupDigitalAwaitingPayment(
+                    txnId = current.txnId,
+                    verifiedLitres = current.verifiedLitres,
+                    amountDueNaira = current.amountDueNaira,
+                    qrContent = qrContent,
+                )
+            )
+            startFillupDigitalExpiry(current)
+            startFillupDigitalPayment(current)
+        }
+    }
+
+    /**
+     * Listens to the mock [PaymentProcessor] for a Success/Failed result. The Pending
+     * event is ignored — we already showed the QR with the verified amount and our own
+     * txn id; the backend ref is only meaningful once the webhook actually fires.
+     */
+    private fun startFillupDigitalPayment(source: TransactionState.FillupTankFull) {
+        paymentJob?.cancel()
+        val amountKobo = source.amountDueNaira.toLong() * 100
+        paymentJob = viewModelScope.launch {
+            paymentProcessor.process(PaymentMethod.BANK_QR_TRANSFER, amountKobo).collect { result ->
+                when (result) {
+                    is PaymentResult.Pending -> Unit // QR is already on-screen
+                    is PaymentResult.Success -> onFillupDigitalSuccess(source)
+                    is PaymentResult.Failed -> onFillupDigitalFailed(source, result.reason)
+                }
+            }
+        }
+    }
+
+    private suspend fun onFillupDigitalSuccess(source: TransactionState.FillupTankFull) {
+        // The webhook may land after the customer cancelled or after we fell back to
+        // cash — only transition if we're still on the digital-awaiting screen.
+        if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
+        expiryJob?.cancel()
+        completeAndRecord(
+            TransactionState.Complete(
+                flow = TransactionFlow.FILLUP_DIGITAL,
+                txnId = source.txnId,
+                litres = source.verifiedLitres,
+                amountNaira = source.amountDueNaira,
+                method = PaymentMethod.BANK_QR_TRANSFER,
             )
         )
     }
+
+    private fun onFillupDigitalFailed(source: TransactionState.FillupTankFull, reason: String) {
+        if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
+        expiryJob?.cancel()
+        // Drop back to cash collection — the litres already flowed; the audit row must
+        // still record cash actually collected, not a failed digital attempt.
+        android.util.Log.w("CustomerVM", "Fill-up digital payment failed: $reason")
+        setState(
+            TransactionState.FillupAwaitingCashConfirm(
+                txnId = source.txnId,
+                verifiedLitres = source.verifiedLitres,
+                amountDueNaira = source.amountDueNaira,
+            )
+        )
+    }
+
+    private fun startFillupDigitalExpiry(source: TransactionState.FillupTankFull) {
+        expiryJob?.cancel()
+        expiryJob = viewModelScope.launch {
+            var remaining = FILLUP_DIGITAL_EXPIRY_SECONDS
+            _ui.update { it.copy(fillupDigitalExpiresInSeconds = remaining) }
+            while (remaining > 0 && currentState() is TransactionState.FillupDigitalAwaitingPayment) {
+                delay(1_000L)
+                remaining -= 1
+                _ui.update { it.copy(fillupDigitalExpiresInSeconds = remaining) }
+            }
+            if (remaining <= 0 && currentState() is TransactionState.FillupDigitalAwaitingPayment) {
+                // Per state-machine.md: 5-min expiry → FillupAwaitingCashConfirm. The
+                // fuel already flowed; cash collection is the safe fallback.
+                paymentJob?.cancel()
+                setState(
+                    TransactionState.FillupAwaitingCashConfirm(
+                        txnId = source.txnId,
+                        verifiedLitres = source.verifiedLitres,
+                        amountDueNaira = source.amountDueNaira,
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Build a NIP transfer QR payload. Real Balanceè production payload TBD; this is
+     * the simplest scannable URI that round-trips the three fields a bank app needs:
+     * destination account, exact amount in kobo, transaction ref for reconciliation.
+     */
+    private fun buildNipTransferQr(account: String, amountNaira: Int, txnId: String): String =
+        "nip://transfer?account=$account&amount=$amountNaira&ref=$txnId"
 
     fun onAttendantCashReceived() {
         val current = currentState() as? TransactionState.FillupAwaitingCashConfirm ?: return
@@ -494,7 +593,12 @@ class CustomerViewModel @Inject constructor(
         cancelInFlightJobs()
         viewModelScope.launch { relay.stopFuelFlow() }
         setState(TransactionState.Idle)
-        _ui.update { it.copy(prepayExpiresInSeconds = 0) }
+        _ui.update {
+            it.copy(
+                prepayExpiresInSeconds = 0,
+                fillupDigitalExpiresInSeconds = 0,
+            )
+        }
     }
 
     fun onShareReceipt() {
@@ -571,5 +675,9 @@ class CustomerViewModel @Inject constructor(
         // Stop-gap default until the operator-push channel lands (Phase 6). Matches the spec example
         // (₦870/L ⇒ 87_000 kobo/L). The Phase 4 debug screen will let testers override this live.
         const val DEFAULT_KOBO_PER_LITRE = 87_000L
+
+        // Fallback NIP account for the fill-up-digital QR if DeviceConfig has none yet.
+        // Real virtualAccountNumber is provisioned during install (see OPEN_QUESTIONS #6).
+        const val DEFAULT_VIRTUAL_ACCOUNT = "0123456789"
     }
 }

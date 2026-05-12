@@ -1,7 +1,7 @@
 // Dispatches the right customer-side screen for the current [TransactionState].
 // Phase 3b wired Flow 1 (Fixed Pre-pay Digital); Phase 3c added Flow 4 (Cash Fixed);
-// Phase 3d wires Flow 2 (Fill-up Cash). FillupDigitalAwaitingPayment + UssdAwaitingSms
-// still fall through to NotYetImplementedScreen until 3e–3f.
+// Phase 3d added Flow 2 (Fill-up Cash); Phase 3e adds Flow 3 (Fill-up Digital).
+// UssdAwaitingSms still falls through to NotYetImplementedScreen until 3f.
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
@@ -135,7 +135,18 @@ fun CustomerStateHost(
             amountDueNaira = state.amountDueNaira,
             onPayCash = onFillupPayCash,
             onPayDigital = onFillupPayDigital,
-            digitalEnabled = false,
+            digitalEnabled = true,
+            modifier = modifier,
+        )
+
+        is TransactionState.FillupDigitalAwaitingPayment -> FillupDigitalAwaitingPaymentScreen(
+            txnId = state.txnId,
+            verifiedLitres = state.verifiedLitres,
+            amountDueNaira = state.amountDueNaira,
+            pricePerLitre = uiState.pricePerLitre,
+            qrContent = state.qrContent,
+            expiresInSeconds = uiState.fillupDigitalExpiresInSeconds,
+            onCancel = onCancel,
             modifier = modifier,
         )
 
