@@ -174,3 +174,36 @@ Phase 3b — Flow 1 (Fixed Pre-pay Digital). Wire the customer side end-to-end:
 `PrepayAmountSelect` (₦2k/₦5k/₦10k/₦20k/₦50k/Custom tiles + numeric keypad on Custom),
 `PrepayMethodSelect`, `PrepayAwaitingPayment` (gold QR card, 5-min expiry → Idle),
 `FixedDispensing` (green border, live `LitresDisplay`), `Complete` (green border, ledger rows, share-receipt). Add the use-case the VM consumes for "is price-per-litre set?" (block transactions if not), wire a mocked webhook trigger via the existing `PaymentProcessor` so the QR state advances on the timed mock success. Keep persistence out for now.
+
+---
+
+### Phase 3b (rebuild) — Flow 1 (Fixed Pre-pay Digital), end-to-end
+**Date:** 2026-05-12
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+A customer can now walk the entire pre-pay journey on the pump. They tap PRE-PAY, pick an amount (one of five presets or any custom value on the keypad), pick a payment method, see a QR card with a 5-minute countdown, watch the litres count up in green once payment confirms, and land on a "Done." receipt screen showing how much they paid, how many litres they got, and the transaction ID. If the operator hasn't pushed a price, the app refuses to start a transaction and tells the customer to find the operator — but for now a default price (₦870/L) is seeded on first launch so the flow is playable. Cash is acknowledged but routes back to idle because the attendant overlay isn't built yet (Phase 4). The four other flows still show the "wiring in progress" placeholder.
+
+**Technical notes:**
+- New screens under `ui/customer/`:
+  - `PrepayAmountSelectScreen` — five preset tiles (₦2k/5k/10k/20k/50k) + a Custom tile that swaps the grid for a numeric keypad (min ₦200, max ₦200,000).
+  - `PrepayMethodSelectScreen` — five method tiles (Balanceè app, Bank QR, NFC, USSD, Cash) coloured by accent; each fully clickable.
+  - `PrepayAwaitingPaymentScreen` — two-card row, gold border. Left card = `QrCodeView` + method caption. Right card = amount, ledger rows, live `mm:ss` countdown sourced from the VM, plus a "Cancel transaction" secondary button.
+  - `FixedDispensingScreen` — green border, giant `LitresDisplay` of `litresSoFar`, sub-line "of X.XX L authorised", running cost + paid line, ledger column + paid column at the bottom. Borrows amber styling when reached via `CASH_FIXED` (Phase 3c will use it from there).
+  - `CompleteScreen` — green border ✓ card with serif "Done.", ledger (Litres, Paid, Price/L, Method, Txn), "Receipt sent to WhatsApp" hint, Share-receipt + Done buttons.
+- New use case `domain/usecase/CanStartTransactionUseCase` — returns `Allowed(config)` or `PriceNotSet`. Wired into the VM's `onStartTransaction` so MODE_SELECT only renders when a price is live; otherwise we route to `TransactionState.Error("Price not set — contact operator.")`.
+- `CustomerViewModel` rewritten:
+  - Now `@Inject`s `CanStartTransactionUseCase`, `DeviceConfigRepository`, `PaymentProcessor`, `PulseSource`, `RelayController`. UI is exposed as `CustomerUiState` wrapping the canonical `TransactionState` plus a view-only `prepayExpiresInSeconds` countdown the QR card reads.
+  - Pre-pay payment uses `PaymentProcessor.process(method, amountKobo).collect`. Pending → `PrepayAwaitingPayment` + 5-min countdown coroutine; Success → `FixedDispensing` + open relay + start a pulse-count coroutine that converts pulses → litres at 100 pulses/L and emits `Complete` when `litresSoFar >= litresAuthorised`; Failed → `Error(recoverable = true)`.
+  - Expiry coroutine ticks once per second, auto-cancels back to Idle on zero. All in-flight jobs cancelled on `onCancel`, and the relay is force-closed.
+  - `init` seeds a default `DeviceConfig(koboPerLitre = 87_000)` if none exists — stop-gap until the operator-push channel lands in Phase 6.
+  - Cash selection on the method screen short-circuits to `onCancel()` (attendant overlay is Phase 4).
+- `CustomerStateHost` extended to dispatch all Phase 3b states; everything else still falls through to `NotYetImplementedScreen`. Error state gets its own red-bordered card.
+- `MainActivity` switched from passing raw state to passing the new `CustomerUiState` wrapper; nine callbacks now route to VM methods.
+- `gradle/libs.versions.toml` bumped during the session (AGP 9.2.0 → 9.2.1, KSP 2.2.10-2.0.2 → 2.3.2) to keep KSP + AGP compatible after a clean run. Not part of Phase 3b proper but kept in the commit since it touches the same green build.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+- Persistence (PulseRepository round-trip) intentionally still **not** wired. Phase 5 handles boot-time resume.
+
+**Next:**
+Phase 3c — Flow 4 (Cash Fixed). Attendant enters a Naira amount on a gold-bordered keypad card; the system computes a litre cutoff against the live `koboPerLitre`, transitions to `CashFixedDispensing` (which can render through the existing `FixedDispensingScreen` in cash colours), and lands on `Complete` with `method = null` on the receipt. No customer overlay yet — the keypad screen stands in for the attendant action; the swipe-up overlay arrives in Phase 4.

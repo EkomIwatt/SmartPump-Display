@@ -34,12 +34,16 @@ class MainActivity : ComponentActivity() {
 private fun SmartPumpRoot(
     customerVm: CustomerViewModel = hiltViewModel(),
 ) {
-    val state by customerVm.state.collectAsState()
+    val uiState by customerVm.ui.collectAsState()
     CustomerStateHost(
-        state = state,
+        uiState = uiState,
         onStartTransaction = customerVm::onStartTransaction,
         onSelectPrePay = customerVm::onSelectPrePay,
         onSelectFillUp = customerVm::onSelectFillUp,
+        onPrepayAmountChosen = customerVm::onPrepayAmountChosen,
+        onPrepayMethodChosen = customerVm::onPrepayMethodChosen,
+        onShareReceipt = customerVm::onShareReceipt,
+        onDismissComplete = customerVm::onDismissComplete,
         onCancel = customerVm::onCancel,
         modifier = Modifier.fillMaxSize(),
     )
