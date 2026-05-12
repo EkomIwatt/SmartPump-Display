@@ -207,3 +207,31 @@ A customer can now walk the entire pre-pay journey on the pump. They tap PRE-PAY
 
 **Next:**
 Phase 3c — Flow 4 (Cash Fixed). Attendant enters a Naira amount on a gold-bordered keypad card; the system computes a litre cutoff against the live `koboPerLitre`, transitions to `CashFixedDispensing` (which can render through the existing `FixedDispensingScreen` in cash colours), and lands on `Complete` with `method = null` on the receipt. No customer overlay yet — the keypad screen stands in for the attendant action; the swipe-up overlay arrives in Phase 4.
+
+---
+
+### Phase 3c (rebuild) — Flow 4 (Cash Fixed), end-to-end
+**Date:** 2026-05-12
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+The attendant can now run a cash-fixed transaction. From idle, an "Attendant · cash fixed" button drops onto a gold keypad screen where they type the Naira amount the customer handed over; the screen shows the resulting litre cutoff live and the price per litre in use. Tapping the big amber "Authorise cash ₦X,XXX" (or the keypad ✓) opens the pump, the pump dispenses in gold up to exactly that cutoff (rounded down, so never more than was paid), and the receipt comes up green with no payment method — cash leaves no digital trace. The customer experience is unchanged. The attendant entry point is temporary until Phase 4 brings the swipe-up overlay; the keypad screen itself is permanent.
+
+**Technical notes:**
+- New screen `ui/customer/CashFixedAmountEntryScreen.kt` — gold-bordered two-column layout. Left card: live `AmountDisplay` of the typed amount, `LitresDisplay` of the floor-rounded cutoff, ledger rows for Price/L + min/max, Cancel secondary. Right: `NumericKeypad` whose ✓ also authorises. Bottom: a full-width primary `BalanceeButton` labelled "Authorise cash ₦X,XXX" that mirrors the ✓ action. Min ₦200, max ₦200,000.
+- Re-used the existing `FixedDispensingScreen` for `CashFixedDispensing` — it already gold-styles when `flow == CASH_FIXED`. Host maps `cashAmountNaira → amountNaira` and `litresCutoff → litresAuthorised`.
+- `CustomerViewModel`:
+  - `CustomerUiState` gained `pricePerLitre: Int` so the keypad screen can render the current ₦/L before the price guard re-runs.
+  - `init` now also pulls the seeded `DeviceConfig` into `pricePerLitre` + the UI state.
+  - New `onAttendantCashFixed()` — price-guarded `Idle → CashFixedAmountEntry`. Fires `Error("Price not set — contact operator.")` when no config.
+  - New `onCashFixedAuthorise(cashAmountNaira)` — computes cutoff via `DeviceConfig.litresCutoff(amountKobo)` (floor to 0.01L per state-machine invariant #3), transitions to `CashFixedDispensing`, opens the relay, starts a pulse coroutine that converts pulses → litres at 100 pulses/L and emits `Complete(flow = CASH_FIXED, method = null)` when `litresSoFar ≥ litresCutoff`. Sub-minimum amounts (cutoff ≤ 0L) route to a recoverable error.
+  - `generateCashTxnId()` produces a local `"BLC-NNNNN"` ID — cash flows don't go through `PaymentProcessor` so they don't get a backend ref. Real backend correlation lands in Phase 6.
+- `IdleScreen` gained a small secondary "Attendant · cash fixed" button under the primary action — temp affordance until Phase 4 ships the swipe-up overlay. The button is the same width as "Start transaction" so the customer-facing layout still feels symmetrical.
+- `CustomerStateHost` dispatches `CashFixedAmountEntry → CashFixedAmountEntryScreen(uiState.pricePerLitre, ...)` and `CashFixedDispensing → FixedDispensingScreen(flow = CASH_FIXED, ...)`. Two new callbacks added: `onAttendantCashFixed`, `onCashFixedAuthorise(Int)`.
+- `MainActivity` forwards both callbacks to the VM. Previews updated.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+- Persistence (PulseRepository) still deferred to Phase 5; debug screen overrides for price/cutoff still deferred to Phase 4.
+
+**Next:**
+Phase 3d — Flow 2 (Fill-up Cash). Customer-side: `FillupAwaitingAttendantAuth` screen (cyan, "ask the attendant to authorise"), `FillupDispensing` screen with live cyan litre count and a running 3-second pulse-timeout watchdog → `FillupTankFull`, then `FillupAwaitingCashConfirm`. The attendant actions (FILL UP AUTHORISE and CASH RECEIVED) get a second temporary idle-screen button each — the real swipe-up overlay still arrives in Phase 4. Persistence stays deferred.

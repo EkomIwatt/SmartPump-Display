@@ -42,6 +42,8 @@ private fun SmartPumpRoot(
         onSelectFillUp = customerVm::onSelectFillUp,
         onPrepayAmountChosen = customerVm::onPrepayAmountChosen,
         onPrepayMethodChosen = customerVm::onPrepayMethodChosen,
+        onAttendantCashFixed = customerVm::onAttendantCashFixed,
+        onCashFixedAuthorise = customerVm::onCashFixedAuthorise,
         onShareReceipt = customerVm::onShareReceipt,
         onDismissComplete = customerVm::onDismissComplete,
         onCancel = customerVm::onCancel,

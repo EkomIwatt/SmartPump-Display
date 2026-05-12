@@ -1,6 +1,6 @@
 // Dispatches the right customer-side screen for the current [TransactionState].
-// Phase 3b wires Flow 1 (Fixed Pre-pay Digital) end-to-end; the remaining flow-specific
-// states still fall through to the NotYetImplementedScreen placeholder until 3c–3f land.
+// Phase 3b wired Flow 1 (Fixed Pre-pay Digital); Phase 3c adds Flow 4 (Cash Fixed).
+// Fill-up + USSD states still fall through to NotYetImplementedScreen until 3d–3f.
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.domain.model.PaymentMethod
+import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
@@ -38,6 +39,8 @@ fun CustomerStateHost(
     onSelectFillUp: () -> Unit,
     onPrepayAmountChosen: (Int) -> Unit,
     onPrepayMethodChosen: (PaymentMethod) -> Unit,
+    onAttendantCashFixed: () -> Unit,
+    onCashFixedAuthorise: (Int) -> Unit,
     onShareReceipt: () -> Unit,
     onDismissComplete: () -> Unit,
     onCancel: () -> Unit,
@@ -46,6 +49,7 @@ fun CustomerStateHost(
     when (val state = uiState.state) {
         is TransactionState.Idle -> IdleScreen(
             onStartTransaction = onStartTransaction,
+            onAttendantCashFixed = onAttendantCashFixed,
             modifier = modifier,
         )
 
@@ -85,6 +89,23 @@ fun CustomerStateHost(
             pricePerLitre = state.pricePerLitre,
             amountNaira = state.amountNaira,
             litresAuthorised = state.litresAuthorised,
+            litresSoFar = state.litresSoFar,
+            modifier = modifier,
+        )
+
+        is TransactionState.CashFixedAmountEntry -> CashFixedAmountEntryScreen(
+            pricePerLitre = uiState.pricePerLitre,
+            onAuthorise = onCashFixedAuthorise,
+            onCancel = onCancel,
+            modifier = modifier,
+        )
+
+        is TransactionState.CashFixedDispensing -> FixedDispensingScreen(
+            flow = TransactionFlow.CASH_FIXED,
+            txnId = state.txnId,
+            pricePerLitre = state.pricePerLitre,
+            amountNaira = state.cashAmountNaira,
+            litresAuthorised = state.litresCutoff,
             litresSoFar = state.litresSoFar,
             modifier = modifier,
         )
@@ -207,12 +228,14 @@ private fun NotYetImplementedScreen(
 private fun CustomerStateHostIdlePreview() {
     SmartPumpDisplayTheme {
         CustomerStateHost(
-            uiState = CustomerUiState(state = TransactionState.Idle),
+            uiState = CustomerUiState(state = TransactionState.Idle, pricePerLitre = 870),
             onStartTransaction = {},
             onSelectPrePay = {},
             onSelectFillUp = {},
             onPrepayAmountChosen = {},
             onPrepayMethodChosen = {},
+            onAttendantCashFixed = {},
+            onCashFixedAuthorise = {},
             onShareReceipt = {},
             onDismissComplete = {},
             onCancel = {},
@@ -236,6 +259,8 @@ private fun CustomerStateHostPrepayAmountPreview() {
             onSelectFillUp = {},
             onPrepayAmountChosen = {},
             onPrepayMethodChosen = {},
+            onAttendantCashFixed = {},
+            onCashFixedAuthorise = {},
             onShareReceipt = {},
             onDismissComplete = {},
             onCancel = {},

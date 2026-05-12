@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.components.BalanceeButton
+import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.HeroSerifText
 import app.balancee.smartpump.display.ui.components.LabelText
@@ -32,6 +33,7 @@ import app.balancee.smartpump.display.ui.theme.TextSecondary
 @Composable
 fun IdleScreen(
     onStartTransaction: () -> Unit,
+    onAttendantCashFixed: () -> Unit,
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
 ) {
@@ -72,6 +74,12 @@ fun IdleScreen(
                     onClick = onStartTransaction,
                     modifier = Modifier.width(360.dp),
                 )
+                BalanceeButton(
+                    label = "Attendant · cash fixed",
+                    onClick = onAttendantCashFixed,
+                    variant = BalanceeButtonVariant.Secondary,
+                    modifier = Modifier.width(360.dp),
+                )
             }
         }
     }
@@ -81,6 +89,6 @@ fun IdleScreen(
 @Composable
 private fun IdleScreenPreview() {
     SmartPumpDisplayTheme {
-        IdleScreen(onStartTransaction = {})
+        IdleScreen(onStartTransaction = {}, onAttendantCashFixed = {})
     }
 }
