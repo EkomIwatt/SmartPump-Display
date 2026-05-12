@@ -49,6 +49,13 @@ fun CompleteScreen(
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
 ) {
+    // Flow 1 (digital pre-pay) finishes on a gold receipt card; cash, fill-up, and USSD
+    // completions land on a green "dispense succeeded" card. Source: strict-design screens.
+    val accent = when (flow) {
+        TransactionFlow.FIXED_PREPAY_DIGITAL -> PrimaryAmber
+        else -> SuccessGreen
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -60,7 +67,7 @@ fun CompleteScreen(
             pumpId = pumpId,
             mode = flowMode(flow),
             stateLabel = "Complete",
-            stateColor = SuccessGreen,
+            stateColor = accent,
         )
 
         Box(
@@ -70,7 +77,7 @@ fun CompleteScreen(
             contentAlignment = Alignment.Center,
         ) {
             BalanceeCard(
-                borderColor = SuccessGreen,
+                borderColor = accent,
                 modifier = Modifier.sizeIn(maxWidth = 520.dp),
             ) {
                 Column(
@@ -80,7 +87,7 @@ fun CompleteScreen(
                 ) {
                     Text(
                         text = "✓",
-                        style = MaterialTheme.typography.displayLarge.copy(color = SuccessGreen),
+                        style = MaterialTheme.typography.displayLarge.copy(color = accent),
                     )
                     HeroSerifText(text = "Done.", color = PrimaryAmber)
                     LabelText(text = "Transaction complete")

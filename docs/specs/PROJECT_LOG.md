@@ -235,3 +235,29 @@ The attendant can now run a cash-fixed transaction. From idle, an "Attendant · 
 
 **Next:**
 Phase 3d — Flow 2 (Fill-up Cash). Customer-side: `FillupAwaitingAttendantAuth` screen (cyan, "ask the attendant to authorise"), `FillupDispensing` screen with live cyan litre count and a running 3-second pulse-timeout watchdog → `FillupTankFull`, then `FillupAwaitingCashConfirm`. The attendant actions (FILL UP AUTHORISE and CASH RECEIVED) get a second temporary idle-screen button each — the real swipe-up overlay still arrives in Phase 4. Persistence stays deferred.
+
+---
+
+### Phase 3 hardening — spec-compliance + audit fixes
+**Date:** 2026-05-12
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+A pass over Phases 1–3 turned up four issues that needed fixing before Phase 4 builds on top of them. (1) The "Done." receipt at the end of a digital pre-pay transaction was green — the actual design says it should be gold (it's a receipt; gold is the "money" colour), and the cash/fill-up "Done." screens stay green because they're "dispense succeeded" feedback. (2) Completed transactions were never being written to the local audit log — the wiring existed but nothing called it. Now every completion lands a row in the transactions table so the backend sync (Phase 6) will have something to upload. (3) A leftover model file from before the rebuild (`FuelPrice.kt`) was deleted — its duplicate already lives on `DeviceConfig`. (4) The relay control verbs were renamed (`open()` → `startFuelFlow()`, `close()` → `stopFuelFlow()`) because the old names collided with the spec's electrical "OPEN/CLOSED" terminology in the opposite direction, which was a trap for future contributors.
+
+**Technical notes:**
+- `ui/theme/StateColors.kt`: `Complete` now branches on `flow`. `FIXED_PREPAY_DIGITAL → PrimaryAmber`, all others → `SuccessGreen`. Matches strict-design screen 224956 (Flow 1) vs 225053 (Flow 4).
+- `ui/customer/CompleteScreen.kt`: derives the card border, the ✓ glyph, and the `PumpHeader` state chip from a single `accent` computed from `flow`. The serif "Done." stays `PrimaryAmber` either way.
+- `docs/design-system.md`: state→border table split. Was `CONFIRMED / COMPLETE / PAID → green`; now `CONFIRMED / PAID → green`, plus two new rows — `COMPLETE — Flow 1 receipt → gold` and `COMPLETE — cash / fill-up / USSD → green`. Added a rule-of-thumb sentence so future contributors don't re-collapse the rows.
+- `ui/customer/CustomerViewModel.kt`: now `@Inject`s `TransactionRepository`. New private suspend `completeAndRecord(complete: TransactionState.Complete)` helper that calls `setState` first, then best-effort `transactions.saveTransaction(...)` inside a try/catch (failures get `Log.e`'d but don't block the UI — the customer already got fuel; Phase 6 backend reconciliation handles drift). Both `startDispensing` (Flow 1) and `startCashFixedDispensing` (Flow 4) now go through it. Mapping: `amountKobo = amountNaira * 100`, `priceKoboPerLitre = pricePerLitre * 100`, `transactionRef = txnId` (separate field reserved for the short ref the backend issues), `attendantId = null` in V1.
+- Deleted `domain/model/FuelPrice.kt`. Grep confirmed zero references; `DeviceConfig.litresCutoff(amountKobo)` is the single source of truth.
+- Relay rename:
+  - `RelayController.isOpen: StateFlow<Boolean>` → `isDispensing: StateFlow<Boolean>` (still `true` ⇒ fuel flowing).
+  - `open()` → `startFuelFlow()`, `close()` → `stopFuelFlow()`.
+  - File header updated to spell out the spec mapping: spec "RELAY OPEN" (no fuel) ≡ `!isDispensing`; spec "RELAY CLOSED" (fuel flows) ≡ `isDispensing`. Behaviour unchanged.
+  - Callers updated: `MockRelayController` (log strings now say "ENERGISED / DE-ENERGISED"), `MockPulseSource` (uses `isDispensing` for the pulse gate + reset trigger), `CustomerViewModel` (six callsites across Flow 1 + Flow 4 + cancel).
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+
+**Next:**
+Phase 3d as previously scoped — Flow 2 (Fill-up Cash) customer-side, plus a temp idle-screen attendant entry for FILL UP AUTHORISE / CASH RECEIVED until Phase 4 ships the swipe-up overlay.

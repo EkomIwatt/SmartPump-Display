@@ -34,16 +34,20 @@ The screenshots under `docs/Strict design screens/` are authoritative. This file
 ### State-color → border mapping (critical)
 Cards carry a 1dp border in the state color:
 
-| State                        | Border color   | Token        |
-|------------------------------|----------------|--------------|
-| WAITING (pre-pay QR shown)   | gold           | `#F5A623`    |
-| AWAITING SMS (USSD)          | blue/gold mix  | `#F5A623`    |
-| DISPENSING — fixed/pre-pay   | green          | `#48BB78`    |
-| DISPENSING — fill-up         | cyan           | `#4FD1C5`    |
-| DISPENSING — cash fixed      | gold           | `#F5A623`    |
-| TANK FULL (verified count)   | gold           | `#F5A623`    |
-| CONFIRMED / COMPLETE / PAID  | green          | `#48BB78`    |
-| IDLE / default               | border-subtle  | `#2A2A38`    |
+| State                                 | Border color   | Token        |
+|---------------------------------------|----------------|--------------|
+| WAITING (pre-pay QR shown)            | gold           | `#F5A623`    |
+| AWAITING SMS (USSD)                   | blue/gold mix  | `#F5A623`    |
+| DISPENSING — fixed/pre-pay            | green          | `#48BB78`    |
+| DISPENSING — fill-up                  | cyan           | `#4FD1C5`    |
+| DISPENSING — cash fixed               | gold           | `#F5A623`    |
+| TANK FULL (verified count)            | gold           | `#F5A623`    |
+| CONFIRMED / PAID                      | green          | `#48BB78`    |
+| COMPLETE — Flow 1 receipt (digital pre-pay) | gold     | `#F5A623`    |
+| COMPLETE — cash / fill-up / USSD      | green          | `#48BB78`    |
+| IDLE / default                        | border-subtle  | `#2A2A38`    |
+
+Rule of thumb: the **gold** completion is the "receipt" feeling — the customer paid up front and now sees their itemised receipt. The **green** completion is the "dispense succeeded" feeling — the action just finished. Flow 1 is the only flow that pays before fuelling, so it's the only flow whose Complete is gold.
 
 The state's chip pill (top-left of card) uses the same color, filled with ~15% alpha on the canvas.
 

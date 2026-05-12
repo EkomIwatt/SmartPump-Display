@@ -1,17 +1,23 @@
 // Controls the dispense relay (GPIO line on the Arduino that energises the pump motor solenoid).
-// Open == fuel can flow. Always close on transaction end, error, or app teardown.
+//
+// Verb mapping vs docs/state-machine.md:
+//   spec "RELAY OPEN"   (circuit open, no fuel)  →  code  !isDispensing
+//   spec "RELAY CLOSED" (circuit closed, fuel flows) → code  isDispensing
+// The methods are named after the fuel-flow effect rather than the electrical state so callers
+// don't have to remember which side of the relay verb means what. Always stop the fuel flow on
+// transaction end, error, or app teardown.
 package app.balancee.smartpump.display.domain.hardware
 
 import kotlinx.coroutines.flow.StateFlow
 
 interface RelayController {
 
-    /** Live state of the relay. True == open (fuel flows). Drives the mock pulse generator. */
-    val isOpen: StateFlow<Boolean>
+    /** Live state of the relay. True == fuel is flowing. Drives the mock pulse generator. */
+    val isDispensing: StateFlow<Boolean>
 
-    /** Close the circuit so fuel flows. Idempotent. */
-    suspend fun open()
+    /** Energise the relay so fuel flows. Idempotent. */
+    suspend fun startFuelFlow()
 
-    /** Open the circuit so fuel stops. MUST be called on every terminal state. Idempotent. */
-    suspend fun close()
+    /** De-energise the relay so fuel stops. MUST be called on every terminal state. Idempotent. */
+    suspend fun stopFuelFlow()
 }

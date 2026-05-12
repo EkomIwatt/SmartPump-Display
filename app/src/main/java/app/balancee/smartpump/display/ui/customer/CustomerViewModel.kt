@@ -29,10 +29,12 @@ import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PulseMessage
+import app.balancee.smartpump.display.domain.model.Transaction
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
+import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -61,6 +63,7 @@ class CustomerViewModel @Inject constructor(
     private val paymentProcessor: PaymentProcessor,
     private val pulseSource: PulseSource,
     private val relay: RelayController,
+    private val transactions: TransactionRepository,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CustomerUiState())
@@ -189,7 +192,7 @@ class CustomerViewModel @Inject constructor(
     ) {
         dispenseJob?.cancel()
         dispenseJob = viewModelScope.launch {
-            relay.open()
+            relay.startFuelFlow()
             try {
                 pulseSource.observe().collect { msg ->
                     if (msg !is PulseMessage.Pulse) return@collect
@@ -197,8 +200,8 @@ class CustomerViewModel @Inject constructor(
                         ?: return@collect
                     val litres = msg.count.toDouble() / PULSES_PER_LITRE
                     if (litres >= litresCutoff) {
-                        relay.close()
-                        setState(
+                        relay.stopFuelFlow()
+                        completeAndRecord(
                             TransactionState.Complete(
                                 flow = TransactionFlow.CASH_FIXED,
                                 txnId = txnId,
@@ -212,7 +215,7 @@ class CustomerViewModel @Inject constructor(
                     setState(current.copy(litresSoFar = litres))
                 }
             } finally {
-                relay.close()
+                relay.stopFuelFlow()
             }
         }
     }
@@ -322,7 +325,7 @@ class CustomerViewModel @Inject constructor(
     private fun startDispensing(litresAuthorised: Double, method: PaymentMethod) {
         dispenseJob?.cancel()
         dispenseJob = viewModelScope.launch {
-            relay.open()
+            relay.startFuelFlow()
             try {
                 pulseSource.observe().collect { msg ->
                     if (msg !is PulseMessage.Pulse) return@collect
@@ -330,8 +333,8 @@ class CustomerViewModel @Inject constructor(
                         ?: return@collect
                     val litres = msg.count.toDouble() / PULSES_PER_LITRE
                     if (litres >= litresAuthorised) {
-                        relay.close()
-                        setState(
+                        relay.stopFuelFlow()
+                        completeAndRecord(
                             TransactionState.Complete(
                                 flow = current.flow,
                                 txnId = current.txnId,
@@ -345,7 +348,7 @@ class CustomerViewModel @Inject constructor(
                     setState(current.copy(litresSoFar = litres))
                 }
             } finally {
-                relay.close()
+                relay.stopFuelFlow()
             }
         }
     }
@@ -354,7 +357,7 @@ class CustomerViewModel @Inject constructor(
 
     fun onCancel() {
         cancelInFlightJobs()
-        viewModelScope.launch { relay.close() }
+        viewModelScope.launch { relay.stopFuelFlow() }
         setState(TransactionState.Idle)
         _ui.update { it.copy(prepayExpiresInSeconds = 0) }
     }
@@ -375,6 +378,33 @@ class CustomerViewModel @Inject constructor(
     private fun setState(state: TransactionState) {
         _ui.update { it.copy(state = state) }
     }
+
+    /**
+     * Show the Complete screen and persist the audit row. The audit write is best-effort —
+     * the customer already received fuel, so a disk-write failure must not block the UI.
+     * WorkManager-driven backend sync (Phase 6) will reconcile if it ever sees drift.
+     */
+    private suspend fun completeAndRecord(complete: TransactionState.Complete) {
+        setState(complete)
+        try {
+            transactions.saveTransaction(complete.toAuditRecord(pricePerLitre))
+        } catch (t: Throwable) {
+            android.util.Log.e("CustomerVM", "Failed to persist transaction ${complete.txnId}", t)
+        }
+    }
+
+    private fun TransactionState.Complete.toAuditRecord(pricePerLitre: Int): Transaction =
+        Transaction(
+            id = txnId,
+            flow = flow,
+            paymentMethod = method,
+            litresDispensed = litres,
+            amountKobo = amountNaira.toLong() * 100,
+            priceKoboPerLitre = pricePerLitre.toLong() * 100,
+            transactionRef = txnId,
+            attendantId = attendantId,
+            attendantNote = null,
+        )
 
     private fun cancelInFlightJobs() {
         paymentJob?.cancel()

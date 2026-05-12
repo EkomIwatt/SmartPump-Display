@@ -49,7 +49,7 @@ class MockPulseSource @Inject constructor(
 
     override fun observe(): Flow<PulseMessage> = flow {
         var count = 0
-        var lastRelayOpen = false
+        var wasDispensing = false
         var lastHeartbeatMs = 0L
 
         while (currentCoroutineContext().isActive) {
@@ -60,19 +60,19 @@ class MockPulseSource @Inject constructor(
             }
 
             val now = System.currentTimeMillis()
-            val open = relay.isOpen.value
+            val isDispensing = relay.isDispensing.value
             val rate = _pulsesPerSecond.value
 
-            // Fresh transaction → reset count on each open transition.
-            if (open && !lastRelayOpen) count = 0
-            lastRelayOpen = open
+            // Fresh transaction → reset count on each start-of-dispense transition.
+            if (isDispensing && !wasDispensing) count = 0
+            wasDispensing = isDispensing
 
             if (now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
                 emit(PulseMessage.Heartbeat(now))
                 lastHeartbeatMs = now
             }
 
-            if (open && rate > 0) {
+            if (isDispensing && rate > 0) {
                 count++
                 emit(PulseMessage.Pulse(count, now))
                 delay(1_000L / rate)

@@ -1,4 +1,4 @@
-// Debug-build relay. Holds an in-memory open/closed flag that MockPulseSource observes
+// Debug-build relay. Holds an in-memory dispensing flag that MockPulseSource observes
 // to decide whether to emit pulses. No GPIO touched — real impl lands in a later phase.
 package app.balancee.smartpump.display.data.hardware
 
@@ -13,18 +13,18 @@ import javax.inject.Singleton
 @Singleton
 class MockRelayController @Inject constructor() : RelayController {
 
-    private val _isOpen = MutableStateFlow(false)
-    override val isOpen: StateFlow<Boolean> = _isOpen.asStateFlow()
+    private val _isDispensing = MutableStateFlow(false)
+    override val isDispensing: StateFlow<Boolean> = _isDispensing.asStateFlow()
 
-    override suspend fun open() {
-        if (_isOpen.compareAndSet(expect = false, update = true)) {
-            Log.i(TAG, "RELAY OPEN — fuel flowing")
+    override suspend fun startFuelFlow() {
+        if (_isDispensing.compareAndSet(expect = false, update = true)) {
+            Log.i(TAG, "RELAY ENERGISED — fuel flowing")
         }
     }
 
-    override suspend fun close() {
-        if (_isOpen.compareAndSet(expect = true, update = false)) {
-            Log.i(TAG, "RELAY CLOSE — fuel stopped")
+    override suspend fun stopFuelFlow() {
+        if (_isDispensing.compareAndSet(expect = true, update = false)) {
+            Log.i(TAG, "RELAY DE-ENERGISED — fuel stopped")
         }
     }
 
