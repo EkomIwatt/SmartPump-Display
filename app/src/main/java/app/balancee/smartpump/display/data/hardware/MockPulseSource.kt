@@ -30,11 +30,24 @@ class MockPulseSource @Inject constructor(
     private val _pulsesPerSecond = MutableStateFlow(DEFAULT_PPS)
     val pulsesPerSecond: StateFlow<Int> = _pulsesPerSecond.asStateFlow()
 
+    /**
+     * Simulated tank capacity in litres. Once the mock has emitted enough Pulse messages
+     * to cover this, it stops emitting Pulse (Heartbeats still fire). Lets the customer-side
+     * 3-second pulse-timeout watchdog actually fire during testing — real fuel hardware
+     * has no "tank full" signal either; we infer shutoff from a flow gap.
+     */
+    private val _tankCapacityLitres = MutableStateFlow(DEFAULT_TANK_CAPACITY_LITRES)
+    val tankCapacityLitres: StateFlow<Double> = _tankCapacityLitres.asStateFlow()
+
     // Out-of-band injection channel for debug-only failure simulation.
     private val injections = Channel<PulseMessage>(capacity = Channel.UNLIMITED)
 
     fun setPulsesPerSecond(value: Int) {
         _pulsesPerSecond.value = value.coerceIn(MIN_PPS, MAX_PPS)
+    }
+
+    fun setTankCapacityLitres(value: Double) {
+        _tankCapacityLitres.value = value.coerceIn(0.5, MAX_TANK_CAPACITY_LITRES)
     }
 
     /** Debug-only: inject a synthetic disconnect event into the next observe() collection. */
@@ -72,7 +85,9 @@ class MockPulseSource @Inject constructor(
                 lastHeartbeatMs = now
             }
 
-            if (isDispensing && rate > 0) {
+            val capacityPulses = (_tankCapacityLitres.value * PULSES_PER_LITRE).toInt()
+            val tankFull = capacityPulses > 0 && count >= capacityPulses
+            if (isDispensing && rate > 0 && !tankFull) {
                 count++
                 emit(PulseMessage.Pulse(count, now))
                 delay(1_000L / rate)
@@ -88,5 +103,8 @@ class MockPulseSource @Inject constructor(
         const val MAX_PPS = 200
         const val HEARTBEAT_INTERVAL_MS = 5_000L
         const val IDLE_POLL_MS = 100L
+        const val PULSES_PER_LITRE = 100      // mirrors the VM constant for hardware contract
+        const val DEFAULT_TANK_CAPACITY_LITRES = 60.0
+        const val MAX_TANK_CAPACITY_LITRES = 500.0
     }
 }

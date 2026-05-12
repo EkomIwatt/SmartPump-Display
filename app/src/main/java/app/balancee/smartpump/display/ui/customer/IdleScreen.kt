@@ -34,6 +34,7 @@ import app.balancee.smartpump.display.ui.theme.TextSecondary
 fun IdleScreen(
     onStartTransaction: () -> Unit,
     onAttendantCashFixed: () -> Unit,
+    onAttendantFillUp: () -> Unit,
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
 ) {
@@ -80,6 +81,12 @@ fun IdleScreen(
                     variant = BalanceeButtonVariant.Secondary,
                     modifier = Modifier.width(360.dp),
                 )
+                BalanceeButton(
+                    label = "Attendant · fill up",
+                    onClick = onAttendantFillUp,
+                    variant = BalanceeButtonVariant.Secondary,
+                    modifier = Modifier.width(360.dp),
+                )
             }
         }
     }
@@ -89,6 +96,10 @@ fun IdleScreen(
 @Composable
 private fun IdleScreenPreview() {
     SmartPumpDisplayTheme {
-        IdleScreen(onStartTransaction = {}, onAttendantCashFixed = {})
+        IdleScreen(
+            onStartTransaction = {},
+            onAttendantCashFixed = {},
+            onAttendantFillUp = {},
+        )
     }
 }

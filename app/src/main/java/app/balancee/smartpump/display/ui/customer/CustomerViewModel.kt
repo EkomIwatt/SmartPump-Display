@@ -1,6 +1,8 @@
 // Customer-side state machine. Phase 3b wired Flow 1 (Fixed Pre-pay Digital);
-// Phase 3c adds Flow 4 (Cash Fixed): Idle → CashFixedAmountEntry → CashFixedDispensing → Complete.
-// The cash-fixed entry stands in for the Phase 4 attendant swipe-up overlay.
+// Phase 3c added Flow 4 (Cash Fixed): Idle → CashFixedAmountEntry → CashFixedDispensing → Complete.
+// Phase 3d adds Flow 2 (Fill-up Cash): Idle/FillupAwaitingAttendantAuth → FillupDispensing →
+// (3s pulse-timeout watchdog) → FillupTankFull → FillupAwaitingCashConfirm → Complete.
+// The cash-fixed and fill-up entries both stand in for the Phase 4 attendant swipe-up overlay.
 //
 // Wiring notes:
 //  - Price guard (CanStartTransactionUseCase) blocks any new transaction when koboPerLitre is unset.
@@ -48,6 +50,8 @@ import javax.inject.Inject
 
 private const val PULSES_PER_LITRE = 100
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
+private const val FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L
+private const val FILLUP_WATCHDOG_POLL_MS = 500L
 
 /** Wraps the canonical [TransactionState] with view-only fields the host screens read. */
 data class CustomerUiState(
@@ -72,6 +76,7 @@ class CustomerViewModel @Inject constructor(
     private var paymentJob: Job? = null
     private var expiryJob: Job? = null
     private var dispenseJob: Job? = null
+    private var fillupWatchdogJob: Job? = null
     private var pricePerLitre: Int = 0
 
     init {
@@ -117,6 +122,136 @@ class CustomerViewModel @Inject constructor(
     fun onSelectFillUp() {
         if (currentState() is TransactionState.ModeSelect) {
             setState(TransactionState.FillupAwaitingAttendantAuth)
+        }
+    }
+
+    // ---- Fill-up cash (Flow 2) ----
+    //
+    // Entry point stands in for the Phase 4 attendant swipe-up overlay. Two valid sources:
+    //   - Idle (attendant starts a fill-up before any customer interaction)
+    //   - FillupAwaitingAttendantAuth (customer already picked FILL UP from ModeSelect)
+    // The pulse stream drives litresSoFar; a sibling 500ms watchdog fires nozzle shutoff
+    // once the flow stalls for 3s (mock simulates the stall via the tank-capacity cap).
+
+    fun onAttendantFillUpAuthorise() {
+        val current = currentState()
+        if (current !is TransactionState.Idle && current !is TransactionState.FillupAwaitingAttendantAuth) {
+            return
+        }
+        viewModelScope.launch {
+            when (val result = canStartTransaction()) {
+                is CanStartTransactionUseCase.Result.Allowed -> {
+                    pricePerLitre = (result.config.koboPerLitre / 100).toInt()
+                    _ui.update { it.copy(pricePerLitre = pricePerLitre) }
+                    val txnId = generateCashTxnId()
+                    cancelInFlightJobs()
+                    setState(
+                        TransactionState.FillupDispensing(
+                            txnId = txnId,
+                            pricePerLitre = pricePerLitre,
+                            litresSoFar = 0.0,
+                        )
+                    )
+                    startFillupDispensing(txnId)
+                }
+                CanStartTransactionUseCase.Result.PriceNotSet -> {
+                    setState(
+                        TransactionState.Error(
+                            message = "Price not set — contact operator.",
+                            recoverable = true,
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun startFillupDispensing(txnId: String) {
+        dispenseJob?.cancel()
+        fillupWatchdogJob?.cancel()
+        // Volatile-equivalent: viewModelScope is single-threaded (Main), so a local
+        // Long mutated by both the pulse coroutine and the watchdog coroutine is safe.
+        var lastPulseMs = 0L
+
+        dispenseJob = viewModelScope.launch {
+            relay.startFuelFlow()
+            try {
+                pulseSource.observe().collect { msg ->
+                    if (msg !is PulseMessage.Pulse) return@collect
+                    lastPulseMs = msg.timestampMs
+                    val current = currentState() as? TransactionState.FillupDispensing
+                        ?: return@collect
+                    val litres = msg.count.toDouble() / PULSES_PER_LITRE
+                    setState(current.copy(litresSoFar = litres))
+                }
+            } finally {
+                relay.stopFuelFlow()
+            }
+        }
+
+        fillupWatchdogJob = viewModelScope.launch {
+            while (true) {
+                delay(FILLUP_WATCHDOG_POLL_MS)
+                val current = currentState() as? TransactionState.FillupDispensing ?: break
+                val now = System.currentTimeMillis()
+                // Only fire shutoff after fuel has actually started flowing — before the
+                // first pulse, lastPulseMs == 0L and the gap is meaningless.
+                if (lastPulseMs > 0L && (now - lastPulseMs) > FILLUP_SHUTOFF_TIMEOUT_MS) {
+                    relay.stopFuelFlow()
+                    val verifiedLitres = current.litresSoFar
+                    val amountDue = (verifiedLitres * current.pricePerLitre).toInt()
+                    setState(
+                        TransactionState.FillupTankFull(
+                            txnId = current.txnId,
+                            pricePerLitre = current.pricePerLitre,
+                            verifiedLitres = verifiedLitres,
+                            amountDueNaira = amountDue,
+                        )
+                    )
+                    dispenseJob?.cancel()
+                    dispenseJob = null
+                    break
+                }
+            }
+        }
+    }
+
+    fun onFillupPayCash() {
+        val current = currentState() as? TransactionState.FillupTankFull ?: return
+        setState(
+            TransactionState.FillupAwaitingCashConfirm(
+                txnId = current.txnId,
+                verifiedLitres = current.verifiedLitres,
+                amountDueNaira = current.amountDueNaira,
+            )
+        )
+    }
+
+    fun onFillupPayDigital() {
+        // Branches to Flow 3 — wired in Phase 3e. Until then the UI keeps the button
+        // disabled, but route to a recoverable error if the host calls anyway so we
+        // never silently no-op.
+        if (currentState() !is TransactionState.FillupTankFull) return
+        setState(
+            TransactionState.Error(
+                message = "Digital fill-up payment lands in Phase 3e.",
+                recoverable = true,
+            )
+        )
+    }
+
+    fun onAttendantCashReceived() {
+        val current = currentState() as? TransactionState.FillupAwaitingCashConfirm ?: return
+        viewModelScope.launch {
+            completeAndRecord(
+                TransactionState.Complete(
+                    flow = TransactionFlow.FILLUP_CASH,
+                    txnId = current.txnId,
+                    litres = current.verifiedLitres,
+                    amountNaira = current.amountDueNaira,
+                    method = null,
+                )
+            )
         }
     }
 
@@ -410,9 +545,11 @@ class CustomerViewModel @Inject constructor(
         paymentJob?.cancel()
         expiryJob?.cancel()
         dispenseJob?.cancel()
+        fillupWatchdogJob?.cancel()
         paymentJob = null
         expiryJob = null
         dispenseJob = null
+        fillupWatchdogJob = null
     }
 
     private suspend fun seedDefaultConfigIfMissing() {

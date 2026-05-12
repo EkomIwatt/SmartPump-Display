@@ -1,6 +1,7 @@
 // Dispatches the right customer-side screen for the current [TransactionState].
-// Phase 3b wired Flow 1 (Fixed Pre-pay Digital); Phase 3c adds Flow 4 (Cash Fixed).
-// Fill-up + USSD states still fall through to NotYetImplementedScreen until 3d–3f.
+// Phase 3b wired Flow 1 (Fixed Pre-pay Digital); Phase 3c added Flow 4 (Cash Fixed);
+// Phase 3d wires Flow 2 (Fill-up Cash). FillupDigitalAwaitingPayment + UssdAwaitingSms
+// still fall through to NotYetImplementedScreen until 3e–3f.
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
@@ -41,6 +42,10 @@ fun CustomerStateHost(
     onPrepayMethodChosen: (PaymentMethod) -> Unit,
     onAttendantCashFixed: () -> Unit,
     onCashFixedAuthorise: (Int) -> Unit,
+    onAttendantFillUp: () -> Unit,
+    onFillupPayCash: () -> Unit,
+    onFillupPayDigital: () -> Unit,
+    onAttendantCashReceived: () -> Unit,
     onShareReceipt: () -> Unit,
     onDismissComplete: () -> Unit,
     onCancel: () -> Unit,
@@ -50,6 +55,7 @@ fun CustomerStateHost(
         is TransactionState.Idle -> IdleScreen(
             onStartTransaction = onStartTransaction,
             onAttendantCashFixed = onAttendantCashFixed,
+            onAttendantFillUp = onAttendantFillUp,
             modifier = modifier,
         )
 
@@ -107,6 +113,39 @@ fun CustomerStateHost(
             amountNaira = state.cashAmountNaira,
             litresAuthorised = state.litresCutoff,
             litresSoFar = state.litresSoFar,
+            modifier = modifier,
+        )
+
+        is TransactionState.FillupAwaitingAttendantAuth -> FillupAwaitingAttendantAuthScreen(
+            onCancel = onCancel,
+            modifier = modifier,
+        )
+
+        is TransactionState.FillupDispensing -> FillupDispensingScreen(
+            txnId = state.txnId,
+            pricePerLitre = state.pricePerLitre,
+            litresSoFar = state.litresSoFar,
+            modifier = modifier,
+        )
+
+        is TransactionState.FillupTankFull -> FillupTankFullScreen(
+            txnId = state.txnId,
+            pricePerLitre = state.pricePerLitre,
+            verifiedLitres = state.verifiedLitres,
+            amountDueNaira = state.amountDueNaira,
+            onPayCash = onFillupPayCash,
+            onPayDigital = onFillupPayDigital,
+            digitalEnabled = false,
+            modifier = modifier,
+        )
+
+        is TransactionState.FillupAwaitingCashConfirm -> FillupAwaitingCashConfirmScreen(
+            txnId = state.txnId,
+            verifiedLitres = state.verifiedLitres,
+            amountDueNaira = state.amountDueNaira,
+            pricePerLitre = uiState.pricePerLitre,
+            onAttendantCashReceived = onAttendantCashReceived,
+            onCancel = onCancel,
             modifier = modifier,
         )
 
@@ -236,6 +275,10 @@ private fun CustomerStateHostIdlePreview() {
             onPrepayMethodChosen = {},
             onAttendantCashFixed = {},
             onCashFixedAuthorise = {},
+            onAttendantFillUp = {},
+            onFillupPayCash = {},
+            onFillupPayDigital = {},
+            onAttendantCashReceived = {},
             onShareReceipt = {},
             onDismissComplete = {},
             onCancel = {},
@@ -261,6 +304,10 @@ private fun CustomerStateHostPrepayAmountPreview() {
             onPrepayMethodChosen = {},
             onAttendantCashFixed = {},
             onCashFixedAuthorise = {},
+            onAttendantFillUp = {},
+            onFillupPayCash = {},
+            onFillupPayDigital = {},
+            onAttendantCashReceived = {},
             onShareReceipt = {},
             onDismissComplete = {},
             onCancel = {},

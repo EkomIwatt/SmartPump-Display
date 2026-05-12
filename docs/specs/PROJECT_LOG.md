@@ -261,3 +261,39 @@ A pass over Phases 1–3 turned up four issues that needed fixing before Phase 4
 
 **Next:**
 Phase 3d as previously scoped — Flow 2 (Fill-up Cash) customer-side, plus a temp idle-screen attendant entry for FILL UP AUTHORISE / CASH RECEIVED until Phase 4 ships the swipe-up overlay.
+
+---
+
+### Phase 3d (rebuild) — Flow 2 (Fill-up Cash), end-to-end
+**Date:** 2026-05-12
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+The most common Nigerian scenario now runs in the app. The customer says "fill am", the attendant taps a temporary "Attendant · fill up" button on the idle screen, and the pump opens open-ended — the litres tick up in cyan with no target. Once the (simulated) tank fills and the flow stops, the screen flips to a gold "Amount due" card showing exactly what the customer owes. The customer taps "Pay cash" (the "Pay digitally" branch is greyed out until Phase 3e), the screen goes to a gold "Hand cash to attendant" hold, and once the attendant taps "Cash received" the receipt comes up green with the verified litres + cash logged in the audit table. The 3-second nozzle-shutoff watchdog from the spec is the real thing — the only way to test it without real hardware is to let the mock fill its 60L "tank" and stop emitting pulses, which is exactly what the new tank-capacity knob on `MockPulseSource` does.
+
+**Technical notes:**
+- New screens under `ui/customer/`:
+  - `FillupAwaitingAttendantAuthScreen` — cyan card, hero-serif "Ask the attendant." with explainer + Cancel. Used when the customer picks FILL UP from ModeSelect.
+  - `FillupDispensingScreen` — cyan border, giant `LitresDisplay` (no target line — open-ended), running `AmountDisplay` total, "filling… nozzle shuts automatically" hint, no customer-side stop. Spec hint: "Do not remove the nozzle until done." printed below.
+  - `FillupTankFullScreen` — gold border, big `AmountDisplay` for verified amount-due, verified `LitresDisplay` in the right column. Two action buttons: primary "Pay cash" → `FillupAwaitingCashConfirm`; secondary "Pay digitally · phase 3e" disabled (host passes `digitalEnabled = false`).
+  - `FillupAwaitingCashConfirmScreen` — gold border, same ledger as TankFull, primary "Cash received (attendant)" + Cancel. Banner explains the button stands in for the Phase 4 swipe-up overlay.
+- `data/hardware/MockPulseSource`: added a `tankCapacityLitres` (`StateFlow<Double>`, default 60.0, capped at 0.5–500). Once `count >= capacityPulses` the mock stops emitting `Pulse` messages — heartbeats keep ticking. This is what lets the VM's 3s pulse-timeout watchdog actually fire during testing. Phase 4 debug screen will expose the knob to testers.
+- `CustomerViewModel`:
+  - File header updated; new private constants `FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L`, `FILLUP_WATCHDOG_POLL_MS = 500L`.
+  - New `fillupWatchdogJob: Job?` field, included in `cancelInFlightJobs()`.
+  - `onAttendantFillUpAuthorise()` — price-guarded entry from `Idle` or `FillupAwaitingAttendantAuth`. Generates a local `BLC-NNNNN` txn id (same `generateCashTxnId()` used by cash-fixed), sets `FillupDispensing(litresSoFar = 0)`, and calls `startFillupDispensing(txnId)`.
+  - `startFillupDispensing(txnId)`:
+    - Sibling coroutines under `viewModelScope`: a pulse collector and a 500ms watchdog. Both close over a single `var lastPulseMs: Long` — safe because `viewModelScope` is Main-confined.
+    - Pulse collector calls `relay.startFuelFlow()`, then on each `PulseMessage.Pulse` updates `lastPulseMs` and `litresSoFar`. In `finally`, force `relay.stopFuelFlow()` for safety.
+    - Watchdog ticks every 500ms; once `lastPulseMs > 0` (i.e. fuel has started) and `now - lastPulseMs > 3000`, calls `relay.stopFuelFlow()`, computes `amountDueNaira = (verifiedLitres * pricePerLitre).toInt()`, transitions to `FillupTankFull`, and cancels the now-redundant pulse collector. Pulse collector's `finally` keeps the relay closed.
+  - `onFillupPayCash()` — `FillupTankFull → FillupAwaitingCashConfirm` carrying through txnId / verifiedLitres / amountDueNaira.
+  - `onFillupPayDigital()` — if called from FillupTankFull, routes to a recoverable `Error("Digital fill-up payment lands in Phase 3e.")`. The host disables the button so this should never fire today; the route is just defensive.
+  - `onAttendantCashReceived()` — `FillupAwaitingCashConfirm → Complete(flow = FILLUP_CASH, method = null)` via the existing `completeAndRecord(...)` helper from the hardening pass; the transaction row lands in the `transactions` table.
+- `IdleScreen` now has three buttons stacked: primary "Start transaction", secondary "Attendant · cash fixed", secondary "Attendant · fill up". Phase 4 swipe-up overlay replaces all the attendant buttons.
+- `CustomerStateHost` dispatches the four Flow-2 states; four new callbacks (`onAttendantFillUp`, `onFillupPayCash`, `onFillupPayDigital`, `onAttendantCashReceived`) added. Previews updated.
+- `MainActivity` forwards the new callbacks to the VM (`onAttendantFillUp → onAttendantFillUpAuthorise`).
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+
+**Next:**
+Phase 3e — Flow 3 (Fill-up Digital). From `FillupTankFull` the "Pay digitally" branch enables: transition to `FillupDigitalAwaitingPayment(qrContent)` showing a dynamic NIP QR encoding the exact verified amount against the station's `virtualAccountNumber` from `DeviceConfig`, gold border + 5-min expiry → fallback to `FillupAwaitingCashConfirm` (cash collected anyway). On webhook (mock `PaymentProcessor`) success the state goes to `Complete(flow = FILLUP_DIGITAL, method = BANK_QR_TRANSFER)`.
