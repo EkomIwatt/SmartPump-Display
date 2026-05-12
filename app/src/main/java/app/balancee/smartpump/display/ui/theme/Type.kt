@@ -1,21 +1,38 @@
 // Typography for the industrial-fintech display language.
-// Display/numeric: monospace (TODO: bundle Space Mono .ttf in res/font/ for production).
-// Heading/body: system sans-serif (Inter when bundled).
-// Labels: ALL CAPS, weight 500, tracked — used for field names, state badges.
+// - Hero serif italic: high-contrast serif italic for "Every state. Every flow." phrases — gold, italic.
+// - Display mono: JetBrains/Space Mono — giant litre counts, naira amounts.
+// - Headings / body: system sans (Inter when bundled).
+// - Labels: ALL CAPS tracked — field names, state chips.
 package app.balancee.smartpump.display.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// TODO: Replace with bundled Space Mono for production (offline kiosk — no Google Fonts).
-//   Add res/font/space_mono_regular.ttf and: val DisplayMono = FontFamily(Font(R.font.space_mono_regular))
+// TODO: bundle Space Mono + Playfair Display .ttf in res/font/ for offline kiosk.
+//   DisplayMono = FontFamily(Font(R.font.space_mono_regular))
+//   HeroSerif   = FontFamily(Font(R.font.playfair_display_italic))
 val DisplayMono: FontFamily = FontFamily.Monospace
+val HeroSerif: FontFamily = FontFamily.Serif
+
+/**
+ * Hero serif italic — used for gold display phrases on cover / section headers
+ * (e.g. "Every state. Every flow.", "Fixed amount, pay before fuel flows.").
+ * Color is applied at call site so it can carry the state colour.
+ */
+val HeroSerifItalic = TextStyle(
+    fontFamily = HeroSerif,
+    fontStyle = FontStyle.Italic,
+    fontWeight = FontWeight.Medium,
+    fontSize = 40.sp,
+    lineHeight = 48.sp,
+)
 
 val SmartPumpTypography = Typography(
-    // Giant litre count and Naira amounts on dispensing/complete screens (120sp+)
+    // Giant litre count and Naira amounts on dispensing/complete screens (120sp+).
     displayLarge = TextStyle(
         fontFamily = DisplayMono,
         fontWeight = FontWeight.Normal,
@@ -24,7 +41,7 @@ val SmartPumpTypography = Typography(
         letterSpacing = (-2).sp,
         color = TextPrimary,
     ),
-    // Medium numeric display e.g. amount-due on awaiting-cash screen
+    // Medium numeric display e.g. amount-due on awaiting-cash screen.
     displayMedium = TextStyle(
         fontFamily = DisplayMono,
         fontWeight = FontWeight.Normal,
@@ -33,7 +50,7 @@ val SmartPumpTypography = Typography(
         letterSpacing = (-1).sp,
         color = TextPrimary,
     ),
-    // Smaller monospace numbers e.g. running total in Naira
+    // Smaller monospace numbers e.g. running total in Naira.
     displaySmall = TextStyle(
         fontFamily = DisplayMono,
         fontWeight = FontWeight.Normal,
@@ -41,7 +58,7 @@ val SmartPumpTypography = Typography(
         lineHeight = 52.sp,
         color = TextPrimary,
     ),
-    // Screen headings e.g. "HOW DO YOU WANT TO FUEL?"
+    // Screen headings e.g. "HOW DO YOU WANT TO FUEL?".
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
@@ -84,7 +101,7 @@ val SmartPumpTypography = Typography(
         lineHeight = 20.sp,
         color = TextSecondary,
     ),
-    // ALL-CAPS field labels e.g. "LITRES DISPENSED", "PRICE/L", "TXN"
+    // ALL-CAPS field labels e.g. "LITRES DISPENSED", "PRICE/L", "TXN".
     labelLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,

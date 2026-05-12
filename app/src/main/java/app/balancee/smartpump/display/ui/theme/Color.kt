@@ -8,15 +8,17 @@ import androidx.compose.ui.graphics.Color
 val Background = Color(0xFF0A0A0F)          // Near-black with slight blue tint
 val Surface = Color(0xFF13131A)             // Cards, elevated elements
 val SurfaceVariant = Color(0xFF1C1C26)      // Subtle secondary elevation
+val CodePanelSurface = Color(0xFF0F0F16)    // Dark code/log blocks (debug, spec)
 val BorderSubtle = Color(0xFF2A2A38)        // 1dp card borders — crisp, not shadow
 
 // — Brand / action ————————————————————————————————————————————————————————
-val PrimaryAmber = Color(0xFFF5A623)        // AUTHORISE button — the money colour
+val PrimaryAmber = Color(0xFFF5A623)        // AUTHORISE / cash / waiting — the money colour
 val OnPrimary = Color(0xFF0A0A0F)           // Dark text on amber buttons
+val BrandBlue = Color(0xFF1B3FB8)           // Spec cover only — not used at runtime
 
 // — Semantic states ———————————————————————————————————————————————————————
-val ActiveCyan = Color(0xFF4FD1C5)          // Dispensing / filling — live state
-val SuccessGreen = Color(0xFF48BB78)        // Payment confirmed, transaction complete
+val ActiveCyan = Color(0xFF4FD1C5)          // Fill-up dispensing — live count
+val SuccessGreen = Color(0xFF48BB78)        // Confirmed / paid / complete
 val WarningRed = Color(0xFFF56565)          // Error, relay fault, price not set
 
 // — Typography ————————————————————————————————————————————————————————————

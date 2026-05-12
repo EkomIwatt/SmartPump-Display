@@ -1,4 +1,5 @@
-// Payment methods shown to the customer on the payment selection screen.
+// Customer-facing payment methods on the PRE-PAY selection screen.
+// CASH_SEE_ATTENDANT routes to the attendant overlay rather than a customer payment flow.
 package app.balancee.smartpump.display.domain.model
 
 import kotlinx.serialization.Serializable
@@ -8,15 +9,15 @@ enum class PaymentMethod {
     /** Deep-link into the Balanceè mobile app. */
     BALANCEE_APP,
 
-    /** NIP bank-transfer QR code — scanned in any Nigerian bank app. */
-    BANK_QR,
+    /** NIP bank-transfer QR — scanned in any Nigerian bank app. */
+    BANK_QR_TRANSFER,
 
     /** NFC / contactless card tap on the payment panel. */
-    NFC,
+    NFC_CARD,
 
     /** USSD code dialled on customer's phone; confirmed via incoming SMS on pump SIM. */
     USSD,
 
-    /** Cash collected by attendant — attendant-driven flow only. */
-    CASH,
+    /** Cash — handled by the attendant via the swipe-up overlay. */
+    CASH_SEE_ATTENDANT,
 }

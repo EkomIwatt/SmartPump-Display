@@ -19,14 +19,24 @@ object Dimensions {
     /** Tight spacing between a label and its value within a card. */
     val itemSpacing = 8.dp
 
+    /** Gap between the equal-width cards in a three-card-row flow layout. */
+    val threeCardGap = 16.dp
+
     // — Corners ———————————————————————————————————————————————————————————
     val cornerCard = 12.dp
     val cornerButton = 8.dp
+    val cornerChip = 6.dp
+    val cornerCodePanel = 8.dp
     val cornerBadge = 4.dp
 
     // — Borders ———————————————————————————————————————————————————————————
     /** 1dp crisp border on cards — no shadows, industrial look. */
     val borderWidth = 1.dp
+
+    // — Chips —————————————————————————————————————————————————————————————
+    val chipPaddingHorizontal = 8.dp
+    val chipPaddingVertical = 4.dp
+    val chipDotSize = 6.dp
 
     // — Buttons ———————————————————————————————————————————————————————————
     /** Primary action buttons — 64dp minimum for fingers/gloves in daylight. */
