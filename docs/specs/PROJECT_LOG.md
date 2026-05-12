@@ -108,3 +108,44 @@ We stripped out the entire old UI and rebuilt the foundations the new design wil
 
 **Next:**
 Phase 2 — shared UI components per strict design. Implement primitives from `docs/design-system.md`: `BalanceeCard` (state-coloured border), `BalanceeButton` (primary amber / secondary), `LitresDisplay`, `AmountDisplay`, `StateChip` (dot + alpha-fill), `LabelText`, `LedgerRow`, `NumericKeypad`, `QrCodeView`, `CodePanel`, `HeroSerifText`, `PumpHeader`, plus the new `ThreeCardRow` layout primitive. Every component gets an @Preview. Still no screens — just the kit.
+
+---
+
+### Phase 2 (rebuild) — Shared UI component kit
+**Date:** 2026-05-12
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+Built the visual building blocks that every screen will be made of — cards with the right coloured borders, the big amber buttons, the live litre and naira counters, the state pills, the receipt rows, the keypad, the QR view, and the three-card row that lays out the customer journey. Each block has its own preview so the look can be verified inside Android Studio without running the app. No actual screens yet — just the kit. The project still launches the placeholder; the components are wired in next phase when screens get assembled.
+
+**Technical notes:**
+- New files under `app/src/main/java/app/balancee/smartpump/display/ui/components/`:
+  - `LabelText` — small all-caps tracked label (defaults to text-secondary).
+  - `StateChip` — leading 6dp dot, label uppercase, 15% alpha fill, 1dp outline, 6dp radius.
+  - `LedgerRow` — left label / right value with optional monospace toggle.
+  - `BalanceeCard` — state-coloured 1dp border, surface bg, 12dp radius, 24dp pad; `borderColor` is required.
+  - `BalanceeButton` — `Primary` (amber, 64dp) / `Secondary` (outline) / disabled (text-tertiary + border-subtle); all-caps label.
+  - `LitresDisplay` — giant mono number with "L" suffix at ~40% size in text-secondary; figure colour passed in.
+  - `AmountDisplay` — same scale with "₦" prefix at ~50% size; UK locale thousand-grouping by default.
+  - `HeroSerifText` — gold serif italic phrase; uses `HeroSerifItalic` style from Type.kt.
+  - `ThreeCardRow` — three equal-width slots with `Dimensions.threeCardGap` (16dp).
+  - `PumpHeader` — left-aligned "PUMP 1 · FILL-UP" label, right-aligned `StateChip`.
+  - `CodePanel` — code-panel surface, 8dp radius, 13sp monospace, 16dp pad.
+  - `NumericKeypad` — 3×4 grid (1–9 / ⌫ / 0 / ✓), per-row `weight(1f)` cells, 64dp minimum height; callbacks for `onDigit`, `onBackspace`, `onConfirm`; confirm key disabled-state supported.
+  - `QrCodeView` — ZXing `MultiFormatWriter` → `BitMatrix` → `IntArray` → `Bitmap`; `remember` re-keyed by content + pixel size + colours; defaults to spec's inverted styling (white modules on black).
+- Every component file ships a `@Preview` rendered against `Background` so the previews work in Android Studio without launching the app.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+- ZXing dependency (`com.journeyapps:zxing-android-embedded`) already wired in `app/build.gradle.kts`; no Gradle changes this phase.
+- No state-color→border helper introduced yet — primitives take `Color` directly. A `StateColors` mapper lands in Phase 3 alongside the first screens.
+
+**Next:**
+Phase 3 — Customer flows + Idle/ModeSelect. One phase committed flow-by-flow:
+- **3a** — `IdleScreen`, `ModeSelectScreen`, and the customer state host (renders the right screen for each `TransactionState`). Wire `MainActivity` to host it.
+- **3b** — Flow 1 (Fixed Pre-pay Digital): amount tiles, payment method select, QR waiting, fixed dispensing, complete.
+- **3c** — Flow 4 (Cash Fixed): keypad entry → cash-fixed dispensing → complete.
+- **3d** — Flow 2 (Fill-up Cash): attendant-auth wait, open-ended dispensing with shutoff detection, awaiting cash confirm, complete.
+- **3e** — Flow 3 (Fill-up Digital): tank-full QR generation, digital awaiting, complete.
+- **3f** — Flow 5 (USSD Offline): USSD code display, awaiting SMS, dispensing on parsed SMS.
+
+Each sub-deliverable leaves the build green, ends with a commit, and matches the corresponding strict-design screenshot.
