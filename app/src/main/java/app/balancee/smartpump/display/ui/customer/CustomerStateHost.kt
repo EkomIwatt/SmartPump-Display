@@ -1,7 +1,8 @@
 // Dispatches the right customer-side screen for the current [TransactionState].
 // Phase 3b wired Flow 1 (Fixed Pre-pay Digital); Phase 3c added Flow 4 (Cash Fixed);
-// Phase 3d added Flow 2 (Fill-up Cash); Phase 3e adds Flow 3 (Fill-up Digital).
-// UssdAwaitingSms still falls through to NotYetImplementedScreen until 3f.
+// Phase 3d added Flow 2 (Fill-up Cash); Phase 3e added Flow 3 (Fill-up Digital);
+// Phase 3f wires Flow 5 (USSD Offline). All five customer flows are now end-to-end —
+// the next gap is the attendant swipe-up overlay (Phase 4).
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
@@ -21,16 +22,13 @@ import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.ui.components.BalanceeButton
-import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
-import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.WarningRed
-import app.balancee.smartpump.display.ui.theme.borderColor
 
 @Composable
 fun CustomerStateHost(
@@ -85,6 +83,16 @@ fun CustomerStateHost(
             txnId = state.txnId,
             pricePerLitre = state.pricePerLitre,
             expiresInSeconds = uiState.prepayExpiresInSeconds,
+            onCancel = onCancel,
+            modifier = modifier,
+        )
+
+        is TransactionState.UssdAwaitingSms -> UssdAwaitingSmsScreen(
+            amountNaira = state.amountNaira,
+            txnRef = state.txnRef,
+            txnId = state.txnId,
+            pricePerLitre = state.pricePerLitre,
+            expiresInSeconds = uiState.ussdExpiresInSeconds,
             onCancel = onCancel,
             modifier = modifier,
         )
@@ -177,12 +185,6 @@ fun CustomerStateHost(
             onDismiss = onCancel,
             modifier = modifier,
         )
-
-        else -> NotYetImplementedScreen(
-            state = state,
-            onCancel = onCancel,
-            modifier = modifier,
-        )
     }
 }
 
@@ -221,47 +223,6 @@ private fun ErrorScreen(
                 BalanceeButton(
                     label = "Back to idle",
                     onClick = onDismiss,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun NotYetImplementedScreen(
-    state: TransactionState,
-    onCancel: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Background)
-            .padding(Dimensions.screenPadding),
-        contentAlignment = Alignment.Center,
-    ) {
-        BalanceeCard(
-            borderColor = state.borderColor(),
-            modifier = Modifier.sizeIn(maxWidth = 520.dp),
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                LabelText(text = "Phase 3 — wiring in progress")
-                Text(
-                    text = state::class.simpleName ?: "Unknown",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = TextPrimary,
-                )
-                Text(
-                    text = "Screen for this state lands in a later sub-phase.",
-                    style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),
-                )
-                BalanceeButton(
-                    label = "Back to idle",
-                    onClick = onCancel,
-                    variant = BalanceeButtonVariant.Secondary,
                 )
             }
         }

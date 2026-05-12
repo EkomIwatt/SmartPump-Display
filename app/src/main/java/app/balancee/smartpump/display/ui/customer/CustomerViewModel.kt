@@ -2,9 +2,12 @@
 // Phase 3c added Flow 4 (Cash Fixed): Idle → CashFixedAmountEntry → CashFixedDispensing → Complete.
 // Phase 3d added Flow 2 (Fill-up Cash): Idle/FillupAwaitingAttendantAuth → FillupDispensing →
 // (3s pulse-timeout watchdog) → FillupTankFull → FillupAwaitingCashConfirm → Complete.
-// Phase 3e adds Flow 3 (Fill-up Digital): FillupTankFull → FillupDigitalAwaitingPayment
+// Phase 3e added Flow 3 (Fill-up Digital): FillupTankFull → FillupDigitalAwaitingPayment
 // (dynamic NIP QR for the verified amount) → Complete on webhook; 5-min expiry falls back
 // to FillupAwaitingCashConfirm so cash can still be collected.
+// Phase 3f adds Flow 5 (USSD Offline): PrepayMethodSelect[USSD] → UssdAwaitingSms (per-bank
+// dial codes, 5-min SMS timeout → Idle) → FixedDispensing(USSD_OFFLINE) → Complete. The mock
+// PaymentProcessor's USSD channel stands in for the SMS-parser pipeline until Phase 6.
 // The cash-fixed and fill-up entries stand in for the Phase 4 attendant swipe-up overlay.
 //
 // Wiring notes:
@@ -54,6 +57,7 @@ import javax.inject.Inject
 private const val PULSES_PER_LITRE = 100
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
 private const val FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60
+private const val USSD_SMS_TIMEOUT_SECONDS = 5 * 60
 private const val FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L
 private const val FILLUP_WATCHDOG_POLL_MS = 500L
 
@@ -62,6 +66,7 @@ data class CustomerUiState(
     val state: TransactionState = TransactionState.Idle,
     val prepayExpiresInSeconds: Int = 0,
     val fillupDigitalExpiresInSeconds: Int = 0,
+    val ussdExpiresInSeconds: Int = 0,
     val pricePerLitre: Int = 0,
 )
 
@@ -467,14 +472,113 @@ class CustomerViewModel @Inject constructor(
 
     fun onPrepayMethodChosen(method: PaymentMethod) {
         val current = currentState() as? TransactionState.PrepayMethodSelect ?: return
-        if (method == PaymentMethod.CASH_SEE_ATTENDANT) {
-            // Cash routes through the attendant (overlay lands in Phase 4). For now,
-            // return to Idle so the customer is told to talk to the attendant verbally.
-            onCancel()
-            return
+        when (method) {
+            PaymentMethod.CASH_SEE_ATTENDANT -> {
+                // Cash routes through the attendant (overlay lands in Phase 4). For now,
+                // return to Idle so the customer is told to talk to the attendant verbally.
+                onCancel()
+            }
+            PaymentMethod.USSD -> startUssdFlow(amountNaira = current.amountNaira)
+            else -> startPrepayPayment(amountNaira = current.amountNaira, method = method)
         }
-        startPrepayPayment(amountNaira = current.amountNaira, method = method)
     }
+
+    // ---- USSD offline (Flow 5) ----
+    //
+    // No data on the customer side. The pump shows per-bank USSD codes; the customer
+    // dials and the bank sends an SMS to the pump SIM. The real SMS BroadcastReceiver
+    // pipeline lands in Phase 6 (production). For the rebuild we use the existing
+    // MockPaymentProcessor: a Success on the USSD channel stands in for "SMS received,
+    // ref matched, payment confirmed". 5-min idle timeout returns to Idle per spec.
+
+    private fun startUssdFlow(amountNaira: Int) {
+        cancelInFlightJobs()
+        val amountKobo = amountNaira.toLong() * 100
+        val txnRef = generateUssdRef()
+        val txnId = generateCashTxnId()
+        setState(
+            TransactionState.UssdAwaitingSms(
+                amountNaira = amountNaira,
+                txnRef = txnRef,
+                txnId = txnId,
+                pricePerLitre = pricePerLitre,
+            )
+        )
+        startUssdExpiry()
+        startUssdSmsListener(amountNaira = amountNaira, amountKobo = amountKobo, txnId = txnId)
+    }
+
+    private fun startUssdSmsListener(amountNaira: Int, amountKobo: Long, txnId: String) {
+        paymentJob?.cancel()
+        paymentJob = viewModelScope.launch {
+            paymentProcessor.process(PaymentMethod.USSD, amountKobo).collect { result ->
+                when (result) {
+                    is PaymentResult.Pending -> Unit // Customer is dialing; code already on-screen.
+                    is PaymentResult.Success -> onUssdSmsConfirmed(amountNaira, txnId)
+                    is PaymentResult.Failed -> onUssdFailed(result.reason)
+                }
+            }
+        }
+    }
+
+    private suspend fun onUssdSmsConfirmed(amountNaira: Int, txnId: String) {
+        // A late Success after timeout/cancel must not retrigger — guard on state.
+        if (currentState() !is TransactionState.UssdAwaitingSms) return
+        expiryJob?.cancel()
+        val amountKobo = amountNaira.toLong() * 100
+        val litresAuthorised = deviceConfig()?.litresCutoff(amountKobo)
+            ?: ((amountNaira.toDouble() / pricePerLitre).coerceAtLeast(0.0))
+        setState(
+            TransactionState.FixedDispensing(
+                flow = TransactionFlow.USSD_OFFLINE,
+                txnId = txnId,
+                pricePerLitre = pricePerLitre,
+                amountNaira = amountNaira,
+                litresAuthorised = litresAuthorised,
+                litresSoFar = 0.0,
+            )
+        )
+        startDispensing(litresAuthorised, PaymentMethod.USSD)
+    }
+
+    private fun onUssdFailed(reason: String) {
+        if (currentState() !is TransactionState.UssdAwaitingSms) return
+        expiryJob?.cancel()
+        setState(
+            TransactionState.Error(
+                message = "USSD payment failed — $reason.",
+                recoverable = true,
+            )
+        )
+    }
+
+    private fun startUssdExpiry() {
+        expiryJob?.cancel()
+        expiryJob = viewModelScope.launch {
+            var remaining = USSD_SMS_TIMEOUT_SECONDS
+            _ui.update { it.copy(ussdExpiresInSeconds = remaining) }
+            while (remaining > 0 && currentState() is TransactionState.UssdAwaitingSms) {
+                delay(1_000L)
+                remaining -= 1
+                _ui.update { it.copy(ussdExpiresInSeconds = remaining) }
+            }
+            if (remaining <= 0 && currentState() is TransactionState.UssdAwaitingSms) {
+                // Per state-machine.md: USSD timeout returns to Idle (the bank SMS path
+                // has no fuel-side fallback; the customer has to start over).
+                paymentJob?.cancel()
+                setState(TransactionState.Idle)
+                _ui.update { it.copy(ussdExpiresInSeconds = 0) }
+            }
+        }
+    }
+
+    /**
+     * 3-digit USSD reference, matching the spec's `*737*amount*REF#` shape. Three
+     * digits will collide eventually (see OPEN_QUESTIONS #11) — V1 accepts that until
+     * the production scheme is agreed with the bank partners.
+     */
+    private fun generateUssdRef(): String =
+        kotlin.random.Random.nextInt(100, 1000).toString()
 
     private fun startPrepayPayment(amountNaira: Int, method: PaymentMethod) {
         cancelInFlightJobs()
@@ -597,6 +701,7 @@ class CustomerViewModel @Inject constructor(
             it.copy(
                 prepayExpiresInSeconds = 0,
                 fillupDigitalExpiresInSeconds = 0,
+                ussdExpiresInSeconds = 0,
             )
         }
     }

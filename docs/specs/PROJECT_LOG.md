@@ -326,3 +326,36 @@ The fill-up journey now has a digital payment option that works without the atte
 
 **Next:**
 Phase 3f — Flow 5 (USSD Offline). From `PrepayMethodSelect` with method = USSD: transition to `UssdAwaitingSms(amount, txnRef, txnId, pricePerLitre)` showing the per-bank USSD codes (`*737*amount*ref#` for GTBank, plus Access / Zenith / UBA) and a "waiting for SMS" hold. The mock SMS path uses a debug-screen injector (lands in Phase 4) so testers can trigger the parser. On parse success → `FixedDispensing(flow = USSD_OFFLINE, …)` then `Complete(flow = USSD_OFFLINE, method = USSD)`. Default 5-min SMS timeout returns to `Idle`.
+
+---
+
+### Phase 3f (rebuild) — Flow 5 (USSD Offline), end-to-end
+**Date:** 2026-05-12
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+The last of the five flows runs in the app now. From the pre-pay method picker, choosing USSD shows the customer a gold two-card screen — the left card lists per-bank dial codes (GTBank as the primary, plus Access, Zenith and UBA in a monospace block); the right card shows the amount due, the short reference number to look for in the SMS, a placeholder SIM status, and a 5-minute countdown until the transaction auto-cancels. When the simulated SMS "arrives" (the same mock payment processor we already use for bank QR, just on the USSD channel), the screen flips green and the pump dispenses to the litre target. The receipt at the end records method = USSD and flow = USSD offline. If 5 minutes pass with no SMS, the screen returns to idle and the transaction is dropped. Result: all five customer flows are now wired end-to-end. The next gap is the attendant overlay — Phase 4.
+
+**Technical notes:**
+- New screen `ui/customer/UssdAwaitingSmsScreen.kt` — two gold-bordered cards in a `weight(1f)` row.
+  - **Dial-code card (left):** label "Dial this code", primary GTBank code rendered big in `DisplayMono` + amber (`*737*$amount*$ref#`), `CodePanel` listing the four bank codes (GTBank / Access / Zenith / UBA) with their dial strings aligned, and a "Works on any phone — including 2G" footer.
+  - **Waiting card (right):** label "Waiting for SMS confirmation", `AmountDisplay` of the naira amount in gold, ledger rows (Ref, Price / L, Txn, Sim status, Expires-in `mm:ss`), and a paragraph explaining the 10–30s bank SMS latency.
+  - Bottom: full-width secondary "Cancel transaction" button.
+- `ui/customer/CustomerViewModel.kt`:
+  - File header updated; new constant `USSD_SMS_TIMEOUT_SECONDS = 5 * 60`; new ui-state field `ussdExpiresInSeconds: Int`.
+  - `onPrepayMethodChosen` rewritten as a 3-arm `when` — cash routes to `onCancel()` (Phase 4 overlay still owns cash), USSD routes to `startUssdFlow(amountNaira)`, every other method falls through to the existing `startPrepayPayment(...)` path.
+  - New `startUssdFlow(amountNaira)` — cancels in-flight jobs, generates a 3-digit `txnRef` (see OPEN_QUESTIONS #11) plus a `BLC-NNNNN` `txnId` via the existing `generateCashTxnId()`, transitions to `UssdAwaitingSms`, kicks off both the expiry coroutine and the SMS listener.
+  - `startUssdSmsListener(amountNaira, amountKobo, txnId)` — uses the same `PaymentProcessor.process(USSD, amountKobo)` flow already in DI. Pending is ignored (we already showed the USSD code with our own ref); Success means the mock SMS landed → `onUssdSmsConfirmed(...)`; Failed → recoverable `Error`. Real production path swaps in a SIM-side `BroadcastReceiver`-driven adapter behind the same `PaymentProcessor` interface (Phase 6).
+  - `onUssdSmsConfirmed` — guards `currentState() is UssdAwaitingSms` (a late Success after cancel/timeout must not re-arm the pump), cancels expiry, computes `litresAuthorised` from the device-config `litresCutoff(amountKobo)` (floor to 0.01L per state-machine invariant), transitions to `FixedDispensing(flow = USSD_OFFLINE, …)`, then reuses the existing `startDispensing(litresAuthorised, USSD)`. The existing helper produces `Complete(flow = USSD_OFFLINE, method = USSD)` through `completeAndRecord(...)` so the audit row lands in the transactions table on completion.
+  - `startUssdExpiry` — 1Hz countdown updating `ussdExpiresInSeconds`. On hitting zero (while still on the USSD screen), cancels the SMS listener and returns to `Idle` — matches the `docs/state-machine.md` USSD-timeout rule.
+  - `onCancel()` resets `ussdExpiresInSeconds` alongside the existing prepay/fillup countdowns.
+- `ui/customer/CustomerStateHost.kt`:
+  - Added `UssdAwaitingSms → UssdAwaitingSmsScreen(...)` dispatch passing through the `ussdExpiresInSeconds` view-state.
+  - Removed the `else → NotYetImplementedScreen` fallback (and the screen itself) — the `when` is now exhaustive across the sealed hierarchy and the compiler flagged the redundant branch. Stale imports (`borderColor`, `BalanceeButtonVariant`, `TextSecondary`) dropped with it.
+  - Header comment updated; the next gap is the attendant overlay (Phase 4).
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL with no warnings.
+- Persistence (PulseRepository round-trip) still deferred to Phase 5. The real SMS parser (GTBank format) lands in Phase 6 — see OPEN_QUESTIONS #9.
+
+**Next:**
+Phase 4 — attendant swipe-up overlay + debug-screen rebuild. The overlay holds exactly three actions per `docs/flows.md`: FILL UP AUTHORISE (enabled in Idle), AUTHORISE CASH ₦… (enabled in Idle, inline amount entry → Flow 4), CASH RECEIVED (enabled in `FillupAwaitingCashConfirm`). State-gated enable/disable; `translateY` slide-up animation; swipe-down / tap-outside dismiss. Once the overlay is live, the three temporary "Attendant · …" buttons on `IdleScreen` come off. Debug screen covers: live price override, pulse rate + tank-capacity knobs on `MockPulseSource`, mock SMS injector for Flow 5, mock-payment auto-approve / failure-reason toggles, device-config form.
