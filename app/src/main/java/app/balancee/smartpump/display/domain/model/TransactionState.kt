@@ -114,7 +114,13 @@ sealed class TransactionState {
 
     // ---- FIXED DISPENSING (Flow 1 + Flow 5) ----
 
-    /** Generic fixed-target dispensing — counts toward a known litre target. */
+    /**
+     * Generic fixed-target dispensing — counts toward a known litre target.
+     * [method] is the digital channel that authorised the dispense (null for cash flows).
+     * Carrying it on the state lets a power-cut resume rebuild the right `Complete` audit
+     * row without having to re-derive from `flow` (kotlinx default = null keeps older
+     * persisted JSON blobs backwards-compatible).
+     */
     @Serializable @SerialName("fixed_dispensing")
     data class FixedDispensing(
         val flow: TransactionFlow,
@@ -123,6 +129,7 @@ sealed class TransactionState {
         val amountNaira: Int,
         val litresAuthorised: Double,
         val litresSoFar: Double,
+        val method: PaymentMethod? = null,
     ) : TransactionState()
 
     // ---- TERMINAL ----

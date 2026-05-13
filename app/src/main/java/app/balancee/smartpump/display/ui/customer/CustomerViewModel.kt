@@ -1,32 +1,34 @@
-// Customer-side state machine. Phase 3b wired Flow 1 (Fixed Pre-pay Digital);
-// Phase 3c added Flow 4 (Cash Fixed): Idle → CashFixedAmountEntry → CashFixedDispensing → Complete.
-// Phase 3d added Flow 2 (Fill-up Cash): Idle/FillupAwaitingAttendantAuth → FillupDispensing →
-// (3s pulse-timeout watchdog) → FillupTankFull → FillupAwaitingCashConfirm → Complete.
-// Phase 3e added Flow 3 (Fill-up Digital): FillupTankFull → FillupDigitalAwaitingPayment
-// (dynamic NIP QR for the verified amount) → Complete on webhook; 5-min expiry falls back
-// to FillupAwaitingCashConfirm so cash can still be collected.
-// Phase 3f adds Flow 5 (USSD Offline): PrepayMethodSelect[USSD] → UssdAwaitingSms (per-bank
-// dial codes, 5-min SMS timeout → Idle) → FixedDispensing(USSD_OFFLINE) → Complete. The mock
-// PaymentProcessor's USSD channel stands in for the SMS-parser pipeline until Phase 6.
-// The cash-fixed and fill-up entries stand in for the Phase 4 attendant swipe-up overlay.
+// Customer-side state machine. Phases 3b–3f wired the five flows; Phase 4 lifted the
+// attendant actions into the swipe-up overlay; Phase 5 adds persistence + boot resume.
 //
-// Wiring notes:
-//  - Price guard (CanStartTransactionUseCase) blocks any new transaction when koboPerLitre is unset.
-//    A debug-build default config is seeded on first launch so flows are playable; real
-//    operator-push lands in Phase 4 (debug screen) / Phase 6 (backend). pricePerLitre is also
-//    surfaced on CustomerUiState so the cash-fixed entry screen can render it pre-guard.
-//  - PaymentProcessor.process emits Pending then Success/Failed. Success drives Pre-pay → Dispensing.
-//  - 5-min QR expiry (spec) is enforced by a per-state countdown coroutine.
-//  - Cash-fixed cutoff is computed via DeviceConfig.litresCutoff(amountKobo) — floors to 0.01L
-//    per the state-machine invariant ("never dispense more than was paid").
+// Persistence rules (matching docs/state-machine.md):
+//  - Every state transition writes the new state to Room via PulseRepository. Writes are
+//    funnelled through a CONFLATED channel + a single writer coroutine so rapid transitions
+//    can never persist out of order. The body of the dispensing loop also throttles a
+//    pulse-count write every PULSE_PERSIST_EVERY_N pulses so a power-cut mid-fill can
+//    reconstruct litresSoFar.
+//  - On VM construction we first force RelayController.stopFuelFlow() — the spec invariant
+//    "relay defaults OPEN on boot" must hold before we re-derive from state. Then we read
+//    the persisted state and dispatch:
+//      • Terminal (Complete / non-recoverable Error) → reset to Idle + clear.
+//      • Pure-UI states (pickers, FillupTankFull, FillupAwaitingCashConfirm, etc.)
+//        → just dispatch; no side-effect jobs needed.
+//      • Waiting states (Prepay/Ussd/FillupDigital awaiting) → restart the countdown
+//        and the payment listener using the persisted state's amount + method.
+//      • Dispensing states → restore pulseBaseline from disk, dispatch, and restart the
+//        relay + pulse collector. The collector's cumulative count is `pulseBaseline +
+//        mockMsg.count`, so a clean reboot or a fresh transaction both work.
+//
+// Wiring notes (carried from earlier phases):
+//  - Price guard (CanStartTransactionUseCase) blocks any new transaction when koboPerLitre
+//    is unset. A debug-build default config is seeded on first launch so flows are playable;
+//    the Phase 4b debug screen now exposes live overrides for testing.
+//  - PaymentProcessor.process emits Pending then Success/Failed; Success drives Pre-pay →
+//    Dispensing. Phase 4b added an "SMS arrived" injector that bypasses the pending delay.
+//  - Cash-fixed cutoff is computed via DeviceConfig.litresCutoff(amountKobo) — floored to
+//    0.01L per state-machine invariant ("never dispense more than was paid").
 //  - Pulse counts come from the injected PulseSource; the mock generates ~50 pps when the
-//    relay is open. Litres are derived at 100 pulses/L (matches the prior mock; see
-//    OPEN_QUESTIONS #1 for production confirmation).
-//  - Persistence (PulseRepository) plumbing is intentionally NOT wired here — Phase 5 handles
-//    boot-time resume so we keep the customer VM small until then.
-//
-// Fill-up cash/digital + USSD still fall through to NotYetImplementedScreen in CustomerStateHost;
-// they land in 3d–3f.
+//    relay is open. Litres are derived at 100 pulses/L (see OPEN_QUESTIONS #1).
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.lifecycle.ViewModel
@@ -42,10 +44,12 @@ import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
+import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +64,14 @@ private const val FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60
 private const val USSD_SMS_TIMEOUT_SECONDS = 5 * 60
 private const val FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L
 private const val FILLUP_WATCHDOG_POLL_MS = 500L
+
+/**
+ * Persist pulse count every N pulses during a dispense — at 100 pulses/L this is one
+ * write every 0.25L (~25 writes for a full 10L pre-pay). Frequent enough that a
+ * power-cut resume reconstructs litresSoFar within ±0.25L, cheap enough not to thrash
+ * the SD card on the kiosk.
+ */
+private const val PULSE_PERSIST_EVERY_N = 25
 
 /** Wraps the canonical [TransactionState] with view-only fields the host screens read. */
 data class CustomerUiState(
@@ -76,6 +88,7 @@ class CustomerViewModel @Inject constructor(
     private val deviceConfigRepository: DeviceConfigRepository,
     private val paymentProcessor: PaymentProcessor,
     private val pulseSource: PulseSource,
+    private val pulseRepository: PulseRepository,
     private val relay: RelayController,
     private val transactions: TransactionRepository,
 ) : ViewModel() {
@@ -89,19 +102,170 @@ class CustomerViewModel @Inject constructor(
     private var fillupWatchdogJob: Job? = null
     private var pricePerLitre: Int = 0
 
+    /**
+     * Cumulative pulses persisted from the prior session, applied as a baseline to
+     * resumed dispensing flows. The mock pulse source resets its own count to 0 each
+     * time the relay re-opens, so the cumulative for litres = baseline + msg.count.
+     * Zero on a fresh dispense; non-zero only on power-cut resume.
+     */
+    private var pulseBaseline: Int = 0
+
+    /**
+     * CONFLATED state-write channel — only the latest pending state survives queuing, so
+     * rapid transitions can't race the writer into out-of-order disk writes.
+     */
+    private val stateWriteChannel = Channel<TransactionState>(capacity = Channel.CONFLATED)
+
     init {
+        // Serial writer coroutine — every setState() funnels its state in here.
         viewModelScope.launch {
+            for (state in stateWriteChannel) {
+                runCatching {
+                    pulseRepository.saveTransactionState(state, txnRefFor(state))
+                }.onFailure {
+                    android.util.Log.e("CustomerVM", "Failed to persist state", it)
+                }
+            }
+        }
+        // Boot sequence: relay-open invariant, config seed, then state resume.
+        viewModelScope.launch {
+            // Spec invariant: relay must default OPEN on boot — assert it before re-deriving.
+            relay.stopFuelFlow()
             seedDefaultConfigIfMissing()
-            // Surface the seeded price so the cash-fixed entry screen can show it
-            // before the customer-side price guard runs.
             deviceConfigRepository.getConfig()?.let { config ->
                 pricePerLitre = (config.koboPerLitre / 100).toInt()
                 _ui.update { it.copy(pricePerLitre = pricePerLitre) }
             }
+            bootResume()
         }
     }
 
-    // ---- Idle / ModeSelect ----
+    // ---- Boot resume ---------------------------------------------------------------
+
+    private suspend fun bootResume() {
+        val restored = pulseRepository.restoreTransactionState()
+        val restoredPulses = pulseRepository.restorePulseCount()
+        when (restored) {
+            is TransactionState.Idle,
+            is TransactionState.ModeSelect,
+            is TransactionState.PrepayAmountSelect,
+            is TransactionState.PrepayMethodSelect,
+            is TransactionState.FillupAwaitingAttendantAuth,
+            is TransactionState.FillupTankFull,
+            is TransactionState.FillupAwaitingCashConfirm,
+            is TransactionState.CashFixedAmountEntry -> {
+                // Pure-UI: just dispatch. No side-effect coroutines needed.
+                setState(restored)
+            }
+
+            is TransactionState.Error -> {
+                if (restored.recoverable) setState(restored)
+                else resetToIdle(clearPulses = true)
+            }
+
+            is TransactionState.Complete -> {
+                // Customer never tapped "Done" before the power cut. Treat as terminal:
+                // reset to Idle. The audit row was already written when Complete first set.
+                resetToIdle(clearPulses = true)
+            }
+
+            is TransactionState.PrepayAwaitingPayment -> {
+                setState(restored)
+                startExpiryCountdown()
+                resumePrepayPaymentListener(restored)
+            }
+
+            is TransactionState.UssdAwaitingSms -> {
+                setState(restored)
+                startUssdExpiry()
+                startUssdSmsListener(
+                    amountNaira = restored.amountNaira,
+                    amountKobo = restored.amountNaira.toLong() * 100,
+                    txnId = restored.txnId,
+                )
+            }
+
+            is TransactionState.FillupDigitalAwaitingPayment -> {
+                setState(restored)
+                // Reconstruct the FillupTankFull source the digital handlers close over.
+                // pricePerLitre persisted via DeviceConfig is preferred — but for fidelity
+                // to the snapshot, derive from amountDueNaira / verifiedLitres which were
+                // locked at TankFull time and survive any subsequent price change.
+                val derivedPrice = if (restored.verifiedLitres > 0) {
+                    (restored.amountDueNaira / restored.verifiedLitres).toInt()
+                } else pricePerLitre
+                val source = TransactionState.FillupTankFull(
+                    txnId = restored.txnId,
+                    pricePerLitre = derivedPrice,
+                    verifiedLitres = restored.verifiedLitres,
+                    amountDueNaira = restored.amountDueNaira,
+                )
+                startFillupDigitalExpiry(source)
+                startFillupDigitalPayment(source)
+            }
+
+            is TransactionState.FixedDispensing -> {
+                pulseBaseline = restoredPulses
+                setState(restored)
+                val method = restored.method ?: deriveMethodForFlow(restored.flow)
+                startDispensing(restored.litresAuthorised, method)
+            }
+
+            is TransactionState.CashFixedDispensing -> {
+                pulseBaseline = restoredPulses
+                setState(restored)
+                startCashFixedDispensing(
+                    litresCutoff = restored.litresCutoff,
+                    cashAmountNaira = restored.cashAmountNaira,
+                    txnId = restored.txnId,
+                )
+            }
+
+            is TransactionState.FillupDispensing -> {
+                pulseBaseline = restoredPulses
+                setState(restored)
+                startFillupDispensing(restored.txnId)
+            }
+        }
+    }
+
+    private fun resetToIdle(clearPulses: Boolean) {
+        setState(TransactionState.Idle)
+        if (clearPulses) {
+            viewModelScope.launch {
+                runCatching { pulseRepository.savePulseCount(0, 0L) }
+            }
+        }
+        pulseBaseline = 0
+    }
+
+    private fun deriveMethodForFlow(flow: TransactionFlow): PaymentMethod? = when (flow) {
+        // Resume fidelity: when the original method choice is lost (older persisted blob
+        // without the FixedDispensing.method field), fall back to the most likely channel
+        // per flow. Audit row may show BANK_QR_TRANSFER for what was actually BALANCEE_APP;
+        // backend reconciliation in Phase 6 corrects via the webhook trail.
+        TransactionFlow.FIXED_PREPAY_DIGITAL -> PaymentMethod.BANK_QR_TRANSFER
+        TransactionFlow.USSD_OFFLINE -> PaymentMethod.USSD
+        TransactionFlow.CASH_FIXED -> null
+        TransactionFlow.FILLUP_CASH -> null
+        TransactionFlow.FILLUP_DIGITAL -> PaymentMethod.BANK_QR_TRANSFER
+    }
+
+    /** Returns the txn ref (BLC-NNNNN) embedded in the state, or null for stateless variants. */
+    private fun txnRefFor(state: TransactionState): String? = when (state) {
+        is TransactionState.PrepayAwaitingPayment -> state.txnId
+        is TransactionState.UssdAwaitingSms -> state.txnId
+        is TransactionState.FixedDispensing -> state.txnId
+        is TransactionState.CashFixedDispensing -> state.txnId
+        is TransactionState.FillupDispensing -> state.txnId
+        is TransactionState.FillupTankFull -> state.txnId
+        is TransactionState.FillupDigitalAwaitingPayment -> state.txnId
+        is TransactionState.FillupAwaitingCashConfirm -> state.txnId
+        is TransactionState.Complete -> state.txnId
+        else -> null
+    }
+
+    // ---- Idle / ModeSelect ---------------------------------------------------------
 
     fun onStartTransaction() {
         if (currentState() !is TransactionState.Idle) return
@@ -135,13 +299,7 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    // ---- Fill-up cash (Flow 2) ----
-    //
-    // Entry point stands in for the Phase 4 attendant swipe-up overlay. Two valid sources:
-    //   - Idle (attendant starts a fill-up before any customer interaction)
-    //   - FillupAwaitingAttendantAuth (customer already picked FILL UP from ModeSelect)
-    // The pulse stream drives litresSoFar; a sibling 500ms watchdog fires nozzle shutoff
-    // once the flow stalls for 3s (mock simulates the stall via the tank-capacity cap).
+    // ---- Fill-up cash (Flow 2) -----------------------------------------------------
 
     fun onAttendantFillUpAuthorise() {
         val current = currentState()
@@ -155,6 +313,7 @@ class CustomerViewModel @Inject constructor(
                     _ui.update { it.copy(pricePerLitre = pricePerLitre) }
                     val txnId = generateCashTxnId()
                     cancelInFlightJobs()
+                    pulseBaseline = 0
                     setState(
                         TransactionState.FillupDispensing(
                             txnId = txnId,
@@ -179,9 +338,10 @@ class CustomerViewModel @Inject constructor(
     private fun startFillupDispensing(txnId: String) {
         dispenseJob?.cancel()
         fillupWatchdogJob?.cancel()
-        // Volatile-equivalent: viewModelScope is single-threaded (Main), so a local
-        // Long mutated by both the pulse coroutine and the watchdog coroutine is safe.
+        // viewModelScope is Main-confined, so a local Long mutated by both the pulse
+        // coroutine and the watchdog coroutine is safe without synchronisation.
         var lastPulseMs = 0L
+        var lastPersistAtPulses = pulseBaseline
 
         dispenseJob = viewModelScope.launch {
             relay.startFuelFlow()
@@ -191,8 +351,15 @@ class CustomerViewModel @Inject constructor(
                     lastPulseMs = msg.timestampMs
                     val current = currentState() as? TransactionState.FillupDispensing
                         ?: return@collect
-                    val litres = msg.count.toDouble() / PULSES_PER_LITRE
+                    val cumulativePulses = pulseBaseline + msg.count
+                    val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
                     setState(current.copy(litresSoFar = litres))
+                    if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
+                        lastPersistAtPulses = cumulativePulses
+                        runCatching {
+                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                        }
+                    }
                 }
             } finally {
                 relay.stopFuelFlow()
@@ -204,8 +371,6 @@ class CustomerViewModel @Inject constructor(
                 delay(FILLUP_WATCHDOG_POLL_MS)
                 val current = currentState() as? TransactionState.FillupDispensing ?: break
                 val now = System.currentTimeMillis()
-                // Only fire shutoff after fuel has actually started flowing — before the
-                // first pulse, lastPulseMs == 0L and the gap is meaningless.
                 if (lastPulseMs > 0L && (now - lastPulseMs) > FILLUP_SHUTOFF_TIMEOUT_MS) {
                     relay.stopFuelFlow()
                     val verifiedLitres = current.litresSoFar
@@ -261,18 +426,13 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Listens to the mock [PaymentProcessor] for a Success/Failed result. The Pending
-     * event is ignored — we already showed the QR with the verified amount and our own
-     * txn id; the backend ref is only meaningful once the webhook actually fires.
-     */
     private fun startFillupDigitalPayment(source: TransactionState.FillupTankFull) {
         paymentJob?.cancel()
         val amountKobo = source.amountDueNaira.toLong() * 100
         paymentJob = viewModelScope.launch {
             paymentProcessor.process(PaymentMethod.BANK_QR_TRANSFER, amountKobo).collect { result ->
                 when (result) {
-                    is PaymentResult.Pending -> Unit // QR is already on-screen
+                    is PaymentResult.Pending -> Unit
                     is PaymentResult.Success -> onFillupDigitalSuccess(source)
                     is PaymentResult.Failed -> onFillupDigitalFailed(source, result.reason)
                 }
@@ -281,8 +441,6 @@ class CustomerViewModel @Inject constructor(
     }
 
     private suspend fun onFillupDigitalSuccess(source: TransactionState.FillupTankFull) {
-        // The webhook may land after the customer cancelled or after we fell back to
-        // cash — only transition if we're still on the digital-awaiting screen.
         if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
         expiryJob?.cancel()
         completeAndRecord(
@@ -299,8 +457,6 @@ class CustomerViewModel @Inject constructor(
     private fun onFillupDigitalFailed(source: TransactionState.FillupTankFull, reason: String) {
         if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
         expiryJob?.cancel()
-        // Drop back to cash collection — the litres already flowed; the audit row must
-        // still record cash actually collected, not a failed digital attempt.
         android.util.Log.w("CustomerVM", "Fill-up digital payment failed: $reason")
         setState(
             TransactionState.FillupAwaitingCashConfirm(
@@ -322,8 +478,6 @@ class CustomerViewModel @Inject constructor(
                 _ui.update { it.copy(fillupDigitalExpiresInSeconds = remaining) }
             }
             if (remaining <= 0 && currentState() is TransactionState.FillupDigitalAwaitingPayment) {
-                // Per state-machine.md: 5-min expiry → FillupAwaitingCashConfirm. The
-                // fuel already flowed; cash collection is the safe fallback.
                 paymentJob?.cancel()
                 setState(
                     TransactionState.FillupAwaitingCashConfirm(
@@ -336,11 +490,6 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Build a NIP transfer QR payload. Real Balanceè production payload TBD; this is
-     * the simplest scannable URI that round-trips the three fields a bank app needs:
-     * destination account, exact amount in kobo, transaction ref for reconciliation.
-     */
     private fun buildNipTransferQr(account: String, amountNaira: Int, txnId: String): String =
         "nip://transfer?account=$account&amount=$amountNaira&ref=$txnId"
 
@@ -359,10 +508,7 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    // ---- Cash fixed (Flow 4) ----
-    //
-    // Entry point stands in for the Phase 4 attendant swipe-up overlay. The keypad
-    // screen carries the same price-guard contract as customer-initiated flows.
+    // ---- Cash fixed (Flow 4) -------------------------------------------------------
 
     fun onAttendantCashFixed() {
         if (currentState() !is TransactionState.Idle) return
@@ -410,6 +556,7 @@ class CustomerViewModel @Inject constructor(
                 return@launch
             }
             cancelInFlightJobs()
+            pulseBaseline = 0
             val txnId = generateCashTxnId()
             setState(
                 TransactionState.CashFixedDispensing(
@@ -430,6 +577,7 @@ class CustomerViewModel @Inject constructor(
         txnId: String,
     ) {
         dispenseJob?.cancel()
+        var lastPersistAtPulses = pulseBaseline
         dispenseJob = viewModelScope.launch {
             relay.startFuelFlow()
             try {
@@ -437,7 +585,8 @@ class CustomerViewModel @Inject constructor(
                     if (msg !is PulseMessage.Pulse) return@collect
                     val current = currentState() as? TransactionState.CashFixedDispensing
                         ?: return@collect
-                    val litres = msg.count.toDouble() / PULSES_PER_LITRE
+                    val cumulativePulses = pulseBaseline + msg.count
+                    val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
                     if (litres >= litresCutoff) {
                         relay.stopFuelFlow()
                         completeAndRecord(
@@ -452,6 +601,12 @@ class CustomerViewModel @Inject constructor(
                         return@collect
                     }
                     setState(current.copy(litresSoFar = litres))
+                    if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
+                        lastPersistAtPulses = cumulativePulses
+                        runCatching {
+                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                        }
+                    }
                 }
             } finally {
                 relay.stopFuelFlow()
@@ -462,7 +617,7 @@ class CustomerViewModel @Inject constructor(
     private fun generateCashTxnId(): String =
         "BLC-${System.currentTimeMillis().toString().takeLast(5)}"
 
-    // ---- Pre-pay flow ----
+    // ---- Pre-pay flow --------------------------------------------------------------
 
     fun onPrepayAmountChosen(amountNaira: Int) {
         if (currentState() is TransactionState.PrepayAmountSelect) {
@@ -473,23 +628,13 @@ class CustomerViewModel @Inject constructor(
     fun onPrepayMethodChosen(method: PaymentMethod) {
         val current = currentState() as? TransactionState.PrepayMethodSelect ?: return
         when (method) {
-            PaymentMethod.CASH_SEE_ATTENDANT -> {
-                // Cash routes through the attendant (overlay lands in Phase 4). For now,
-                // return to Idle so the customer is told to talk to the attendant verbally.
-                onCancel()
-            }
+            PaymentMethod.CASH_SEE_ATTENDANT -> onCancel()
             PaymentMethod.USSD -> startUssdFlow(amountNaira = current.amountNaira)
             else -> startPrepayPayment(amountNaira = current.amountNaira, method = method)
         }
     }
 
-    // ---- USSD offline (Flow 5) ----
-    //
-    // No data on the customer side. The pump shows per-bank USSD codes; the customer
-    // dials and the bank sends an SMS to the pump SIM. The real SMS BroadcastReceiver
-    // pipeline lands in Phase 6 (production). For the rebuild we use the existing
-    // MockPaymentProcessor: a Success on the USSD channel stands in for "SMS received,
-    // ref matched, payment confirmed". 5-min idle timeout returns to Idle per spec.
+    // ---- USSD offline (Flow 5) ------------------------------------------------------
 
     private fun startUssdFlow(amountNaira: Int) {
         cancelInFlightJobs()
@@ -513,7 +658,7 @@ class CustomerViewModel @Inject constructor(
         paymentJob = viewModelScope.launch {
             paymentProcessor.process(PaymentMethod.USSD, amountKobo).collect { result ->
                 when (result) {
-                    is PaymentResult.Pending -> Unit // Customer is dialing; code already on-screen.
+                    is PaymentResult.Pending -> Unit
                     is PaymentResult.Success -> onUssdSmsConfirmed(amountNaira, txnId)
                     is PaymentResult.Failed -> onUssdFailed(result.reason)
                 }
@@ -522,12 +667,12 @@ class CustomerViewModel @Inject constructor(
     }
 
     private suspend fun onUssdSmsConfirmed(amountNaira: Int, txnId: String) {
-        // A late Success after timeout/cancel must not retrigger — guard on state.
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
         val amountKobo = amountNaira.toLong() * 100
         val litresAuthorised = deviceConfig()?.litresCutoff(amountKobo)
             ?: ((amountNaira.toDouble() / pricePerLitre).coerceAtLeast(0.0))
+        pulseBaseline = 0
         setState(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.USSD_OFFLINE,
@@ -536,6 +681,7 @@ class CustomerViewModel @Inject constructor(
                 amountNaira = amountNaira,
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
+                method = PaymentMethod.USSD,
             )
         )
         startDispensing(litresAuthorised, PaymentMethod.USSD)
@@ -563,8 +709,6 @@ class CustomerViewModel @Inject constructor(
                 _ui.update { it.copy(ussdExpiresInSeconds = remaining) }
             }
             if (remaining <= 0 && currentState() is TransactionState.UssdAwaitingSms) {
-                // Per state-machine.md: USSD timeout returns to Idle (the bank SMS path
-                // has no fuel-side fallback; the customer has to start over).
                 paymentJob?.cancel()
                 setState(TransactionState.Idle)
                 _ui.update { it.copy(ussdExpiresInSeconds = 0) }
@@ -572,11 +716,6 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 3-digit USSD reference, matching the spec's `*737*amount*REF#` shape. Three
-     * digits will collide eventually (see OPEN_QUESTIONS #11) — V1 accepts that until
-     * the production scheme is agreed with the bank partners.
-     */
     private fun generateUssdRef(): String =
         kotlin.random.Random.nextInt(100, 1000).toString()
 
@@ -588,6 +727,27 @@ class CustomerViewModel @Inject constructor(
                 when (result) {
                     is PaymentResult.Pending -> onPaymentPending(amountNaira, method, result)
                     is PaymentResult.Success -> onPaymentSuccess(amountNaira, method, result)
+                    is PaymentResult.Failed -> onPaymentFailed(result)
+                }
+            }
+        }
+    }
+
+    /**
+     * Restart the prepay payment listener for a state restored from disk. The original
+     * Pending event is gone — we go straight back into a fresh [paymentProcessor.process]
+     * call carrying the same amount + method and treat its Success as the resumed webhook.
+     * The transactionRef on the resumed state stays the in-memory one the customer is
+     * looking at; the new Pending event arrives with a fresh backend ref that we ignore.
+     */
+    private fun resumePrepayPaymentListener(restored: TransactionState.PrepayAwaitingPayment) {
+        paymentJob?.cancel()
+        val amountKobo = restored.amountNaira.toLong() * 100
+        paymentJob = viewModelScope.launch {
+            paymentProcessor.process(restored.method, amountKobo).collect { result ->
+                when (result) {
+                    is PaymentResult.Pending -> Unit
+                    is PaymentResult.Success -> onPaymentSuccess(restored.amountNaira, restored.method, result)
                     is PaymentResult.Failed -> onPaymentFailed(result)
                 }
             }
@@ -620,6 +780,7 @@ class CustomerViewModel @Inject constructor(
         val litresAuthorised = deviceConfig()?.litresCutoff(success.amountKobo)
             ?: ((amountNaira.toDouble() / pricePerLitre).coerceAtLeast(0.0))
 
+        pulseBaseline = 0
         setState(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
@@ -628,6 +789,7 @@ class CustomerViewModel @Inject constructor(
                 amountNaira = amountNaira,
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
+                method = method,
             )
         )
         startDispensing(litresAuthorised, method)
@@ -660,8 +822,9 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    private fun startDispensing(litresAuthorised: Double, method: PaymentMethod) {
+    private fun startDispensing(litresAuthorised: Double, method: PaymentMethod?) {
         dispenseJob?.cancel()
+        var lastPersistAtPulses = pulseBaseline
         dispenseJob = viewModelScope.launch {
             relay.startFuelFlow()
             try {
@@ -669,7 +832,8 @@ class CustomerViewModel @Inject constructor(
                     if (msg !is PulseMessage.Pulse) return@collect
                     val current = currentState() as? TransactionState.FixedDispensing
                         ?: return@collect
-                    val litres = msg.count.toDouble() / PULSES_PER_LITRE
+                    val cumulativePulses = pulseBaseline + msg.count
+                    val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
                     if (litres >= litresAuthorised) {
                         relay.stopFuelFlow()
                         completeAndRecord(
@@ -684,6 +848,12 @@ class CustomerViewModel @Inject constructor(
                         return@collect
                     }
                     setState(current.copy(litresSoFar = litres))
+                    if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
+                        lastPersistAtPulses = cumulativePulses
+                        runCatching {
+                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                        }
+                    }
                 }
             } finally {
                 relay.stopFuelFlow()
@@ -691,12 +861,12 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    // ---- Cancel / dismiss ----
+    // ---- Cancel / dismiss ----------------------------------------------------------
 
     fun onCancel() {
         cancelInFlightJobs()
         viewModelScope.launch { relay.stopFuelFlow() }
-        setState(TransactionState.Idle)
+        resetToIdle(clearPulses = true)
         _ui.update {
             it.copy(
                 prepayExpiresInSeconds = 0,
@@ -708,26 +878,21 @@ class CustomerViewModel @Inject constructor(
 
     fun onShareReceipt() {
         // Wired to a real share sheet in Phase 6. Logged-only for now so the button isn't dead.
-        // Intentionally no state change.
     }
 
     fun onDismissComplete() {
         if (currentState() is TransactionState.Complete) onCancel()
     }
 
-    // ---- Helpers ----
+    // ---- Helpers -------------------------------------------------------------------
 
     private fun currentState(): TransactionState = _ui.value.state
 
     private fun setState(state: TransactionState) {
         _ui.update { it.copy(state = state) }
+        stateWriteChannel.trySend(state)
     }
 
-    /**
-     * Show the Complete screen and persist the audit row. The audit write is best-effort —
-     * the customer already received fuel, so a disk-write failure must not block the UI.
-     * WorkManager-driven backend sync (Phase 6) will reconcile if it ever sees drift.
-     */
     private suspend fun completeAndRecord(complete: TransactionState.Complete) {
         setState(complete)
         try {
@@ -777,12 +942,7 @@ class CustomerViewModel @Inject constructor(
     private suspend fun deviceConfig(): DeviceConfig? = deviceConfigRepository.getConfig()
 
     private companion object {
-        // Stop-gap default until the operator-push channel lands (Phase 6). Matches the spec example
-        // (₦870/L ⇒ 87_000 kobo/L). The Phase 4 debug screen will let testers override this live.
         const val DEFAULT_KOBO_PER_LITRE = 87_000L
-
-        // Fallback NIP account for the fill-up-digital QR if DeviceConfig has none yet.
-        // Real virtualAccountNumber is provisioned during install (see OPEN_QUESTIONS #6).
         const val DEFAULT_VIRTUAL_ACCOUNT = "0123456789"
     }
 }
