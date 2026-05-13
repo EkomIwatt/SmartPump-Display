@@ -420,3 +420,42 @@ A hidden engineering screen joins the build for testers. A long-press on the top
 
 **Next:**
 Phase 5 — persistence & resume verification. Wire `CustomerViewModel` to `PulseRepository` (state writes on every `setState`, restore on `init`), run the reboot test through each non-terminal state per the `docs/state-machine.md` persistence rules, force relay open on boot before re-deriving from state, and re-confirm `Complete` / `Error(recoverable=false)` reset to `Idle`. After Phase 5, merge `rebuild/strict-design` → `main`.
+
+---
+
+### Phase 5 (rebuild) — Persistence + boot resume
+**Date:** 2026-05-13
+**Status:** done
+**Commit(s):** f77700a
+
+**Summary (plain language):**
+The pump now remembers what it was doing across a power cut. Every move the state machine makes is written to local storage, and during a long fill-up the pulse count is saved every quarter-litre. When the app starts, the very first thing it does is force the fuel flow off — no matter what was happening before. Then it reads the last saved state and picks up where it left off: a customer who was waiting at the QR screen still sees their QR; a fill-up that was mid-dispense resumes counting from the saved pulse total (no double-pour, no lost litres); the 5-minute countdowns restart. The only states the app refuses to resume are "done" and "fatal error" — both get reset to idle on boot since they're already terminal. The audit row that a successful transaction wrote when it completed is already on disk too, so backend reconciliation in a later phase will see exactly what was dispensed.
+
+**Technical notes:**
+- `domain/model/TransactionState.kt`:
+  - `FixedDispensing` gained a nullable `method: PaymentMethod? = null`. The default value keeps older persisted JSON blobs deserialisable (`Json { ignoreUnknownKeys = true }` already covered the *adding fields* case; the kotlinx defaulting handles the *missing fields on old blobs* case). Carrying the channel on the state lets a power-cut resume rebuild the `Complete` audit row with the right `method` rather than re-deriving from `flow` (which collapses BALANCEE_APP / BANK_QR_TRANSFER / NFC_CARD into "some Flow 1 channel").
+- `ui/customer/CustomerViewModel.kt` — rewritten end-to-end for persistence:
+  - New injected dep `pulseRepository: PulseRepository`.
+  - `setState(s)` now also `trySend`s `s` into a CONFLATED `stateWriteChannel: Channel<TransactionState>`. A single writer coroutine (launched in `init`) drains the channel and calls `pulseRepository.saveTransactionState(s, txnRefFor(s))`. CONFLATED is the right shape for state-machine recovery — only the latest pending state matters; intermediate states being dropped is fine because resume only ever reads the freshest write.
+  - `txnRefFor(state)` extracts `BLC-NNNNN` from whichever state carries it (Prepay/Ussd/Fixed/CashFixed/Fillup* + Complete) so the entity's `currentTransactionRef` column stays useful even when the user reboots mid-flow.
+  - New private `pulseBaseline: Int` field. Reset to 0 on every fresh dispense entry point; restored from `pulseRepository.restorePulseCount()` on boot when resuming a dispensing state. Each of the three dispensing collectors (`startDispensing`, `startCashFixedDispensing`, `startFillupDispensing`) computes `cumulativePulses = pulseBaseline + msg.count` and uses that for both the live `litresSoFar` and the litre-target check. On the mock this means a resumed dispense doesn't restart at 0L — the mock's internal counter resets on each `relay.startFuelFlow()` but the VM adds the baseline back. On real hardware (Phase 6) the Arduino is authoritative for cumulative count and the baseline becomes a no-op.
+  - Pulse persistence is throttled to every 25 pulses (`PULSE_PERSIST_EVERY_N` — at 100 ppl that's one disk write per 0.25 L). Frequent enough that a power-cut resume reconstructs `litresSoFar` within ±0.25 L; cheap enough not to thrash the kiosk's flash. Wrapped in `runCatching` — a disk failure mustn't break the dispense loop.
+  - `init` is now a two-coroutine boot:
+    1. The state-writer coroutine (launched first so it's ready to receive when boot resume starts firing `setState` calls).
+    2. The boot-sequence coroutine: `relay.stopFuelFlow()` → `seedDefaultConfigIfMissing()` → load price into `pricePerLitre` → `bootResume()`. The relay invariant runs **before** state restore so even a state that says "we were dispensing" can't accidentally keep the relay open across a reboot.
+  - `bootResume()` dispatches per restored state:
+    - **Pure-UI states** (`Idle`, `ModeSelect`, `PrepayAmountSelect`, `PrepayMethodSelect`, `FillupAwaitingAttendantAuth`, `FillupTankFull`, `FillupAwaitingCashConfirm`, `CashFixedAmountEntry`) → `setState(restored)`. No side-effect jobs to restart.
+    - **`Error(recoverable=true)`** → resume so the user can dismiss. **`Error(recoverable=false)`** → reset to Idle + clear pulses (terminal per `state-machine.md` invariants).
+    - **`Complete`** → reset to Idle + clear pulses. The audit row was already written by `completeAndRecord` at the original completion; the customer just never tapped "Done". Treating Complete as terminal on boot is per spec.
+    - **`PrepayAwaitingPayment`** → restart expiry countdown + a fresh `paymentProcessor.process(method, amountKobo)` collector via the new `resumePrepayPaymentListener(...)` helper. The transactionRef on the resumed state stays the one the customer is looking at; the new Pending event's fresh backend ref is ignored.
+    - **`UssdAwaitingSms`** → restart `startUssdExpiry()` + `startUssdSmsListener(...)` with the persisted amount/txnId.
+    - **`FillupDigitalAwaitingPayment`** → reconstruct the `FillupTankFull` source the digital handlers close over. `pricePerLitre` is derived from `amountDueNaira / verifiedLitres` rather than re-read from DeviceConfig — that way a price change between cut and reboot doesn't retroactively edit the customer's receipt.
+    - **`FixedDispensing` / `CashFixedDispensing` / `FillupDispensing`** → `pulseBaseline = restoredPulses`, `setState(restored)`, kick the corresponding `startDispensing(...)` / `startCashFixedDispensing(...)` / `startFillupDispensing(...)` helper. The collector's first read of `currentState()` finds the just-set restored state, so the resume is seamless to the UI.
+  - New `deriveMethodForFlow(flow)` fallback — only fires for older persisted blobs without the new `FixedDispensing.method` field. `FIXED_PREPAY_DIGITAL → BANK_QR_TRANSFER`, `USSD_OFFLINE → USSD`, cash flows → null. Audit fidelity is best-effort here; Phase 6 backend reconciliation corrects via the webhook trail.
+  - `onCancel()` now resets pulse baseline + clears persisted pulses via `resetToIdle(clearPulses = true)`. `startDispensing` / `startCashFixedDispensing` / `startFillupDispensing` reset `pulseBaseline = 0` at the start of each fresh transaction so a previous transaction's count doesn't leak into the next.
+  - `startDispensing(method: PaymentMethod?)` signature relaxed (was non-null) so the boot-resume `deriveMethodForFlow(flow)` fallback can pass through cash flows.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL. One transient compile fix during the change (the relaxed `method` parameter type).
+- **Not** verified on a real device kill-and-relaunch test for every state — flagged for a manual reboot sweep before merging to `main` (each non-terminal state at least once: idle, mode-select, prepay-amount-select, prepay-method-select, prepay-awaiting, fillup-attendant-waiting, fillup-dispensing-mid-fill, fillup-tank-full, fillup-awaiting-cash, fillup-digital-awaiting, cash-fixed-entry, cash-fixed-dispensing-mid-fill, ussd-awaiting-sms, complete, error-recoverable, error-non-recoverable).
+
+**Next:**
+Phase 6 — production wiring. Real USB-serial Arduino driver behind `PulseSource`, real Balanceè payment SDK behind `PaymentProcessor`, real SMS `BroadcastReceiver` for Flow 5 GTBank parsing, WorkManager backend sync for the audit table, FCM channel for operator price/config push (or polled HTTP — see OPEN_QUESTIONS #8). Phase 5's `MOCK_HARDWARE`-style flag in `HardwareModule` / `PaymentModule` switches between mocks and prod bindings. Before Phase 6 starts: merge `rebuild/strict-design` → `main` once the manual reboot sweep is clean.
