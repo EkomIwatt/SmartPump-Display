@@ -359,3 +359,64 @@ The last of the five flows runs in the app now. From the pre-pay method picker, 
 
 **Next:**
 Phase 4 — attendant swipe-up overlay + debug-screen rebuild. The overlay holds exactly three actions per `docs/flows.md`: FILL UP AUTHORISE (enabled in Idle), AUTHORISE CASH ₦… (enabled in Idle, inline amount entry → Flow 4), CASH RECEIVED (enabled in `FillupAwaitingCashConfirm`). State-gated enable/disable; `translateY` slide-up animation; swipe-down / tap-outside dismiss. Once the overlay is live, the three temporary "Attendant · …" buttons on `IdleScreen` come off. Debug screen covers: live price override, pulse rate + tank-capacity knobs on `MockPulseSource`, mock SMS injector for Flow 5, mock-payment auto-approve / failure-reason toggles, device-config form.
+
+---
+
+### Phase 4a (rebuild) — Attendant swipe-up overlay
+**Date:** 2026-05-13
+**Status:** done
+**Commit(s):** 749483a
+
+**Summary (plain language):**
+The attendant's interface is no longer three loose buttons stapled to the idle screen — it's the proper swipe-up bottom panel the spec called for. A subtle pill handle sits at the bottom edge of every screen; tapping it (or swiping up from it) slides a dark panel up over the customer view with exactly three action cards: FILL UP AUTHORISE in cyan, AUTHORISE CASH ₦… in gold, CASH RECEIVED in green. Each card lights up only when the current state actually allows that action — for example, CASH RECEIVED only becomes tappable once the fill-up has finished and the customer is in the cash-collection hold; the other two only work when the pump is idle. Tap the scrim, drag the panel back down, or tap "Dismiss" to close it. The three temporary attendant buttons on the idle screen (and the stand-in "Cash received" button on the awaiting-cash screen) are gone — the overlay is the only path now.
+
+**Technical notes:**
+- New package `ui/attendant/`:
+  - `AttendantOverlay.kt` — the panel composable. `BalanceeCard` per action with the spec border colour (cyan/amber/green) when enabled and `BorderSubtle` + text-tertiary when disabled. Header reads "Three actions. *Swipe down to dismiss.*" mirroring the strict-design copy.
+  - `AttendantOverlayHost.kt` — a `Box`-scoped wrapper around the customer state host. Owns the `visible` flag (`rememberSaveable` so it survives rotation), the bottom-edge swipe-up handle, the scrim, and the slide-up/down animation. Two gesture surfaces:
+    - **Open:** 28dp bottom strip with a 72×4dp pill + faint amber tick. Tap opens. Vertical drag accumulating > 32dp upwards also opens.
+    - **Dismiss:** the panel itself accepts a downward `draggable` — net delta > 48dp dismisses. Scrim taps + the in-panel "Dismiss" pill also dismiss. Threshold conversion via `LocalDensity.toPx()`.
+  - 250ms ease-out `slideInVertically` + `fadeIn` for the open animation; mirrored ease-in for close. Matches `docs/design-system.md` motion spec.
+- State-gated enable map (single source of truth in `AttendantPanel`):
+  - `FILL UP AUTHORISE` → `state is Idle || state is FillupAwaitingAttendantAuth`
+  - `AUTHORISE CASH ₦…` → `state is Idle` (routes via `onAttendantCashFixed → CashFixedAmountEntry`; the strict-design "inline ₦___" placeholder is rendered as a teaser on the card — actual amount entry stays on the dedicated `CashFixedAmountEntryScreen` since fitting a numeric keypad inside a 320dp panel would crowd it.)
+  - `CASH RECEIVED` → `state is FillupAwaitingCashConfirm`
+  Each card auto-dismisses the overlay after firing its action.
+- `MainActivity` rewritten to wrap `CustomerStateHost` in `AttendantOverlayHost`. The three attendant callbacks now route from the overlay directly to the existing VM methods (`onAttendantFillUpAuthorise`, `onAttendantCashFixed`, `onAttendantCashReceived`) — the customer-side host no longer carries them.
+- `CustomerStateHost` drops three callback parameters (`onAttendantCashFixed`, `onAttendantFillUp`, `onAttendantCashReceived`) — its API is now customer-only.
+- `IdleScreen` — three "Attendant · …" temp buttons removed; replaced with a single "Attendant? Swipe up from the bottom edge." hint under the primary "Start transaction" button.
+- `FillupAwaitingCashConfirmScreen` — the stand-in "Cash received (attendant)" primary button and the Phase 4 banner are gone. The screen is now purely informational on the customer side; the close-out lives in the overlay.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL. (One transient compile fix: missing `androidx.compose.foundation.layout.width` import in `AttendantOverlay.kt` for the tick affordance.)
+
+**Next:**
+Phase 4b — the engineering debug screen: pulse-rate + tank-capacity sliders on `MockPulseSource`, mock-payment auto-approve / pending-delay / failure-reason knobs on `MockPaymentProcessor`, the Flow 5 "SMS arrived" injector that bypasses the pending delay on the in-flight payment, and a `DeviceConfig` form (pumpId / stationName / koboPerLitre / virtualAccountNumber). Reachable from an undocumented top-left long-press hotspot — testers only.
+
+---
+
+### Phase 4b (rebuild) — Debug screen + mock-payment force-resolve
+**Date:** 2026-05-13
+**Status:** done
+**Commit(s):** 494278f
+
+**Summary (plain language):**
+A hidden engineering screen joins the build for testers. A long-press on the top-left corner of any screen (an invisible 40dp hit-target) opens it. From there you can change the fuel price live and the customer-side price guard picks it up immediately, slide the mock pump's pulse rate and "tank capacity" to test the nozzle-shutoff watchdog, toggle whether the next mock payment will succeed or fail, change how long it takes the mock to "resolve", and press a single "SMS arrived · force resolve" button to short-circuit the wait — which is the only way to test the USSD flow in seconds rather than minutes. The device-config form also lets you set the station name, pump number, and the NIP virtual account that the fill-up-digital QR encodes. Tap "Done" to return. Customers and attendants never see this screen.
+
+**Technical notes:**
+- New package `ui/debug/`:
+  - `DebugViewModel.kt` — Hilt VM that injects the concrete `MockPulseSource` + `MockPaymentProcessor` (Hilt provides them as themselves since both carry `@Singleton @Inject constructor`; the same singletons sit behind the `PulseSource` / `PaymentProcessor` interface bindings, so debug-side changes affect the live `CustomerViewModel`). 5-flow `combine` over `pulsesPerSecond`, `tankCapacityLitres`, `autoApprove`, `pendingDelayMs`, `failureReason` collapsed into a `DebugUiState` via a small local `Quint` holder (stdlib stops at `Triple`). `DeviceConfigRepository.observeConfig()` is a separate collector that updates the same UI state.
+  - `DebugScreen.kt` — three vertically-stacked `BalanceeCard`s on a scrollable column:
+    1. **Mock hardware** (cyan border) — pulse-rate `Slider` 0–200 pps, tank-capacity `Slider` 0.5–200 L, plus two secondary buttons for the existing `injectDisconnect()` / `injectParseError()` knobs.
+    2. **Mock payment** (gold border) — auto-approve `Switch` with a helper line that flips copy based on the toggle, pending-delay `Slider` 0–30 000 ms, failure-reason `OutlinedTextField` (enabled only when auto-approve is off), and the primary "SMS arrived · force resolve" button.
+    3. **Device config** (green border) — live "Price/L" + "Updated at" readout plus an editable form (`pumpId`, `stationName`, naira-per-litre, virtual account). `Save config` writes through `DeviceConfigRepository.saveConfig(...)`. A status line under the button reports "Saved at …" in green or "Save failed: …" in red.
+- `MockPaymentProcessor`:
+  - New `triggerInstantResolve()` backed by a `Channel<Unit>(capacity = CONFLATED)` — collapses repeated presses into a single pending signal.
+  - `process(...)` now races the pending delay against the channel via `withTimeoutOrNull(delayMs) { instantResolve.receive() }`, then drains any stale signal at the start of the next call so a press while no payment is in flight doesn't get carried over to the next transaction.
+  - This is the actual interrupt point the customer VM was already wired for — `startUssdSmsListener` and the pre-pay digital collectors are unchanged; they just receive `Success` (or `Failed`, per `autoApprove`) sooner.
+- `MainActivity`:
+  - Adds a top-level `debugVisible` flag (`rememberSaveable`) and an early return that hands the whole screen to `DebugScreen` when the flag is set. `DebugScreen` exits via `onClose = { debugVisible = false }`.
+  - Adds a `DebugLongPressHotspot` — a 40dp `Box` at `Alignment.TopStart`, `pointerInput` running `detectTapGestures(onLongPress = { ... })`. `rememberUpdatedState` captures the latest `onOpenDebug` so the gesture detector always calls into the current composition.
+  - The hotspot sits *above* `AttendantOverlayHost` in the Z-order so debug is reachable in any state, including while the attendant panel is open.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+
+**Next:**
+Phase 5 — persistence & resume verification. Wire `CustomerViewModel` to `PulseRepository` (state writes on every `setState`, restore on `init`), run the reboot test through each non-terminal state per the `docs/state-machine.md` persistence rules, force relay open on boot before re-deriving from state, and re-confirm `Complete` / `Error(recoverable=false)` reset to `Idle`. After Phase 5, merge `rebuild/strict-design` → `main`.
