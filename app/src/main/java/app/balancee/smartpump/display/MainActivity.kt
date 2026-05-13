@@ -1,5 +1,8 @@
-// Single-activity host. Bottom layer is the customer state host driven by [CustomerViewModel].
-// The attendant overlay + debug screen are wired back in during Phase 4.
+// Single-activity host. The customer state host renders the screen for the current
+// TransactionState. The attendant overlay (Phase 4a) wraps it from outside: a bottom-edge
+// swipe-up affordance exposes the three attendant actions (FILL UP AUTHORISE, AUTHORISE
+// CASH ₦…, CASH RECEIVED) — each state-gated against the underlying TransactionState.
+// The debug screen entry point lands in Phase 4b.
 package app.balancee.smartpump.display
 
 import android.os.Bundle
@@ -12,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.balancee.smartpump.display.ui.attendant.AttendantOverlayHost
 import app.balancee.smartpump.display.ui.customer.CustomerStateHost
 import app.balancee.smartpump.display.ui.customer.CustomerViewModel
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
@@ -35,22 +39,27 @@ private fun SmartPumpRoot(
     customerVm: CustomerViewModel = hiltViewModel(),
 ) {
     val uiState by customerVm.ui.collectAsState()
-    CustomerStateHost(
-        uiState = uiState,
-        onStartTransaction = customerVm::onStartTransaction,
-        onSelectPrePay = customerVm::onSelectPrePay,
-        onSelectFillUp = customerVm::onSelectFillUp,
-        onPrepayAmountChosen = customerVm::onPrepayAmountChosen,
-        onPrepayMethodChosen = customerVm::onPrepayMethodChosen,
-        onAttendantCashFixed = customerVm::onAttendantCashFixed,
-        onCashFixedAuthorise = customerVm::onCashFixedAuthorise,
+    AttendantOverlayHost(
+        state = uiState.state,
         onAttendantFillUp = customerVm::onAttendantFillUpAuthorise,
-        onFillupPayCash = customerVm::onFillupPayCash,
-        onFillupPayDigital = customerVm::onFillupPayDigital,
+        onAttendantCashFixed = customerVm::onAttendantCashFixed,
         onAttendantCashReceived = customerVm::onAttendantCashReceived,
-        onShareReceipt = customerVm::onShareReceipt,
-        onDismissComplete = customerVm::onDismissComplete,
-        onCancel = customerVm::onCancel,
         modifier = Modifier.fillMaxSize(),
-    )
+    ) {
+        CustomerStateHost(
+            uiState = uiState,
+            onStartTransaction = customerVm::onStartTransaction,
+            onSelectPrePay = customerVm::onSelectPrePay,
+            onSelectFillUp = customerVm::onSelectFillUp,
+            onPrepayAmountChosen = customerVm::onPrepayAmountChosen,
+            onPrepayMethodChosen = customerVm::onPrepayMethodChosen,
+            onCashFixedAuthorise = customerVm::onCashFixedAuthorise,
+            onFillupPayCash = customerVm::onFillupPayCash,
+            onFillupPayDigital = customerVm::onFillupPayDigital,
+            onShareReceipt = customerVm::onShareReceipt,
+            onDismissComplete = customerVm::onDismissComplete,
+            onCancel = customerVm::onCancel,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
 }

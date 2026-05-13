@@ -1,8 +1,8 @@
 // Dispatches the right customer-side screen for the current [TransactionState].
-// Phase 3b wired Flow 1 (Fixed Pre-pay Digital); Phase 3c added Flow 4 (Cash Fixed);
-// Phase 3d added Flow 2 (Fill-up Cash); Phase 3e added Flow 3 (Fill-up Digital);
-// Phase 3f wires Flow 5 (USSD Offline). All five customer flows are now end-to-end —
-// the next gap is the attendant swipe-up overlay (Phase 4).
+// Phase 3b–3f wired all five customer flows; Phase 4 lifted the attendant actions out of
+// the customer state host — they now sit in the swipe-up [AttendantOverlayHost] which
+// wraps this composable from outside. The host below is therefore customer-only:
+// no FILL UP AUTHORISE / AUTHORISE CASH / CASH RECEIVED callbacks reach down to a screen.
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
@@ -38,12 +38,9 @@ fun CustomerStateHost(
     onSelectFillUp: () -> Unit,
     onPrepayAmountChosen: (Int) -> Unit,
     onPrepayMethodChosen: (PaymentMethod) -> Unit,
-    onAttendantCashFixed: () -> Unit,
     onCashFixedAuthorise: (Int) -> Unit,
-    onAttendantFillUp: () -> Unit,
     onFillupPayCash: () -> Unit,
     onFillupPayDigital: () -> Unit,
-    onAttendantCashReceived: () -> Unit,
     onShareReceipt: () -> Unit,
     onDismissComplete: () -> Unit,
     onCancel: () -> Unit,
@@ -52,8 +49,6 @@ fun CustomerStateHost(
     when (val state = uiState.state) {
         is TransactionState.Idle -> IdleScreen(
             onStartTransaction = onStartTransaction,
-            onAttendantCashFixed = onAttendantCashFixed,
-            onAttendantFillUp = onAttendantFillUp,
             modifier = modifier,
         )
 
@@ -163,7 +158,6 @@ fun CustomerStateHost(
             verifiedLitres = state.verifiedLitres,
             amountDueNaira = state.amountDueNaira,
             pricePerLitre = uiState.pricePerLitre,
-            onAttendantCashReceived = onAttendantCashReceived,
             onCancel = onCancel,
             modifier = modifier,
         )
@@ -245,12 +239,9 @@ private fun CustomerStateHostIdlePreview() {
             onSelectFillUp = {},
             onPrepayAmountChosen = {},
             onPrepayMethodChosen = {},
-            onAttendantCashFixed = {},
             onCashFixedAuthorise = {},
-            onAttendantFillUp = {},
             onFillupPayCash = {},
             onFillupPayDigital = {},
-            onAttendantCashReceived = {},
             onShareReceipt = {},
             onDismissComplete = {},
             onCancel = {},
@@ -274,12 +265,9 @@ private fun CustomerStateHostPrepayAmountPreview() {
             onSelectFillUp = {},
             onPrepayAmountChosen = {},
             onPrepayMethodChosen = {},
-            onAttendantCashFixed = {},
             onCashFixedAuthorise = {},
-            onAttendantFillUp = {},
             onFillupPayCash = {},
             onFillupPayDigital = {},
-            onAttendantCashReceived = {},
             onShareReceipt = {},
             onDismissComplete = {},
             onCancel = {},

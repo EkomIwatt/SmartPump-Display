@@ -1,5 +1,5 @@
-// Default attract-state screen. Customer taps "Start Transaction" to enter the flow,
-// or the attendant swipes up from the bottom to reveal the attendant overlay (Phase 4).
+// Default attract-state screen. Customer taps "Start transaction" to enter the flow.
+// Attendant actions live behind the swipe-up overlay (AttendantOverlayHost, Phase 4).
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
@@ -19,7 +19,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.components.BalanceeButton
-import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.HeroSerifText
 import app.balancee.smartpump.display.ui.components.LabelText
@@ -33,8 +32,6 @@ import app.balancee.smartpump.display.ui.theme.TextSecondary
 @Composable
 fun IdleScreen(
     onStartTransaction: () -> Unit,
-    onAttendantCashFixed: () -> Unit,
-    onAttendantFillUp: () -> Unit,
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
 ) {
@@ -75,17 +72,10 @@ fun IdleScreen(
                     onClick = onStartTransaction,
                     modifier = Modifier.width(360.dp),
                 )
-                BalanceeButton(
-                    label = "Attendant · cash fixed",
-                    onClick = onAttendantCashFixed,
-                    variant = BalanceeButtonVariant.Secondary,
-                    modifier = Modifier.width(360.dp),
-                )
-                BalanceeButton(
-                    label = "Attendant · fill up",
-                    onClick = onAttendantFillUp,
-                    variant = BalanceeButtonVariant.Secondary,
-                    modifier = Modifier.width(360.dp),
+                Text(
+                    text = "Attendant? Swipe up from the bottom edge.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary),
+                    textAlign = TextAlign.Center,
                 )
             }
         }
@@ -96,10 +86,6 @@ fun IdleScreen(
 @Composable
 private fun IdleScreenPreview() {
     SmartPumpDisplayTheme {
-        IdleScreen(
-            onStartTransaction = {},
-            onAttendantCashFixed = {},
-            onAttendantFillUp = {},
-        )
+        IdleScreen(onStartTransaction = {})
     }
 }

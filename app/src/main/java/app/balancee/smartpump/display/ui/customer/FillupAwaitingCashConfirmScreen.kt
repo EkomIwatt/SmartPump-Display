@@ -1,7 +1,6 @@
-// Flow 2, step 3 — customer chose cash. Waiting for the attendant to tap CASH RECEIVED.
-// Same gold AMOUNT DUE card as TankFull but the only action is the attendant's. The
-// "Cash received (attendant)" primary button is a temp affordance until the Phase 4
-// swipe-up overlay ships.
+// Flow 2, step 3 — customer chose cash. Waiting for the attendant to tap CASH RECEIVED
+// on the swipe-up attendant overlay (Phase 4). The screen is purely informational on
+// the customer side; the close-out action lives on the overlay and is gated by this state.
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
@@ -18,7 +17,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.components.AmountDisplay
@@ -33,7 +31,6 @@ import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.PrimaryAmber
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
-import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 
 @Composable
@@ -42,7 +39,6 @@ fun FillupAwaitingCashConfirmScreen(
     verifiedLitres: Double,
     amountDueNaira: Int,
     pricePerLitre: Int,
-    onAttendantCashReceived: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
@@ -117,18 +113,6 @@ fun FillupAwaitingCashConfirmScreen(
             }
         }
 
-        Text(
-            text = "Phase 4 ships the attendant overlay — the button below stands in for " +
-                "the swipe-up CASH RECEIVED action.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextPrimary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        BalanceeButton(
-            label = "Cash received (attendant)",
-            onClick = onAttendantCashReceived,
-        )
         BalanceeButton(
             label = "Cancel",
             onClick = onCancel,
@@ -146,7 +130,6 @@ private fun FillupAwaitingCashConfirmPreview() {
             verifiedLitres = 38.10,
             amountDueNaira = 33_147,
             pricePerLitre = 870,
-            onAttendantCashReceived = {},
             onCancel = {},
         )
     }
