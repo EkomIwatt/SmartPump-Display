@@ -29,6 +29,7 @@ import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.PrimaryAmber
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
@@ -50,7 +51,7 @@ private val MethodTiles = listOf(
         title = "Balanceè",
         tag = "App",
         description = "Open the Balanceè app. Tap to confirm.",
-        accent = PrimaryAmber,
+        accent = BrandBlue,
     ),
     MethodTile(
         method = PaymentMethod.BANK_QR_TRANSFER,
@@ -101,7 +102,7 @@ fun PrepayMethodSelectScreen(
             pumpId = pumpId,
             mode = "Pre-pay",
             stateLabel = "Method",
-            stateColor = BorderSubtle,
+            stateColor = BrandBlue,
         )
 
         Row(
@@ -120,12 +121,16 @@ fun PrepayMethodSelectScreen(
                     color = TextSecondary,
                 )
             }
-            Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
-                LabelText(text = "Pre-pay amount")
+            Column(
+                horizontalAlignment = androidx.compose.ui.Alignment.End,
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                LabelText(text = "Pre-pay amount", color = BrandBlue)
                 AmountDisplay(
                     amountNaira = amountNaira,
-                    color = PrimaryAmber,
+                    color = BrandBlue,
                     style = MaterialTheme.typography.displaySmall,
+                    modifier = Modifier.padding(bottom = 6.dp),
                 )
             }
         }

@@ -14,7 +14,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,6 +43,16 @@ fun AmountDisplay(
     } else {
         amountNaira.toString()
     }
+    // Restore font padding + a Both line-height alignment so descenders (the comma in
+    // "2,000") have room — without these, the comma reads as a blank gap in tight tiles.
+    val figureStyle = style.copy(
+        color = color,
+        platformStyle = PlatformTextStyle(includeFontPadding = true),
+        lineHeightStyle = LineHeightStyle(
+            alignment = LineHeightStyle.Alignment.Center,
+            trim = LineHeightStyle.Trim.None,
+        ),
+    )
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.Top,
@@ -57,7 +69,7 @@ fun AmountDisplay(
         )
         Text(
             text = figure,
-            style = style.copy(color = color),
+            style = figureStyle,
         )
     }
 }

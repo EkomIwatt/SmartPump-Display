@@ -38,8 +38,8 @@ import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.Surface
@@ -75,15 +75,6 @@ fun AttendantPanel(
         ) {
             Column {
                 LabelText(text = "Attendant · interface")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "Three actions.",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = TextPrimary,
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    HeroSerifText(text = "Swipe down to dismiss.")
-                }
             }
             // Pull-tab affordance: tappable area to dismiss without a swipe.
             Box(
@@ -128,7 +119,7 @@ fun AttendantPanel(
                     .weight(1f)
                     .fillMaxHeight(),
                 enabled = cashFixedEnabled,
-                accent = PrimaryAmber,
+                accent = BrandBlue,
                 label = "Action 2 · fixed cash",
                 title = "AUTHORISE CASH ₦…",
                 actionLabel = "ENTER AMOUNT",

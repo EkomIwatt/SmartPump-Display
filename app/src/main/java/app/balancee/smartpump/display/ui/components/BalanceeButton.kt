@@ -46,12 +46,20 @@ fun BalanceeButton(
     modifier: Modifier = Modifier,
     variant: BalanceeButtonVariant = BalanceeButtonVariant.Primary,
     enabled: Boolean = true,
+    accentColor: Color? = null,
 ) {
     val shape = RoundedCornerShape(Dimensions.cornerButton)
     val (bg, fg, borderColor) = when {
         !enabled -> Triple(Color.Transparent, TextTertiary, BorderSubtle)
+        // Primary with accentColor: filled in the accent (used on receipt screens so the
+        // "Share receipt" button takes the same gold/green as the card border).
+        variant == BalanceeButtonVariant.Primary && accentColor != null ->
+            Triple(accentColor, OnPrimary, accentColor)
         variant == BalanceeButtonVariant.Primary -> Triple(PrimaryAmber, OnPrimary, PrimaryAmber)
         variant == BalanceeButtonVariant.Brand -> Triple(BrandBlue, OnBrand, BrandBlue)
+        // Secondary with accentColor: outline + label in the accent (used by
+        // "Return to Idle" so it matches the receipt border).
+        accentColor != null -> Triple(Color.Transparent, accentColor, accentColor)
         else -> Triple(Color.Transparent, TextPrimary, BorderSubtle)
     }
 

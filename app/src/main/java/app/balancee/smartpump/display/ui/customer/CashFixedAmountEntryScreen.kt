@@ -35,7 +35,8 @@ import app.balancee.smartpump.display.ui.components.NumericKeypad
 import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.ActiveCyan
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -68,7 +69,7 @@ fun CashFixedAmountEntryScreen(
             pumpId = pumpId,
             mode = "Cash · fixed",
             stateLabel = "Authorising",
-            stateColor = PrimaryAmber,
+            stateColor = ActiveCyan,
         )
 
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -92,26 +93,26 @@ fun CashFixedAmountEntryScreen(
             horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
         ) {
             BalanceeCard(
-                borderColor = PrimaryAmber,
+                borderColor = BrandBlue,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    LabelText(text = "Cash amount", color = PrimaryAmber)
+                    LabelText(text = "Cash amount", color = ActiveCyan)
                     Box(modifier = Modifier.fillMaxWidth()) {
                         AmountDisplay(
                             amountNaira = draft,
-                            color = PrimaryAmber,
+                            color = BrandBlue,
                             style = MaterialTheme.typography.displayMedium,
                         )
                     }
 
-                    LabelText(text = "Litres cutoff", color = PrimaryAmber)
+                    LabelText(text = "Litres cutoff", color = BrandBlue)
                     Box(modifier = Modifier.fillMaxWidth()) {
                         LitresDisplay(
                             litres = litresCutoff,
-                            color = PrimaryAmber,
+                            color = BrandBlue,
                             style = MaterialTheme.typography.displaySmall,
                         )
                     }
@@ -159,6 +160,7 @@ fun CashFixedAmountEntryScreen(
             label = if (draft > 0) "Authorise cash ₦${formatGrouped(draft)}" else "Authorise cash",
             onClick = { if (valid) onAuthorise(draft) },
             enabled = valid,
+            variant = BalanceeButtonVariant.Brand,
             modifier = Modifier.fillMaxWidth(),
         )
     }

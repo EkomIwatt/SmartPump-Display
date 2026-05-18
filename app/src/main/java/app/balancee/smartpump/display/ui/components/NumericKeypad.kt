@@ -34,7 +34,7 @@ import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.DisplayMono
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.Surface
 import app.balancee.smartpump.display.ui.theme.SurfaceVariant
@@ -102,7 +102,7 @@ fun NumericKeypad(
                 height = cellHeight,
                 modifier = Modifier.weight(1f),
                 onClick = onConfirm,
-                accentColor = PrimaryAmber,
+                accentColor = BrandBlue,
                 filled = true,
                 enabled = confirmEnabled,
             )

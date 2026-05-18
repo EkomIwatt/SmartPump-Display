@@ -30,9 +30,11 @@ import app.balancee.smartpump.display.ui.components.CodePanel
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.LedgerRow
 import app.balancee.smartpump.display.ui.components.PumpHeader
+import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.DisplayMono
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.PrimaryAmber
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
@@ -60,7 +62,7 @@ fun UssdAwaitingSmsScreen(
             pumpId = pumpId,
             mode = "USSD · offline",
             stateLabel = "Awaiting SMS",
-            stateColor = PrimaryAmber,
+            stateColor = ActiveCyan,
         )
 
         Row(
@@ -103,19 +105,19 @@ private fun DialCodeCard(
     modifier: Modifier = Modifier,
 ) {
     BalanceeCard(
-        borderColor = PrimaryAmber,
+        borderColor = BrandBlue,
         modifier = modifier,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            LabelText(text = "Dial this code", color = PrimaryAmber)
+            LabelText(text = "Dial this code", color = BrandBlue)
             Text(
                 text = gtBankCode(amountNaira, txnRef),
                 style = MaterialTheme.typography.headlineLarge.copy(
                     fontFamily = DisplayMono,
-                    color = PrimaryAmber,
+                    color = BrandBlue,
                 ),
             )
             Text(
@@ -152,15 +154,15 @@ private fun WaitingCard(
     modifier: Modifier = Modifier,
 ) {
     BalanceeCard(
-        borderColor = PrimaryAmber,
+        borderColor = BrandBlue,
         modifier = modifier,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                LabelText(text = "Waiting for SMS confirmation", color = PrimaryAmber)
+                LabelText(text = "Waiting for SMS confirmation", color = BrandBlue)
                 AmountDisplay(
                     amountNaira = amountNaira,
-                    color = PrimaryAmber,
+                    color = BrandBlue,
                     style = MaterialTheme.typography.displayMedium,
                 )
             }

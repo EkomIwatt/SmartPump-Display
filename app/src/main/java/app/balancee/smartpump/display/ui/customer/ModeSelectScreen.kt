@@ -31,6 +31,7 @@ import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -80,7 +81,7 @@ fun ModeSelectScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                accent = PrimaryAmber,
+                accent = BrandBlue,
                 title = "Pre-pay",
                 heroLine = "Fixed amount, pay before fuel flows.",
                 bullets = listOf(
@@ -142,6 +143,7 @@ private fun ModeCard(
                 BalanceeButton(
                     label = "Choose $title",
                     onClick = onClick,
+                    variant = BalanceeButtonVariant.Brand,
                     modifier = Modifier.align(Alignment.CenterStart),
                 )
             }

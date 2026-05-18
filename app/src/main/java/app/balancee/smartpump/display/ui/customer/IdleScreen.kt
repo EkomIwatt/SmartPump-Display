@@ -62,7 +62,7 @@ fun IdleScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                HeroSerifText(text = "balanceè", color = BrandBlue)
+                HeroSerifText(text = "Balanceè", color = BrandBlue)
                 Text(
                     text = "Smart pump · pay any way",
                     style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),

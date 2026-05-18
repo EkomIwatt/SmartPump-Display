@@ -39,6 +39,8 @@ import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.ActiveCyan
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -174,8 +176,8 @@ private fun PresetTile(
             LabelText(text = "Amount")
             AmountDisplay(
                 amountNaira = amount,
-                color = PrimaryAmber,
-                style = MaterialTheme.typography.displaySmall,
+                color = BrandBlue,
+                style = MaterialTheme.typography.headlineLarge,
             )
         }
     }
@@ -187,18 +189,18 @@ private fun CustomTile(
     modifier: Modifier = Modifier,
 ) {
     BalanceeCard(
-        borderColor = PrimaryAmber,
+        borderColor = ActiveCyan,
         modifier = modifier.clickable(onClick = onClick),
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LabelText(text = "Custom", color = PrimaryAmber)
+            LabelText(text = "Custom", color = ActiveCyan)
             Text(
                 text = "Enter ₦",
                 style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = PrimaryAmber,
+                color = ActiveCyan,
             )
             Text(
                 text = "Type any amount on the keypad.",
@@ -223,7 +225,7 @@ private fun CustomAmountPanel(
         horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
     ) {
         BalanceeCard(
-            borderColor = PrimaryAmber,
+            borderColor = BrandBlue,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxSize(),
@@ -231,11 +233,11 @@ private fun CustomAmountPanel(
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                LabelText(text = "Custom amount", color = PrimaryAmber)
+                LabelText(text = "Custom amount", color = ActiveCyan)
                 Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     AmountDisplay(
                         amountNaira = draft,
-                        color = PrimaryAmber,
+                        color = BrandBlue,
                         style = MaterialTheme.typography.displayMedium,
                     )
                 }

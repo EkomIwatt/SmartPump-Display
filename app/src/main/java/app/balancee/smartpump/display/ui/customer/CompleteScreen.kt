@@ -8,18 +8,27 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.ui.components.BalanceeButton
@@ -35,6 +44,8 @@ import app.balancee.smartpump.display.ui.theme.PrimaryAmber
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+
+private const val AUTO_RETURN_SECONDS = 60
 
 @Composable
 fun CompleteScreen(
@@ -56,6 +67,19 @@ fun CompleteScreen(
         else -> SuccessGreen
     }
 
+    // Screen-local auto-return countdown — Complete is terminal on boot (bootResume resets
+    // to Idle), so no persistence needed for the timer. Any tap on Share Receipt resets it
+    // so a customer who wants to share multiple times never runs out of time.
+    var secondsRemaining by remember(txnId) { mutableIntStateOf(AUTO_RETURN_SECONDS) }
+    LaunchedEffect(txnId, secondsRemaining) {
+        if (secondsRemaining > 0) {
+            delay(1_000L)
+            secondsRemaining -= 1
+        } else {
+            onDismiss()
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -74,29 +98,35 @@ fun CompleteScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            contentAlignment = Alignment.Center,
+            contentAlignment = Alignment.TopCenter,
         ) {
             BalanceeCard(
                 borderColor = accent,
                 modifier = Modifier.sizeIn(maxWidth = 520.dp),
             ) {
+                // The receipt's content can run taller than a phone-landscape viewport
+                // (5-line ledger for digital flows + buttons + countdown), so the inner
+                // column scrolls if it has to. Tighter spacing keeps it fitting on tablets
+                // without needing to scroll.
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
                         text = "✓",
                         style = MaterialTheme.typography.displayLarge.copy(color = accent),
                     )
-                    HeroSerifText(text = "Done.", color = PrimaryAmber)
+                    HeroSerifText(text = "Done.", color = accent)
                     LabelText(text = "Transaction complete")
 
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                            .padding(top = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         LedgerRow(label = "Litres", value = "%.2f L".format(litres))
                         LedgerRow(label = "Paid", value = "₦${formatNaira(amountNaira)}")
@@ -111,21 +141,36 @@ fun CompleteScreen(
                         LedgerRow(label = "Txn", value = txnId)
                     }
 
+                    // Two paired actions side-by-side. Share-receipt only shares — never
+                    // dismisses — and tapping it resets the auto-return countdown so the
+                    // customer can share multiple times without timing out. Return to Idle
+                    // is the explicit dismissal; the countdown text below also auto-returns.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        BalanceeButton(
+                            label = "Share receipt",
+                            onClick = {
+                                secondsRemaining = AUTO_RETURN_SECONDS
+                                onShareReceipt()
+                            },
+                            accentColor = accent,
+                            modifier = Modifier.weight(1f),
+                        )
+                        BalanceeButton(
+                            label = "Return to Idle",
+                            onClick = onDismiss,
+                            variant = BalanceeButtonVariant.Secondary,
+                            accentColor = accent,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                     Text(
-                        text = "Receipt sent to WhatsApp. Tap to share again.",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "Returns to idle in ${secondsRemaining}s",
+                        style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
                         textAlign = TextAlign.Center,
-                    )
-
-                    BalanceeButton(
-                        label = "Share receipt",
-                        onClick = onShareReceipt,
-                    )
-                    BalanceeButton(
-                        label = "Done",
-                        onClick = onDismiss,
-                        variant = BalanceeButtonVariant.Secondary,
                     )
                 }
             }

@@ -12,12 +12,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -28,11 +31,12 @@ import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.LedgerRow
 import app.balancee.smartpump.display.ui.components.LitresDisplay
 import app.balancee.smartpump.display.ui.components.PumpHeader
+import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.PrimaryAmber
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
-import app.balancee.smartpump.display.ui.theme.SuccessGreen
+import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 
@@ -48,8 +52,8 @@ fun FixedDispensingScreen(
     pumpId: String = "Pump 1",
 ) {
     val isCash = flow == TransactionFlow.CASH_FIXED
-    val figureColor = if (isCash) PrimaryAmber else SuccessGreen
-    val borderColor = if (isCash) PrimaryAmber else SuccessGreen
+    val figureColor = if (isCash) PrimaryAmber else ActiveCyan
+    val borderColor = if (isCash) PrimaryAmber else ActiveCyan
     val progressFraction = if (litresAuthorised > 0) {
         (litresSoFar / litresAuthorised).coerceIn(0.0, 1.0)
     } else 0.0
@@ -96,6 +100,7 @@ fun FixedDispensingScreen(
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
                 )
+                ProgressBar(fraction = progressFraction.toFloat(), color = figureColor)
                 Box(modifier = Modifier.weight(1f))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -136,6 +141,32 @@ fun FixedDispensingScreen(
             color = TextSecondary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun ProgressBar(
+    fraction: Float,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    val safe = fraction.coerceIn(0f, 1f)
+    val shape = RoundedCornerShape(3.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .clip(shape)
+            .background(SurfaceVariant),
+    ) {
+        // Industrial-brutalism — sharp tick, no animation. State-colour fill on top of
+        // a flat track surface; reads under direct sunlight at glance distance.
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(safe)
+                .background(color),
         )
     }
 }
