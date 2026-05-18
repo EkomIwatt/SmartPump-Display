@@ -21,7 +21,7 @@ The screenshots under `docs/Strict design screens/` are authoritative. This file
 - **Active cyan (dispensing / filling):** `#4FD1C5` — fill-up dispensing cards, hero numbers in fill mode
 - **Success green:** `#48BB78` — CONFIRMED / PAID / COMPLETE states, green-bordered completion cards
 - **Warning red:** `#F56565` — error banners, "V1 REQUIRED" badges
-- **Brand blue (cover only):** `#1B3FB8` — used on the spec cover; not used in the runtime app
+- **Brand blue:** `#1B3FB8` — Balanceè brand surface. Used on the **Idle screen** (card border, "balanceè" wordmark, "Start Transaction" CTA) and the Balanceè logo. Also on the spec cover. The Idle screen is the only place the brand-blue dominates — once a transaction starts, the canvas hands over to the per-state accents (amber / cyan / green). Pair with `OnBrand` (`#F7F7F8`) for text on blue.
 
 ### Text
 - **Primary:** `#F7F7F8`
@@ -80,7 +80,7 @@ The state's chip pill (top-left of card) uses the same color, filled with ~15% a
 ## Component primitives
 
 - **`BalanceeCard`** — surface background, 1dp border (color from state), 12dp radius, 24dp internal padding. The border-color parameter is required.
-- **`BalanceeButton`** — primary variant: amber bg, dark text, 64dp tall, all-caps label. Secondary variant: transparent bg, border-subtle border, text-primary label. Disabled: text-tertiary, border-subtle, no fill.
+- **`BalanceeButton`** — primary variant: amber bg, dark text, 64dp tall, all-caps label (AUTHORISE-style actions inside flows). Secondary variant: transparent bg, border-subtle border, text-primary label. Brand variant: brand-blue bg, light text — used by the Idle-screen "Start Transaction" CTA only. Disabled: text-tertiary, border-subtle, no fill.
 - **`LitresDisplay`** — giant monospace number (e.g. "3.42") with "L" appended in text-secondary at ~40% of the number size. Color follows state (cyan for fill-up, green for confirmed, gold for cash-fixed).
 - **`AmountDisplay`** — same scale as `LitresDisplay` but with the ₦ prefix. Used for the cash-fixed and post-fill QR screens.
 - **`StateChip`** — 6dp radius pill, padding 4dp/8dp, all-caps label in label type. Filled color from the state table at ~15% alpha. Outline 1dp at full color. Includes a 6dp leading dot at full color (e.g. `• WAITING`).

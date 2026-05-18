@@ -19,12 +19,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.components.BalanceeButton
+import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.HeroSerifText
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -50,7 +52,7 @@ fun IdleScreen(
         )
 
         BalanceeCard(
-            borderColor = BorderSubtle,
+            borderColor = BrandBlue,
             modifier = Modifier
                 .align(Alignment.Center)
                 .sizeIn(maxWidth = 520.dp),
@@ -60,7 +62,7 @@ fun IdleScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                HeroSerifText(text = "balanceè")
+                HeroSerifText(text = "balanceè", color = BrandBlue)
                 Text(
                     text = "Smart pump · pay any way",
                     style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),
@@ -70,6 +72,7 @@ fun IdleScreen(
                 BalanceeButton(
                     label = "Start transaction",
                     onClick = onStartTransaction,
+                    variant = BalanceeButtonVariant.Brand,
                     modifier = Modifier.width(360.dp),
                 )
                 Text(

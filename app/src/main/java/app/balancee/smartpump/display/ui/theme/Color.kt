@@ -14,7 +14,8 @@ val BorderSubtle = Color(0xFF2A2A38)        // 1dp card borders — crisp, not s
 // — Brand / action ————————————————————————————————————————————————————————
 val PrimaryAmber = Color(0xFFF5A623)        // AUTHORISE / cash / waiting — the money colour
 val OnPrimary = Color(0xFF0A0A0F)           // Dark text on amber buttons
-val BrandBlue = Color(0xFF1B3FB8)           // Spec cover only — not used at runtime
+val BrandBlue = Color(0xFF1B3FB8)           // Balanceè brand — Idle screen surface, brand-CTA buttons, spec cover
+val OnBrand = Color(0xFFF7F7F8)             // Light text on brand-blue buttons
 
 // — Semantic states ———————————————————————————————————————————————————————
 val ActiveCyan = Color(0xFF4FD1C5)          // Fill-up dispensing — live count

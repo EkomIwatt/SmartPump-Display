@@ -1,7 +1,8 @@
-// Two button variants for the kiosk:
-//  - Primary: amber background, dark text, 64dp tall — money / authorise actions.
+// Three button variants for the kiosk:
+//  - Primary: amber background, dark text, 64dp tall — money / authorise actions inside flows.
 //  - Secondary: transparent with border-subtle, text-primary label — neutral actions.
-// Both render an all-caps label and disable to a tertiary-text outlined ghost.
+//  - Brand: brand-blue background, light text — Idle-screen "Start Transaction" and other brand CTAs.
+// All render an all-caps label and disable to a tertiary-text outlined ghost.
 package app.balancee.smartpump.display.ui.components
 
 import androidx.compose.foundation.background
@@ -26,7 +27,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
+import app.balancee.smartpump.display.ui.theme.OnBrand
 import app.balancee.smartpump.display.ui.theme.OnPrimary
 import app.balancee.smartpump.display.ui.theme.PrimaryAmber
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
@@ -34,7 +37,7 @@ import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
 import java.util.Locale
 
-enum class BalanceeButtonVariant { Primary, Secondary }
+enum class BalanceeButtonVariant { Primary, Secondary, Brand }
 
 @Composable
 fun BalanceeButton(
@@ -48,6 +51,7 @@ fun BalanceeButton(
     val (bg, fg, borderColor) = when {
         !enabled -> Triple(Color.Transparent, TextTertiary, BorderSubtle)
         variant == BalanceeButtonVariant.Primary -> Triple(PrimaryAmber, OnPrimary, PrimaryAmber)
+        variant == BalanceeButtonVariant.Brand -> Triple(BrandBlue, OnBrand, BrandBlue)
         else -> Triple(Color.Transparent, TextPrimary, BorderSubtle)
     }
 
@@ -80,6 +84,11 @@ private fun BalanceeButtonPreview() {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             BalanceeButton(label = "Authorise ₦5,000", onClick = {})
+            BalanceeButton(
+                label = "Start transaction",
+                onClick = {},
+                variant = BalanceeButtonVariant.Brand,
+            )
             BalanceeButton(
                 label = "Cancel transaction",
                 onClick = {},
