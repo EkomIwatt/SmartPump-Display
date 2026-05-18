@@ -459,3 +459,35 @@ The pump now remembers what it was doing across a power cut. Every move the stat
 
 **Next:**
 Phase 6 — production wiring. Real USB-serial Arduino driver behind `PulseSource`, real Balanceè payment SDK behind `PaymentProcessor`, real SMS `BroadcastReceiver` for Flow 5 GTBank parsing, WorkManager backend sync for the audit table, FCM channel for operator price/config push (or polled HTTP — see OPEN_QUESTIONS #8). Phase 5's `MOCK_HARDWARE`-style flag in `HardwareModule` / `PaymentModule` switches between mocks and prod bindings. Before Phase 6 starts: merge `rebuild/strict-design` → `main` once the manual reboot sweep is clean.
+
+---
+
+### Phase 5 hardening — pre-deployment design polish & UX
+**Date:** 2026-05-18
+**Status:** done
+**Commit(s):** 649ae20 (brand-blue on Idle), cb72110 (design polish)
+
+**Summary (plain language):**
+A pass through every customer-facing screen tightening the visual design and UX before the rebuild branch can merge to `main`. The Idle screen now wears the proper Balanceè blue brand treatment — previously it had drifted to a generic dark card with gold serif text, masking the brand. During dispensing the customer can now see a coloured progress bar fill up as their litres count, not just a percentage in a ledger row. The "Done" receipt at the end gets two clear paired buttons — "Share receipt" and "Return to Idle", both coloured to match the receipt's theme — and the screen auto-returns to idle after a minute so the pump is ready for the next customer if they walk away. A misleading line that claimed the receipt had been sent to WhatsApp was removed (no WhatsApp integration exists yet; that's Phase 6). The app also now runs in proper kiosk mode — no Android status bar or navigation bar showing, the screen stays on, and the hardware back button is disabled so a customer can't accidentally exit the app. No state-machine or persistence changes — UI and lifecycle only.
+
+**Technical notes:**
+- **`ui/theme/Color.kt`** — corrected `BrandBlue` comment (was wrongly marked "spec cover only — not used at runtime"); added `OnBrand = #F7F7F8` for light text on brand-blue surfaces.
+- **`ui/components/BalanceeButton.kt`** — new `Brand` variant (blue bg, light text). Optional `accentColor: Color?` param overrides both the Primary fill *and* the Secondary outline, so receipt buttons can track the flow accent (gold for Flow 1, green elsewhere).
+- **`ui/customer/IdleScreen.kt`** — card border, "Balanceè" wordmark, and "Start transaction" CTA all switched to `BrandBlue`. Wordmark capitalisation fixed (was "balanceè").
+- **`ui/components/AmountDisplay.kt`** — figure text now sets `PlatformTextStyle(includeFontPadding = true)` + `LineHeightStyle(alignment = Center, trim = None)`. Without these, the comma in "2,000" was painted outside the line box and read as a blank gap on tight tiles. Component-level fix — every caller inherits it.
+- **`ui/customer/FixedDispensingScreen.kt`** — new thin horizontal `ProgressBar` (Box-based, no Material `LinearProgressIndicator` so the styling stays industrial-brutalist). Tracks `litresSoFar / litresAuthorised`, tinted in the state colour.
+- **`ui/customer/CompleteScreen.kt`** — serif "Done." + ✓ glyph both render in the flow accent. Bottom action area replaced: now a `Row { Share receipt | Return to Idle }` with `weight(1f)` per button + 12dp gap; both styled with `accentColor = accent`. Screen-local 60-second auto-return countdown via `LaunchedEffect` (no VM/persistence touch — `Complete` is terminal on boot already); pressing Share Receipt resets the countdown so multiple shares don't time out. Inner column wraps in `verticalScroll(rememberScrollState())` + tighter `spacedBy(12.dp)` so the 5-row pre-pay receipt no longer clips its buttons on phone-landscape viewports. Misleading "Receipt sent to WhatsApp" copy removed — the share channel is a Phase 6 / OPEN_QUESTIONS #14 decision.
+- **`ui/customer/PrepayMethodSelectScreen.kt`** — chrome moved to brand-blue (header state-chip + "Pre-pay amount" label and display). Per-method tile accents stay so each payment channel keeps its identity colour. Amount column gains bottom padding so the displaySmall descender doesn't clip.
+- **`ui/customer/PrepayAmountSelectScreen.kt`** — preset tile figure dropped from `displaySmall` (36sp) to `headlineLarge` (32sp); the AmountDisplay fix above handles the comma either way, but `displaySmall` was always tight in a three-column tile grid.
+- **`ui/customer/CashFixedAmountEntryScreen.kt`** — bottom full-width "Authorise cash ₦X,XXX" button switched to the Brand variant (was Primary/amber). Aligns with the keypad's brand-blue ✓ key.
+- **`ui/attendant/AttendantOverlay.kt`** — `AUTHORISE CASH ₦…` action card accent switched from `PrimaryAmber` to `BrandBlue` when enabled. Was the only attendant action still carrying the legacy gold.
+- **`MainActivity.kt`** — full immersive kiosk mode: `WindowCompat.setDecorFitsSystemWindows(false)`, hide `systemBars` via `WindowInsetsControllerCompat`, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`, `FLAG_KEEP_SCREEN_ON`, and an `OnBackPressedCallback` that swallows the hardware back so a customer can't accidentally exit. `AndroidManifest.xml` already had `screenOrientation="landscape"` and `WAKE_LOCK`; Lock Task Mode (device-owner pinning) remains a deployment step, not code.
+- **`docs/design-system.md`** updated alongside `Color.kt`: `BrandBlue` accent line corrected, `BalanceeButton` primitive description gained the Brand variant.
+- Verified clean via `gradlew :app:compileDebugKotlin` (full recompile via `--rerun-tasks` after the brand-blue change).
+
+**Next:**
+Manual on-device reboot sweep through every non-terminal state (the same 16-state list flagged in the Phase 5 entry above) before `rebuild/strict-design` can merge to `main`. Two follow-up items raised by the user remain open and intentionally not in this commit — both pending a conversation with the operator:
+- **Fill-up STOP DISPENSE action.** Add a fourth attendant overlay action enabled only in `FillupDispensing`, for defence-in-depth on top of the mechanical nozzle shutoff + 3s software watchdog. Report written for the operator (`reports/Fillup-Terminate-Note.pdf`).
+- **Attendant / debug-screen PIN gate.** Today anyone can swipe up and authorise a free fill-up, or long-press top-left to re-price the pump. Tracked in OPEN_QUESTIONS #19; user is raising with the operator.
+
+After the reboot sweep and those two decisions land, `rebuild/strict-design` → `main`, then Phase 6 (production hardware/payment wiring).
