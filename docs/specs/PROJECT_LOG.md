@@ -616,7 +616,7 @@ Phase 6b — Flow 1 (Fixed Pre-pay Digital) polish against `docs/Strict design s
 ### Phase 6a follow-up — Idle copy + divider + Compose preview fix
 **Date:** 2026-05-23
 **Status:** done
-**Commit(s):** uncommitted
+**Commit(s):** bd11a67
 
 **Summary (plain language):**
 Two things rolled into one commit. First, an on-device side-by-side of the Idle screen vs the strict-design mockup (Ekomobong dropped both into `docs/compare/`) turned up four small polish gaps: the subtitle copy, a missing horizontal divider, the action label, and the attendant hint. The wordmark style and the missing droplet icon are *intentional* divergences — boss directed station logo/name in place of any Balanceè branding — so those stay as-is; the rest is now aligned. Second, the Android Studio @Preview canvas was rendering blank for any composable that touched our typography. The cause is structural: Google Fonts uses a downloadable provider that depends on Google Play Services, which doesn't exist in the AS preview sandbox. The theme now detects inspection mode and swaps to system serif / sans / mono just for previews — runtime is unchanged.
