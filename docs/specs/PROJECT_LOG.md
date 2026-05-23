@@ -539,7 +539,7 @@ Phase 5d — typography & palette refresh. Add `res/font/` xml resources for Pla
 ### Phase 5d (rebuild) — Typography & palette refresh
 **Date:** 2026-05-23
 **Status:** done
-**Commit(s):** uncommitted
+**Commit(s):** d2e8344
 
 **Summary (plain language):**
 The pump app now wears the brand fonts and the new colour palette the boss specified. Headings and body text use Outfit (a clean modern sans), hero phrases use Playfair Display Italic (a high-contrast serif), and every number on the screen — litres, naira amounts, transaction IDs — uses JetBrains Mono. None of the .ttf files are shipped in the app; the fonts download once per device from Google Fonts via Play Services and stay cached. The gold accent shifts from a vibrant fintech orange to a more muted brass (`#C8A84B`), the brand blue deepens (`#1034A6`), the background warms slightly (`#0B0B0A`), and the body text drops to a warmer off-white. The orange the boss mentioned (`#D4622A`) is reserved in the palette but not used anywhere — it'll get a callsite when there's a screen that needs it.
