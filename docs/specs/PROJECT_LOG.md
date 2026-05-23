@@ -585,3 +585,28 @@ Phase 6 — strict-design screen-matching polish series. A side-by-side review o
 - **Phase 6g** — Attendant overlay polish (`225136.png`)
 
 After Phase 6, manual visual review on a real device, boss sign-off, then merge `rebuild/strict-design` → `main`. Then Phase 7 (production wiring — USB serial Arduino driver, real Balanceè payment SDK, SMS `BroadcastReceiver` for Flow 5 GTBank parsing, WorkManager backend sync for the audit table, FCM/HTTP channel for operator price/config push, including the cashier-tablet → pump PIN-push channel deferred from Phase 5c). Phase 6 was previously slated as the production-wiring phase; renumbered 2026-05-23 to make room for the strict-design polish series.
+
+---
+
+### Phase 6a (rebuild) — Idle + Mode Select polish vs strict-design
+**Date:** 2026-05-23
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+Tiny chrome polish to bring the Idle and Mode-Select screens visually closer to the strict-design spec page (`docs/Strict design screens/Screenshot 2026-05-11 224941.png`). The top-of-screen state pill on both screens is now brand-blue instead of the grey "border-subtle" default — that's the colour the rest of the Idle chrome already wears (card border, "Start Transaction" button, station-name serif fallback), so the pill matching it removes a tiny visual disagreement. On Mode Select, the pill now reads "MODE SELECT" instead of the older "CHOOSING" — same colour, just clearer. And inside each of the two Mode-Select tiles, the "Choose Pre-pay" / "Choose Fill up" buttons now wear their tile's accent (gold for Pre-pay, cyan for Fill up) instead of being uniformly brand-blue, so each tile feels like its own atomic call to action.
+
+**Technical notes:**
+- `ui/customer/IdleScreen.kt` — `PumpHeader.stateColor` switched from `BorderSubtle` → `BrandBlue`. Unused `BorderSubtle` import removed.
+- `ui/customer/ModeSelectScreen.kt` — `PumpHeader.stateColor` `BorderSubtle` → `BrandBlue` and `stateLabel` `"Choosing"` → `"Mode select"` so the header reads `PUMP 1 · MODE SELECT` with a matching `● MODE SELECT` pill. Unused `BorderSubtle` import removed.
+- `ui/customer/ModeSelectScreen.kt` `ModeCard` button — variant `Brand` → `Primary` with `accentColor = accent` (the tile's border colour). `BalanceeButton.kt` already supports this: `variant == Primary && accentColor != null → Triple(accentColor, OnPrimary, accentColor)` — fills the button in the accent and uses `OnPrimary` (#0B0B0A) as the label colour, which has good contrast against both `PrimaryGold` and `ActiveCyan`. No primitive change needed; just calling the existing surface.
+- `docs/design-system.md` state-color → border table left unchanged — `IDLE / default → border-subtle` describes generic non-state cards (e.g. the centred `BalanceeCard` background on Idle screen). The PumpHeader pill is a separate semantic surface: it labels the screen chrome, not a transaction state, and on Idle / Mode Select the chrome is brand-blue.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+
+**Out of scope (intentionally):**
+- The Idle screen's `BalanceeCard` background — spec mockup is small and ambiguous between "dark fill with blue border" (current) and "blue fill". Leaving as-is until a higher-res spec or a boss decision lands; the current rendering already reads as brand-chrome dominant.
+- The "Smart pump · pay any way" tagline and "Tap to fuel" label — already matched.
+- Mode Select cancel button — spec shows a generic "Cancel" secondary at the bottom; current matches.
+
+**Next:**
+Phase 6b — Flow 1 (Fixed Pre-pay Digital) polish against `docs/Strict design screens/Screenshot 2026-05-11 224956.png`. Highest-value visible flow (V1 hero); divergences I've spotted so far: pre-pay QR screen currently splits into two cards, spec shows one; ledger row ordering may differ; the FixedDispensing screen's running-amount layout vs the spec's compact "LITRES DISPENSED · of 5.75 L authorised" line.

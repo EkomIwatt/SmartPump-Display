@@ -28,7 +28,6 @@ import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
-import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.BrandBlue
@@ -54,8 +53,8 @@ fun ModeSelectScreen(
         PumpHeader(
             pumpId = pumpId,
             mode = "Mode select",
-            stateLabel = "Choosing",
-            stateColor = BorderSubtle,
+            stateLabel = "Mode select",
+            stateColor = BrandBlue,
         )
 
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -140,10 +139,14 @@ private fun ModeCard(
                 }
             }
             Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                // Tile-coloured action — gold for Pre-pay, cyan for Fill up. Each tile is
+                // its own atomic CTA; using the tile's accent makes that explicit and
+                // matches the strict-design mockup.
                 BalanceeButton(
                     label = "Choose $title",
                     onClick = onClick,
-                    variant = BalanceeButtonVariant.Brand,
+                    variant = BalanceeButtonVariant.Primary,
+                    accentColor = accent,
                     modifier = Modifier.align(Alignment.CenterStart),
                 )
             }

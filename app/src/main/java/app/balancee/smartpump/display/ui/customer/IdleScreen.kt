@@ -37,7 +37,6 @@ import app.balancee.smartpump.display.ui.components.HeroSerifText
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.Background
-import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
@@ -61,7 +60,7 @@ fun IdleScreen(
             pumpId = pumpId,
             mode = "Idle",
             stateLabel = "Idle",
-            stateColor = BorderSubtle,
+            stateColor = BrandBlue,
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
