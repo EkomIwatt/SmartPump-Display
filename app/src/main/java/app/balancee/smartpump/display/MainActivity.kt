@@ -2,7 +2,12 @@
 // TransactionState. The attendant overlay (Phase 4a) wraps it from outside: a bottom-edge
 // swipe-up affordance exposes the three attendant actions (FILL UP AUTHORISE, AUTHORISE
 // CASH ₦…, CASH RECEIVED) — each state-gated against the underlying TransactionState.
-// The debug screen (Phase 4b) is reachable via a long-press on a hidden top-left hotspot.
+// Each action goes through a 4-digit PIN modal (Phase 5c) before firing; debug builds can
+// bypass the modal via the debug-screen toggle.
+//
+// Phase 5c also gates the whole activity on station provisioning. Until the operator
+// finishes onboarding the device is locked into OnboardingScreen; the debug long-press
+// hotspot is the only escape.
 package app.balancee.smartpump.display
 
 import android.os.Bundle
@@ -11,6 +16,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,6 +40,10 @@ import app.balancee.smartpump.display.ui.attendant.AttendantOverlayHost
 import app.balancee.smartpump.display.ui.customer.CustomerStateHost
 import app.balancee.smartpump.display.ui.customer.CustomerViewModel
 import app.balancee.smartpump.display.ui.debug.DebugScreen
+import app.balancee.smartpump.display.ui.onboarding.GateState
+import app.balancee.smartpump.display.ui.onboarding.IdentityGateViewModel
+import app.balancee.smartpump.display.ui.onboarding.OnboardingScreen
+import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -73,8 +83,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun SmartPumpRoot(
     customerVm: CustomerViewModel = hiltViewModel(),
+    gateVm: IdentityGateViewModel = hiltViewModel(),
 ) {
     val uiState by customerVm.ui.collectAsState()
+    val gateState by gateVm.state.collectAsState()
+    val pinBypass by gateVm.pinBypassEnabled.collectAsState()
     var debugVisible by rememberSaveable { mutableStateOf(false) }
 
     if (debugVisible) {
@@ -86,32 +99,51 @@ private fun SmartPumpRoot(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AttendantOverlayHost(
-            state = uiState.state,
-            onAttendantFillUp = customerVm::onAttendantFillUpAuthorise,
-            onAttendantCashFixed = customerVm::onAttendantCashFixed,
-            onAttendantCashReceived = customerVm::onAttendantCashReceived,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            CustomerStateHost(
-                uiState = uiState,
-                onStartTransaction = customerVm::onStartTransaction,
-                onSelectPrePay = customerVm::onSelectPrePay,
-                onSelectFillUp = customerVm::onSelectFillUp,
-                onPrepayAmountChosen = customerVm::onPrepayAmountChosen,
-                onPrepayMethodChosen = customerVm::onPrepayMethodChosen,
-                onCashFixedAuthorise = customerVm::onCashFixedAuthorise,
-                onFillupPayCash = customerVm::onFillupPayCash,
-                onFillupPayDigital = customerVm::onFillupPayDigital,
-                onShareReceipt = customerVm::onShareReceipt,
-                onDismissComplete = customerVm::onDismissComplete,
-                onCancel = customerVm::onCancel,
-                modifier = Modifier.fillMaxSize(),
-            )
+        when (val gate = gateState) {
+            GateState.Loading -> {
+                // Brief — first-frame while we read the identity row. A blank background
+                // is fine; the gate flips within a single coroutine tick on warm starts.
+                Box(modifier = Modifier.fillMaxSize().background(Background))
+            }
+
+            GateState.NotProvisioned -> {
+                OnboardingScreen(modifier = Modifier.fillMaxSize())
+            }
+
+            is GateState.Provisioned -> {
+                AttendantOverlayHost(
+                    state = uiState.state,
+                    onAttendantFillUp = customerVm::onAttendantFillUpAuthorise,
+                    onAttendantCashFixed = customerVm::onAttendantCashFixed,
+                    onAttendantCashReceived = customerVm::onAttendantCashReceived,
+                    pinBypassEnabled = pinBypass,
+                    verifyPin = gateVm::verifyPin,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    CustomerStateHost(
+                        uiState = uiState,
+                        identity = gate.identity,
+                        onStartTransaction = customerVm::onStartTransaction,
+                        onSelectPrePay = customerVm::onSelectPrePay,
+                        onSelectFillUp = customerVm::onSelectFillUp,
+                        onPrepayAmountChosen = customerVm::onPrepayAmountChosen,
+                        onPrepayMethodChosen = customerVm::onPrepayMethodChosen,
+                        onCashFixedAuthorise = customerVm::onCashFixedAuthorise,
+                        onFillupPayCash = customerVm::onFillupPayCash,
+                        onFillupPayDigital = customerVm::onFillupPayDigital,
+                        onShareReceipt = customerVm::onShareReceipt,
+                        onDismissComplete = customerVm::onDismissComplete,
+                        onCancel = customerVm::onCancel,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
+
         // Engineering long-press hotspot — top-left 40dp square. Not visible to attendants
-        // or customers; testers reach the debug screen from here. Sits on top of the
-        // attendant overlay layer so it's reachable in any state.
+        // or customers; testers reach the debug screen from here. Sits on top of every
+        // gate state including onboarding, so a tester can reset the device without
+        // having to finish a half-broken install.
         DebugLongPressHotspot(
             onOpenDebug = { debugVisible = true },
             modifier = Modifier.align(Alignment.TopStart),

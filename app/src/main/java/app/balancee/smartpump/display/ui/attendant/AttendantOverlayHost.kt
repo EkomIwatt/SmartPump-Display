@@ -50,16 +50,45 @@ private const val OVERLAY_ANIM_MS = 250
 private const val SWIPE_UP_THRESHOLD_DP = 32  // net drag in dp to count as a swipe-up open
 private const val SWIPE_DOWN_THRESHOLD_DP = 48 // net drag in dp on the panel to dismiss
 
+/**
+ * Which action the attendant has tapped. Used to (a) park the requested action while the
+ * PIN modal is showing and (b) pick a contextual modal title.
+ */
+private enum class AttendantAction(val title: String) {
+    FillUp("Authorise FILL UP"),
+    CashFixed("Authorise CASH"),
+    CashReceived("Confirm CASH RECEIVED"),
+}
+
 @Composable
 fun AttendantOverlayHost(
     state: TransactionState,
     onAttendantFillUp: () -> Unit,
     onAttendantCashFixed: () -> Unit,
     onAttendantCashReceived: () -> Unit,
+    pinBypassEnabled: Boolean,
+    verifyPin: suspend (String) -> Boolean,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit,
 ) {
     var visible by rememberSaveable { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf<AttendantAction?>(null) }
+
+    // Fires the action and closes both the modal and the panel. Used by the bypass path
+    // and the PIN-modal success path.
+    fun fireAndDismiss(action: AttendantAction) {
+        when (action) {
+            AttendantAction.FillUp -> onAttendantFillUp()
+            AttendantAction.CashFixed -> onAttendantCashFixed()
+            AttendantAction.CashReceived -> onAttendantCashReceived()
+        }
+        pendingAction = null
+        visible = false
+    }
+
+    fun requestAction(action: AttendantAction) {
+        if (pinBypassEnabled) fireAndDismiss(action) else pendingAction = action
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         // Base customer-facing layer.
@@ -113,12 +142,23 @@ fun AttendantOverlayHost(
             ) {
                 AttendantPanel(
                     state = state,
-                    onFillUpAuthorise = onAttendantFillUp,
-                    onAuthoriseCash = onAttendantCashFixed,
-                    onCashReceived = onAttendantCashReceived,
+                    onFillUpAuthorise = { requestAction(AttendantAction.FillUp) },
+                    onAuthoriseCash = { requestAction(AttendantAction.CashFixed) },
+                    onCashReceived = { requestAction(AttendantAction.CashReceived) },
                     onDismiss = { visible = false },
                 )
             }
+        }
+
+        // PIN gate — sits on top of the panel + scrim. Released action fires inside
+        // fireAndDismiss(), which also tears down the panel.
+        pendingAction?.let { action ->
+            PinEntryModal(
+                title = action.title,
+                onVerify = verifyPin,
+                onSuccess = { fireAndDismiss(action) },
+                onCancel = { pendingAction = null },
+            )
         }
     }
 }

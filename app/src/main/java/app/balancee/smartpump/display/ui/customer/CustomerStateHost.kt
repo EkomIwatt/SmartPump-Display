@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.domain.model.PaymentMethod
+import app.balancee.smartpump.display.domain.model.StationIdentity
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.ui.components.BalanceeButton
@@ -33,6 +34,7 @@ import app.balancee.smartpump.display.ui.theme.WarningRed
 @Composable
 fun CustomerStateHost(
     uiState: CustomerUiState,
+    identity: StationIdentity?,
     onStartTransaction: () -> Unit,
     onSelectPrePay: () -> Unit,
     onSelectFillUp: () -> Unit,
@@ -49,6 +51,8 @@ fun CustomerStateHost(
     when (val state = uiState.state) {
         is TransactionState.Idle -> IdleScreen(
             onStartTransaction = onStartTransaction,
+            displayName = identity?.displayName.orEmpty(),
+            logoBytes = identity?.logoBytes,
             modifier = modifier,
         )
 
@@ -234,6 +238,7 @@ private fun CustomerStateHostIdlePreview() {
     SmartPumpDisplayTheme {
         CustomerStateHost(
             uiState = CustomerUiState(state = TransactionState.Idle, pricePerLitre = 870),
+            identity = null,
             onStartTransaction = {},
             onSelectPrePay = {},
             onSelectFillUp = {},
@@ -260,6 +265,7 @@ private fun CustomerStateHostPrepayAmountPreview() {
     SmartPumpDisplayTheme {
         CustomerStateHost(
             uiState = CustomerUiState(state = TransactionState.PrepayAmountSelect),
+            identity = null,
             onStartTransaction = {},
             onSelectPrePay = {},
             onSelectFillUp = {},

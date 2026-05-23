@@ -102,6 +102,8 @@ fun AttendantPanel(
                 .height(220.dp),
             horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
         ) {
+            // Each card just signals intent. The PIN gate / panel dismissal is owned by
+            // the surrounding AttendantOverlayHost so the modal can sit over the panel.
             ActionCard(
                 modifier = Modifier
                     .weight(1f)
@@ -112,7 +114,7 @@ fun AttendantPanel(
                 title = "FILL UP",
                 actionLabel = "AUTHORISE",
                 helper = "Opens the pump open-ended. Nozzle shuts on 3s flow gap.",
-                onClick = { if (fillUpEnabled) { onFillUpAuthorise(); onDismiss() } },
+                onClick = { if (fillUpEnabled) onFillUpAuthorise() },
             )
             ActionCard(
                 modifier = Modifier
@@ -124,7 +126,7 @@ fun AttendantPanel(
                 title = "AUTHORISE CASH ₦…",
                 actionLabel = "ENTER AMOUNT",
                 helper = "Enter the cash on the keypad. Cuts at the exact litre cutoff.",
-                onClick = { if (cashFixedEnabled) { onAuthoriseCash(); onDismiss() } },
+                onClick = { if (cashFixedEnabled) onAuthoriseCash() },
             )
             ActionCard(
                 modifier = Modifier
@@ -136,7 +138,7 @@ fun AttendantPanel(
                 title = "CASH RECEIVED",
                 actionLabel = "CONFIRM",
                 helper = "Only available after a fill-up completes and the customer pays cash.",
-                onClick = { if (cashReceivedEnabled) { onCashReceived(); onDismiss() } },
+                onClick = { if (cashReceivedEnabled) onCashReceived() },
             )
         }
     }

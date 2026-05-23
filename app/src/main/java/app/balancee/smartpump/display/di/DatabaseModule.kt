@@ -6,12 +6,15 @@ import androidx.room.Room
 import app.balancee.smartpump.display.data.db.DeviceConfigDao
 import app.balancee.smartpump.display.data.db.PulseStateDao
 import app.balancee.smartpump.display.data.db.SmartPumpDatabase
+import app.balancee.smartpump.display.data.db.StationIdentityDao
 import app.balancee.smartpump.display.data.db.TransactionDao
 import app.balancee.smartpump.display.data.repository.DeviceConfigRepositoryImpl
 import app.balancee.smartpump.display.data.repository.PulseRepositoryImpl
+import app.balancee.smartpump.display.data.repository.StationIdentityRepositoryImpl
 import app.balancee.smartpump.display.data.repository.TransactionRepositoryImpl
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
+import app.balancee.smartpump.display.domain.repository.StationIdentityRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import dagger.Binds
 import dagger.Module
@@ -40,6 +43,10 @@ object DatabaseModule {
 
     @Provides
     fun providePulseStateDao(db: SmartPumpDatabase): PulseStateDao = db.pulseStateDao()
+
+    @Provides
+    fun provideStationIdentityDao(db: SmartPumpDatabase): StationIdentityDao =
+        db.stationIdentityDao()
 }
 
 @Module
@@ -54,4 +61,7 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindPulseRepository(impl: PulseRepositoryImpl): PulseRepository
+
+    @Binds @Singleton
+    abstract fun bindStationIdentityRepository(impl: StationIdentityRepositoryImpl): StationIdentityRepository
 }

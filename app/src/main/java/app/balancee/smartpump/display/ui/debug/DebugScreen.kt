@@ -76,6 +76,8 @@ fun DebugScreen(
         onFailureReason = vm::setFailureReason,
         onTriggerInstantResolve = vm::triggerInstantResolve,
         onSaveConfig = vm::saveDeviceConfig,
+        onPinBypass = vm::setPinBypass,
+        onResetOnboarding = vm::resetOnboarding,
         modifier = modifier,
     )
 }
@@ -93,6 +95,8 @@ private fun DebugScreenContent(
     onFailureReason: (String) -> Unit,
     onTriggerInstantResolve: () -> Unit,
     onSaveConfig: (String, String, Long, String?) -> Unit,
+    onPinBypass: (Boolean) -> Unit,
+    onResetOnboarding: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -147,6 +151,17 @@ private fun DebugScreenContent(
             onFailureReason = onFailureReason,
             onTriggerInstantResolve = onTriggerInstantResolve,
         )
+
+        if (state.isDebugBuild) {
+            SecurityCard(
+                pinBypassEnabled = state.pinBypassEnabled,
+                stationId = state.stationId,
+                stationDisplayName = state.stationDisplayName,
+                resetStatus = state.resetStatus,
+                onPinBypass = onPinBypass,
+                onResetOnboarding = onResetOnboarding,
+            )
+        }
 
         DeviceConfigCard(
             current = state.deviceConfig,
@@ -277,6 +292,83 @@ private fun PaymentCard(
 }
 
 @Composable
+private fun SecurityCard(
+    pinBypassEnabled: Boolean,
+    stationId: String?,
+    stationDisplayName: String?,
+    resetStatus: String?,
+    onPinBypass: (Boolean) -> Unit,
+    onResetOnboarding: () -> Unit,
+) {
+    BalanceeCard(borderColor = app.balancee.smartpump.display.ui.theme.BrandBlue) {
+        LabelText(
+            text = "Security · debug builds only",
+            color = app.balancee.smartpump.display.ui.theme.BrandBlue,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Skip PIN modal on attendant actions",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                )
+                Text(
+                    text = if (pinBypassEnabled) {
+                        "ON · attendant actions fire immediately."
+                    } else {
+                        "OFF · each action prompts for the 4-digit PIN."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
+            }
+            Switch(checked = pinBypassEnabled, onCheckedChange = onPinBypass)
+        }
+        Spacer(Modifier.height(16.dp))
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LedgerRow(
+                label = "Station ID",
+                value = stationId ?: "(not provisioned)",
+            )
+            LedgerRow(
+                label = "Display name",
+                value = stationDisplayName ?: "(not provisioned)",
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        BalanceeButton(
+            label = "Re-run onboarding",
+            onClick = onResetOnboarding,
+            variant = BalanceeButtonVariant.Secondary,
+        )
+        Text(
+            text = "Wipes the local station identity. Debug builds auto-seed the Demo " +
+                "identity on the next launch — flip this off only to walk the real " +
+                "install flow once.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        resetStatus?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (it.startsWith("Reset failed")) WarningRed else SuccessGreen,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
 private fun DeviceConfigCard(
     current: app.balancee.smartpump.display.domain.model.DeviceConfig?,
     saveStatus: String?,
@@ -390,6 +482,10 @@ private fun DebugScreenPreview() {
                     autoApprove = true,
                     pendingDelayMs = 3_000L,
                     failureReason = "Mock: payment declined",
+                    pinBypassEnabled = true,
+                    isDebugBuild = true,
+                    stationId = "DEMO-001",
+                    stationDisplayName = "Demo Station",
                 ),
                 onClose = {},
                 onPulsesPerSecond = {},
@@ -401,6 +497,8 @@ private fun DebugScreenPreview() {
                 onFailureReason = {},
                 onTriggerInstantResolve = {},
                 onSaveConfig = { _, _, _, _ -> },
+                onPinBypass = {},
+                onResetOnboarding = {},
                 modifier = Modifier.padding(PaddingValues(0.dp)),
             )
         }
