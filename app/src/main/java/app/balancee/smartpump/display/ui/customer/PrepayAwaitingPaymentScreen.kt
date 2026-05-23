@@ -22,11 +22,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -87,81 +86,91 @@ fun PrepayAwaitingPaymentScreen(
         // Column header above the card.
         LabelText(text = "QR Waiting", color = TextSecondary)
 
-        Box(
+        // Card fills available vertical space; content splits left/right so the QR area
+        // and the ledger sit side-by-side and the card never overflows on landscape.
+        BalanceeCard(
+            borderColor = accent,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            contentAlignment = Alignment.Center,
         ) {
-            BalanceeCard(
-                borderColor = accent,
-                modifier = Modifier.sizeIn(maxWidth = 560.dp),
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Column(
+                // Top row: amount · pump left, WAITING chip right — spans the full card width.
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    // Top row: amount · pump left, WAITING chip right.
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "${formatNairaAmount(amountNaira)} · $pumpId",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                color = TextSecondary,
-                                fontWeight = FontWeight.Medium,
-                            ),
-                        )
-                        StateChip(label = "Waiting", color = accent)
-                    }
+                    Text(
+                        text = "${formatNairaAmount(amountNaira)} · $pumpId",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            color = TextSecondary,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                    )
+                    StateChip(label = "Waiting", color = accent)
+                }
 
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                ) {
+                    // Left column: artefact + captions.
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         LabelText(text = artifactLabel(method), color = TextSecondary)
+                        PaymentArtifact(
+                            method = method,
+                            amountNaira = amountNaira,
+                            txnId = txnId,
+                            accent = accent,
+                        )
+                        Text(
+                            text = methodCaption(method),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
 
-                    PaymentArtifact(
-                        method = method,
-                        amountNaira = amountNaira,
-                        txnId = txnId,
-                        accent = accent,
-                    )
-
-                    Text(
-                        text = methodCaption(method),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    // Ledger — each row separated by a hairline divider per spec.
-                    Column {
+                    // Right column: ledger.
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         HorizontalDivider(color = BorderSubtle)
                         LedgerLine(
                             label = "Amount",
                             value = formatNairaAmount(amountNaira),
-                            modifier = Modifier.padding(vertical = 10.dp),
+                            modifier = Modifier.padding(vertical = 14.dp),
                         )
                         HorizontalDivider(color = BorderSubtle)
                         LedgerLine(
                             label = "Txn",
                             value = txnId,
-                            modifier = Modifier.padding(vertical = 10.dp),
+                            modifier = Modifier.padding(vertical = 14.dp),
                         )
                         HorizontalDivider(color = BorderSubtle)
                         LedgerLine(
                             label = "Expires",
                             value = formatCountdown(expiresInSeconds),
-                            modifier = Modifier.padding(vertical = 10.dp),
+                            modifier = Modifier.padding(vertical = 14.dp),
                         )
+                        HorizontalDivider(color = BorderSubtle)
                     }
-
-                    Spacer(Modifier.weight(1f, fill = false))
                 }
             }
         }
@@ -213,10 +222,10 @@ private fun PaymentArtifact(
         if (method == PaymentMethod.NFC_CARD) {
             NfcTapPrompt(accent = accent)
         } else {
-            Box(modifier = Modifier.width(240.dp)) {
+            Box(modifier = Modifier.width(180.dp)) {
                 QrCodeView(
                     content = qrPayload(method, amountNaira, txnId),
-                    sizeDp = 240.dp,
+                    sizeDp = 180.dp,
                 )
             }
         }
@@ -226,17 +235,17 @@ private fun PaymentArtifact(
 @Composable
 private fun NfcTapPrompt(accent: Color) {
     Column(
-        modifier = Modifier.padding(vertical = 32.dp),
+        modifier = Modifier.padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = "💳", // 💳 credit-card glyph — placeholder until the spec defines an NFC icon.
-            fontSize = 96.sp,
+            fontSize = 72.sp,
         )
         Text(
             text = "Hold card here",
-            style = MaterialTheme.typography.titleLarge.copy(
+            style = MaterialTheme.typography.titleMedium.copy(
                 color = accent,
                 fontWeight = FontWeight.SemiBold,
             ),
