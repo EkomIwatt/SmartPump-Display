@@ -591,7 +591,7 @@ After Phase 6, manual visual review on a real device, boss sign-off, then merge 
 ### Phase 6a (rebuild) — Idle + Mode Select polish vs strict-design
 **Date:** 2026-05-23
 **Status:** done
-**Commit(s):** uncommitted
+**Commit(s):** cc49f60
 
 **Summary (plain language):**
 Tiny chrome polish to bring the Idle and Mode-Select screens visually closer to the strict-design spec page (`docs/Strict design screens/Screenshot 2026-05-11 224941.png`). The top-of-screen state pill on both screens is now brand-blue instead of the grey "border-subtle" default — that's the colour the rest of the Idle chrome already wears (card border, "Start Transaction" button, station-name serif fallback), so the pill matching it removes a tiny visual disagreement. On Mode Select, the pill now reads "MODE SELECT" instead of the older "CHOOSING" — same colour, just clearer. And inside each of the two Mode-Select tiles, the "Choose Pre-pay" / "Choose Fill up" buttons now wear their tile's accent (gold for Pre-pay, cyan for Fill up) instead of being uniformly brand-blue, so each tile feels like its own atomic call to action.
