@@ -646,7 +646,7 @@ Same as logged on the Phase 6a entry — Phase 6b (Flow 1 polish). The button-st
 ### Phase 6b (rebuild) — Unified Mode + Amount + Method screen
 **Date:** 2026-05-23
 **Status:** done
-**Commit(s):** uncommitted
+**Commit(s):** 7dead6d
 
 **Summary (plain language):**
 The pre-pay path used to walk the customer through three separate screens — pick PRE-PAY vs FILL UP, pick a Naira amount, pick a payment method — one tap → next screen → next screen. The strict-design spec (and the side-by-side at `docs/compare/required.png`) collapses all three into a single screen with progressive reveal: you pick PRE-PAY and the amount section drops in below; you pick an amount and the payment-method section drops in below that; the Confirm button at the bottom enables only when everything is set. FILL UP is the same screen but with the amount and method sections hidden — one tap on FILL UP, then Confirm. The two old screens (`PrepayAmountSelectScreen`, `PrepayMethodSelectScreen`) are gone; the new `ModeSelectScreen` does the whole job. Custom amount works inline — tapping the Custom tile reveals a numeric keypad below the amount grid; typing + ✓ commits the value and unhides the method section.
