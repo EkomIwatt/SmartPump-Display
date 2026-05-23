@@ -79,12 +79,19 @@ private val PRESET_AMOUNTS_NAIRA: List<Int> = listOf(2_000, 5_000, 10_000, 20_00
 private const val CUSTOM_MIN_NAIRA = 200
 private const val CUSTOM_MAX_NAIRA = 200_000
 
-/** Methods offered in the PAY WITH section. Pre-pay flow only — cash routes via attendant. */
+/**
+ * Methods offered in the PAY WITH section. The CASH option is informational — confirming
+ * it short-circuits to onCancel() and the attendant takes over via the swipe-up overlay's
+ * AUTHORISE CASH action. Phase 6c will replace the short-circuit with a proper
+ * "see attendant" state so the customer screen acknowledges the choice instead of
+ * silently returning to Idle.
+ */
 private val PRE_PAY_METHODS: List<PaymentMethod> = listOf(
     PaymentMethod.BALANCEE_APP,
     PaymentMethod.BANK_QR_TRANSFER,
     PaymentMethod.NFC_CARD,
     PaymentMethod.USSD,
+    PaymentMethod.CASH_SEE_ATTENDANT,
 )
 
 @Composable
@@ -221,17 +228,18 @@ private fun HeaderRow(
                 ),
             )
         }
-        // Right: PUMP 1 chip (gold border, gold text).
+        // Right: PUMP 1 chip — brand-blue per Phase 6b feedback (was gold; updated to match
+        // the rest of the brand-blue chrome on the customer-side header).
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(Dimensions.cornerChip))
-                .background(PrimaryGold.copy(alpha = 0.10f))
+                .background(BrandBlue.copy(alpha = 0.12f))
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             Text(
                 text = "PUMP 1",
                 style = MaterialTheme.typography.labelLarge.copy(
-                    color = PrimaryGold,
+                    color = BrandBlue,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 1.5.sp,
                 ),
@@ -516,7 +524,7 @@ private fun methodLabel(method: PaymentMethod): String = when (method) {
     PaymentMethod.BANK_QR_TRANSFER -> "Bank QR / Transfer"
     PaymentMethod.NFC_CARD -> "NFC card"
     PaymentMethod.USSD -> "USSD · *737#"
-    PaymentMethod.CASH_SEE_ATTENDANT -> "Cash"
+    PaymentMethod.CASH_SEE_ATTENDANT -> "Cash — see attendant"
 }
 
 /** Optional badge displayed at the right end of a method tile (e.g. "FASTEST"). */
