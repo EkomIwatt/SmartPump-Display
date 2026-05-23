@@ -66,6 +66,7 @@ import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
+import app.balancee.smartpump.display.ui.theme.heroSerifFamily
 import app.balancee.smartpump.display.ui.theme.OnBrand
 import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
@@ -224,7 +225,7 @@ private fun HeaderRow(
                 color = BrandBlue,
                 style = MaterialTheme.typography.headlineMedium.copy(
                     fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                    fontFamily = app.balancee.smartpump.display.ui.theme.HeroSerif,
+                    fontFamily = heroSerifFamily(),
                 ),
             )
         }

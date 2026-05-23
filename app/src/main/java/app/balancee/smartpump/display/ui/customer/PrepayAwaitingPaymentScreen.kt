@@ -1,42 +1,67 @@
-// Flow 1, step 3 — gold "QR WAITING" card. Customer has chosen amount + method;
+// Flow 1, step 3 — "QR WAITING" card. Customer has chosen amount + method;
 // we now show a payment artefact (QR for BANK_QR_TRANSFER / BALANCEE_APP, instructions
 // for NFC). A 5-min countdown ticks the expiry; the VM auto-cancels back to Idle when it
 // hits zero. The Cancel button gives the customer an early-out.
+//
+// Layout rebuilt (2026-05-23) to match docs/compare/expected.png:
+//   - Single centered card (was two side-by-side).
+//   - Column header above the card.
+//   - Card header row: amount · pump on the left, WAITING chip on the right.
+//   - QR in a tinted inset box, method-specific alt caption underneath.
+//   - Inline ledger (AMOUNT / TXN / EXPIRES) at the bottom of the card.
+//   - Small explainer paragraph below the card.
+//
+// Chrome is method-aware. BALANCEE_APP routes through the Balanceè-app context per
+// docs/design-system.md → brand-blue border + chip. Every other digital method stays
+// on the documented WAITING gold (PrimaryGold).
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.balancee.smartpump.display.domain.model.PaymentMethod
-import app.balancee.smartpump.display.ui.components.AmountDisplay
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.LabelText
-import app.balancee.smartpump.display.ui.components.LedgerRow
-import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.components.QrCodeView
+import app.balancee.smartpump.display.ui.components.StateChip
 import app.balancee.smartpump.display.ui.theme.Background
+import app.balancee.smartpump.display.ui.theme.BorderSubtle
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
+import app.balancee.smartpump.display.ui.theme.displayMonoFamily
 import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
+import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.theme.TextTertiary
+import java.text.NumberFormat
+import java.util.Locale
 
 @Composable
 fun PrepayAwaitingPaymentScreen(
@@ -49,124 +74,204 @@ fun PrepayAwaitingPaymentScreen(
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
 ) {
+    val accent = accentFor(method)
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(Background)
             .padding(Dimensions.screenPadding),
         verticalArrangement = Arrangement.spacedBy(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        PumpHeader(
-            pumpId = pumpId,
-            mode = "Pre-pay",
-            stateLabel = "Waiting",
-            stateColor = PrimaryGold,
-        )
+        // Column header above the card.
+        LabelText(text = "QR Waiting", color = TextSecondary)
 
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
+            contentAlignment = Alignment.Center,
         ) {
-            QrCard(
-                amountNaira = amountNaira,
-                method = method,
-                txnId = txnId,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-            )
-            InfoCard(
-                amountNaira = amountNaira,
-                method = method,
-                txnId = txnId,
-                pricePerLitre = pricePerLitre,
-                expiresInSeconds = expiresInSeconds,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-            )
+            BalanceeCard(
+                borderColor = accent,
+                modifier = Modifier.sizeIn(maxWidth = 560.dp),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    // Top row: amount · pump left, WAITING chip right.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "${formatNairaAmount(amountNaira)} · $pumpId",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = TextSecondary,
+                                fontWeight = FontWeight.Medium,
+                            ),
+                        )
+                        StateChip(label = "Waiting", color = accent)
+                    }
+
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        LabelText(text = artifactLabel(method), color = TextSecondary)
+                    }
+
+                    PaymentArtifact(
+                        method = method,
+                        amountNaira = amountNaira,
+                        txnId = txnId,
+                        accent = accent,
+                    )
+
+                    Text(
+                        text = methodCaption(method),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    // Ledger — each row separated by a hairline divider per spec.
+                    Column {
+                        HorizontalDivider(color = BorderSubtle)
+                        LedgerLine(
+                            label = "Amount",
+                            value = formatNairaAmount(amountNaira),
+                            modifier = Modifier.padding(vertical = 10.dp),
+                        )
+                        HorizontalDivider(color = BorderSubtle)
+                        LedgerLine(
+                            label = "Txn",
+                            value = txnId,
+                            modifier = Modifier.padding(vertical = 10.dp),
+                        )
+                        HorizontalDivider(color = BorderSubtle)
+                        LedgerLine(
+                            label = "Expires",
+                            value = formatCountdown(expiresInSeconds),
+                            modifier = Modifier.padding(vertical = 10.dp),
+                        )
+                    }
+
+                    Spacer(Modifier.weight(1f, fill = false))
+                }
+            }
         }
+
+        Text(
+            text = belowCardHint(method),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         BalanceeButton(
             label = "Cancel transaction",
             onClick = onCancel,
             variant = BalanceeButtonVariant.Secondary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * The "thing the customer interacts with" in the centre of the card. For BANK_QR_TRANSFER
+ * and BALANCEE_APP this is a real QR. For NFC_CARD it's a tap-target prompt — no QR, since
+ * NFC doesn't need a scanned artefact. USSD and CASH don't reach this screen (they're
+ * routed to their own states by the VM) so they're not branched here; we fall through
+ * to a QR with their payload as a safety net.
+ */
+@Composable
+private fun PaymentArtifact(
+    method: PaymentMethod,
+    amountNaira: Int,
+    txnId: String,
+    accent: Color,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dimensions.cornerCodePanel))
+            .background(SurfaceVariant)
+            .border(
+                Dimensions.borderWidth,
+                accent.copy(alpha = 0.35f),
+                RoundedCornerShape(Dimensions.cornerCodePanel),
+            )
+            .padding(vertical = 20.dp, horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (method == PaymentMethod.NFC_CARD) {
+            NfcTapPrompt(accent = accent)
+        } else {
+            Box(modifier = Modifier.width(240.dp)) {
+                QrCodeView(
+                    content = qrPayload(method, amountNaira, txnId),
+                    sizeDp = 240.dp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NfcTapPrompt(accent: Color) {
+    Column(
+        modifier = Modifier.padding(vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = "💳", // 💳 credit-card glyph — placeholder until the spec defines an NFC icon.
+            fontSize = 96.sp,
+        )
+        Text(
+            text = "Hold card here",
+            style = MaterialTheme.typography.titleLarge.copy(
+                color = accent,
+                fontWeight = FontWeight.SemiBold,
+            ),
         )
     }
 }
 
 @Composable
-private fun QrCard(
-    amountNaira: Int,
-    method: PaymentMethod,
-    txnId: String,
+private fun LedgerLine(
+    label: String,
+    value: String,
     modifier: Modifier = Modifier,
+    valueColor: Color = TextPrimary,
 ) {
-    BalanceeCard(
-        borderColor = PrimaryGold,
-        modifier = modifier,
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            LabelText(text = "Scan to pay", color = PrimaryGold)
-            Box(modifier = Modifier.size(260.dp)) {
-                QrCodeView(
-                    content = qrPayload(method, amountNaira, txnId),
-                    sizeDp = 220.dp,
-                )
-            }
-            Text(
-                text = methodCaption(method),
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-                textAlign = TextAlign.Center,
-            )
-        }
+        LabelText(text = label)
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontFamily = displayMonoFamily(),
+                color = valueColor,
+                letterSpacing = 0.5.sp,
+            ),
+        )
     }
 }
 
-@Composable
-private fun InfoCard(
-    amountNaira: Int,
-    method: PaymentMethod,
-    txnId: String,
-    pricePerLitre: Int,
-    expiresInSeconds: Int,
-    modifier: Modifier = Modifier,
-) {
-    BalanceeCard(
-        borderColor = PrimaryGold,
-        modifier = modifier,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                LabelText(text = "Amount due", color = PrimaryGold)
-                AmountDisplay(
-                    amountNaira = amountNaira,
-                    color = PrimaryGold,
-                    style = MaterialTheme.typography.displayMedium,
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                LedgerRow(label = "Method", value = methodLabel(method), valueMonospace = false)
-                LedgerRow(label = "Price / L", value = "₦$pricePerLitre")
-                LedgerRow(label = "Txn", value = txnId)
-                LedgerRow(label = "Expires in", value = formatCountdown(expiresInSeconds))
-            }
-            Box(modifier = Modifier.weight(1f))
-            Text(
-                text = "Pump opens the moment payment confirms. " +
-                    "Walk away before paying — the transaction auto-cancels.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-            )
-        }
-    }
+/** Brand-blue when this is the Balanceè-app context, gold for everyone else (default WAITING). */
+private fun accentFor(method: PaymentMethod): Color = when (method) {
+    PaymentMethod.BALANCEE_APP -> BrandBlue
+    else -> PrimaryGold
 }
 
 private fun qrPayload(method: PaymentMethod, amountNaira: Int, txnId: String): String = when (method) {
@@ -182,21 +287,30 @@ private fun qrPayload(method: PaymentMethod, amountNaira: Int, txnId: String): S
         "cash://$txnId/$amountNaira"
 }
 
-private fun methodLabel(method: PaymentMethod): String = when (method) {
-    PaymentMethod.BALANCEE_APP -> "Balanceè app"
-    PaymentMethod.BANK_QR_TRANSFER -> "Bank QR · NIP"
-    PaymentMethod.NFC_CARD -> "Tap card · NFC"
-    PaymentMethod.USSD -> "USSD *737#"
-    PaymentMethod.CASH_SEE_ATTENDANT -> "Cash"
+private fun methodCaption(method: PaymentMethod): String = when (method) {
+    PaymentMethod.BALANCEE_APP -> "or open Balanceè app"
+    PaymentMethod.BANK_QR_TRANSFER -> "or use any bank app"
+    PaymentMethod.USSD -> "or dial the code on your phone"
+    PaymentMethod.NFC_CARD -> "Any contactless card or phone wallet"
+    PaymentMethod.CASH_SEE_ATTENDANT -> "or hand cash to the attendant"
 }
 
-private fun methodCaption(method: PaymentMethod): String = when (method) {
-    PaymentMethod.BANK_QR_TRANSFER -> "Open any bank app · scan · confirm."
-    PaymentMethod.BALANCEE_APP -> "Open Balanceè · scan · confirm."
-    PaymentMethod.USSD -> "Dial the code on your phone. Bank SMS unlocks the pump."
-    PaymentMethod.NFC_CARD -> "Tap your contactless card on the panel."
-    PaymentMethod.CASH_SEE_ATTENDANT -> "Hand cash to the attendant."
+/** Centred label above the artefact — "Scan to pay" vs "Tap to pay". */
+private fun artifactLabel(method: PaymentMethod): String = when (method) {
+    PaymentMethod.NFC_CARD -> "Tap to pay"
+    else -> "Scan to pay"
 }
+
+/** Small hint paragraph below the card. Tied to the artefact, not the QR. */
+private fun belowCardHint(method: PaymentMethod): String = when (method) {
+    PaymentMethod.NFC_CARD ->
+        "Hold card to the reader. Pump opens on tap. 5-min wait then auto-cancel."
+    else ->
+        "QR shown. Payment expected. 5-min expiry then auto-cancel."
+}
+
+private fun formatNairaAmount(naira: Int): String =
+    "₦" + NumberFormat.getInstance(Locale.UK).format(naira.toLong())
 
 private fun formatCountdown(seconds: Int): String {
     val s = seconds.coerceAtLeast(0)
@@ -205,14 +319,29 @@ private fun formatCountdown(seconds: Int): String {
 
 @Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
-private fun PrepayAwaitingPaymentPreview() {
+private fun PrepayAwaitingPaymentBalanceeAppPreview() {
     SmartPumpDisplayTheme {
         PrepayAwaitingPaymentScreen(
             amountNaira = 5_000,
-            method = PaymentMethod.BANK_QR_TRANSFER,
+            method = PaymentMethod.BALANCEE_APP,
             txnId = "BLC-00847",
             pricePerLitre = 870,
-            expiresInSeconds = 287,
+            expiresInSeconds = 277,
+            onCancel = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
+@Composable
+private fun PrepayAwaitingPaymentBankQrPreview() {
+    SmartPumpDisplayTheme {
+        PrepayAwaitingPaymentScreen(
+            amountNaira = 2_000,
+            method = PaymentMethod.BANK_QR_TRANSFER,
+            txnId = "BLC-00002",
+            pricePerLitre = 870,
+            expiresInSeconds = 299,
             onCancel = {},
         )
     }

@@ -20,12 +20,11 @@ import androidx.compose.ui.unit.sp
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.CodePanelSurface
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.DisplayMono
+import app.balancee.smartpump.display.ui.theme.displayMonoFamily
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 
-private val CodeTextStyle = TextStyle(
-    fontFamily = DisplayMono,
+private val CodeTextStyleBase = TextStyle(
     fontWeight = FontWeight.Normal,
     fontSize = 13.sp,
     lineHeight = 18.sp,
@@ -39,7 +38,7 @@ fun CodePanel(
 ) {
     Text(
         text = text,
-        style = CodeTextStyle,
+        style = CodeTextStyleBase.copy(fontFamily = displayMonoFamily()),
         modifier = modifier
             .clip(RoundedCornerShape(Dimensions.cornerCodePanel))
             .background(CodePanelSurface)

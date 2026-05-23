@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.sp
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.DisplayMono
+import app.balancee.smartpump.display.ui.theme.displayMonoFamily
 import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.Surface
@@ -41,8 +41,7 @@ import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.WarningRed
 
-private val KeyLabelStyle = TextStyle(
-    fontFamily = DisplayMono,
+private val KeyLabelStyleBase = TextStyle(
     fontWeight = FontWeight.SemiBold,
     fontSize = 28.sp,
     lineHeight = 32.sp,
@@ -131,6 +130,7 @@ private fun DigitKey(
         filled -> Color(0xFF0B0B0A)
         else -> TextPrimary
     }
+    val keyStyle = KeyLabelStyleBase.copy(fontFamily = displayMonoFamily(), color = fg)
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -140,7 +140,7 @@ private fun DigitKey(
             .border(Dimensions.borderWidth, accentColor.copy(alpha = if (filled) 1f else 0.6f), shape)
             .let { if (enabled) it.clickable(onClick = onClick) else it },
     ) {
-        Text(text = label, style = KeyLabelStyle.copy(color = fg))
+        Text(text = label, style = keyStyle)
     }
 }
 

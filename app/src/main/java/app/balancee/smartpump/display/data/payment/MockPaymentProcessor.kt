@@ -74,7 +74,9 @@ class MockPaymentProcessor @Inject constructor() : PaymentProcessor {
     private fun nextRef(): String = "BLC-%05d".format(refCounter.incrementAndGet())
 
     private companion object {
-        const val DEFAULT_PENDING_DELAY_MS = 3_000L
+        // 5s so the QR screen is actually visible during demo / preview runs before
+        // mock auto-approval. Debug screen overrides this for soak/timeout testing.
+        const val DEFAULT_PENDING_DELAY_MS = 5_000L
         const val DEFAULT_FAILURE_REASON = "Mock: payment declined"
         const val START_REF_NUMBER = 0
     }

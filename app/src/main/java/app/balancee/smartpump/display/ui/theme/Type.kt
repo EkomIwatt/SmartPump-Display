@@ -2,6 +2,9 @@
 package app.balancee.smartpump.display.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -148,6 +151,26 @@ val HeroSerifItalic: TextStyle
 /** Preview-safe fallback using system serif. */
 val HeroSerifItalicPreview: TextStyle
     get() = HeroSerifItalicBase.copy(fontFamily = FontFamily.Serif)
+
+/**
+ * Composable accessor for the monospace family — returns [FontFamily.Monospace] inside
+ * @Preview (no Google Play Services in the AS sandbox → downloadable fonts stall) and
+ * [DisplayMono] at runtime. Use this instead of referencing [DisplayMono] directly from
+ * any composable that needs to render in previews.
+ */
+@Composable
+@ReadOnlyComposable
+fun displayMonoFamily(): FontFamily =
+    if (LocalInspectionMode.current) FontFamily.Monospace else DisplayMono
+
+/**
+ * Composable accessor for the hero serif family — preview-safe analogue to [HeroSerif].
+ * Returns [FontFamily.Serif] in @Preview, [HeroSerif] (Playfair Display) at runtime.
+ */
+@Composable
+@ReadOnlyComposable
+fun heroSerifFamily(): FontFamily =
+    if (LocalInspectionMode.current) FontFamily.Serif else HeroSerif
 
 /**
  * Main typography for the app. Uses downloadable Google Fonts.

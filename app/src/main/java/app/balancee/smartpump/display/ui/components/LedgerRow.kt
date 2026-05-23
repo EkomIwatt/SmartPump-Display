@@ -17,7 +17,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.theme.Background
-import app.balancee.smartpump.display.ui.theme.DisplayMono
+import app.balancee.smartpump.display.ui.theme.displayMonoFamily
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 
@@ -37,7 +37,7 @@ fun LedgerRow(
         Text(
             text = value,
             style = MaterialTheme.typography.bodyLarge.copy(
-                fontFamily = if (valueMonospace) DisplayMono else FontFamily.Default,
+                fontFamily = if (valueMonospace) displayMonoFamily() else FontFamily.Default,
             ),
             color = TextPrimary,
         )

@@ -4,41 +4,70 @@
 // mock path (Phase 3f) uses the existing MockPaymentProcessor: Success on the USSD
 // channel stands in for "SMS received and parsed". Phase 4's debug screen will add
 // a manual SMS injector for testing parser variants.
+//
+// Layout rebuilt (2026-05-23) to match docs/compare/expected.png:
+//   - Per-card section headers above each card.
+//   - Left card: USSD/OFFLINE chip row → DIAL THIS CODE → highlighted primary code box
+//     → caption → divider → OTHER BANKS list (name / right-aligned mono code).
+//   - Right card: AWAITING SMS chip → satellite icon → WAITING FOR / SMS CONFIRMATION
+//     hero → helper text → divider → AMOUNT / REF / SIM STATUS / EXPIRES IN ledger.
+//   - Small explainer paragraph below each card.
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import app.balancee.smartpump.display.ui.components.AmountDisplay
+import androidx.compose.ui.unit.sp
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
-import app.balancee.smartpump.display.ui.components.CodePanel
 import app.balancee.smartpump.display.ui.components.LabelText
-import app.balancee.smartpump.display.ui.components.LedgerRow
 import app.balancee.smartpump.display.ui.components.PumpHeader
+import app.balancee.smartpump.display.ui.components.StateChip
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
-import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.DisplayMono
+import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.BrandBlue
-import app.balancee.smartpump.display.ui.theme.PrimaryGold
+import app.balancee.smartpump.display.ui.theme.Dimensions
+import app.balancee.smartpump.display.ui.theme.displayMonoFamily
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
+import app.balancee.smartpump.display.ui.theme.SuccessGreen
+import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.theme.TextTertiary
+import java.text.NumberFormat
+import java.util.Locale
+
+private data class BankCode(val name: String, val prefix: String)
+
+private val OTHER_BANKS: List<BankCode> = listOf(
+    BankCode("Access", "*901"),
+    BankCode("Zenith", "*966"),
+    BankCode("UBA", "*919"),
+)
+private val GTBANK = BankCode("GTBank", "*737")
 
 @Composable
 fun UssdAwaitingSmsScreen(
@@ -65,24 +94,41 @@ fun UssdAwaitingSmsScreen(
             stateColor = ActiveCyan,
         )
 
+        // Two column headers above the cards — match expected.png.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
+        ) {
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                LabelText(text = "USSD Code Displayed")
+            }
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                LabelText(text = "Waiting for SMS")
+            }
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
         ) {
-            DialCodeCard(
+            DialColumn(
                 amountNaira = amountNaira,
                 txnRef = txnRef,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
             )
-            WaitingCard(
+            WaitingColumn(
                 amountNaira = amountNaira,
                 txnRef = txnRef,
-                txnId = txnId,
-                pricePerLitre = pricePerLitre,
                 expiresInSeconds = expiresInSeconds,
                 modifier = Modifier
                     .weight(1f)
@@ -99,94 +145,261 @@ fun UssdAwaitingSmsScreen(
 }
 
 @Composable
-private fun DialCodeCard(
+private fun DialColumn(
     amountNaira: Int,
     txnRef: String,
     modifier: Modifier = Modifier,
 ) {
-    BalanceeCard(
-        borderColor = BrandBlue,
+    Column(
         modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+        BalanceeCard(
+            borderColor = BrandBlue,
+            modifier = Modifier.weight(1f),
         ) {
-            LabelText(text = "Dial this code", color = BrandBlue)
-            Text(
-                text = gtBankCode(amountNaira, txnRef),
-                style = MaterialTheme.typography.headlineLarge.copy(
-                    fontFamily = DisplayMono,
-                    color = BrandBlue,
-                ),
-            )
-            Text(
-                text = "Primary — GTBank. Other banks below.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-            )
-            CodePanel(
-                text = listOf(
-                    "GTBank   *737*$amountNaira*$txnRef#",
-                    "Access   *901*$amountNaira*$txnRef#",
-                    "Zenith   *966*$amountNaira*$txnRef#",
-                    "UBA      *919*$amountNaira*$txnRef#",
-                ).joinToString("\n"),
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-            )
-            Box(modifier = Modifier.weight(1f))
-            Text(
-                text = "Works on any phone — including 2G. No data required.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-            )
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // USSD chip on the left, OFFLINE label on the right.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    StateChip(label = "USSD", color = BrandBlue)
+                    Text(
+                        text = "OFFLINE",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            color = TextSecondary,
+                            letterSpacing = 1.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                }
+
+                // Centered "DIAL THIS CODE" label.
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    LabelText(text = "Dial this code", color = TextSecondary)
+                }
+
+                // Highlighted primary code box.
+                PrimaryCodeBox(
+                    code = formatUssd(GTBANK, amountNaira, txnRef),
+                )
+
+                Text(
+                    text = "${GTBANK.name} · ${formatNairaAmount(amountNaira)} · Ref: $txnRef",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                HorizontalDivider(color = BorderSubtle)
+
+                // "OTHER BANKS" section.
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    LabelText(text = "Other banks", color = TextSecondary)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OTHER_BANKS.forEach { bank ->
+                        BankCodeRow(
+                            name = bank.name,
+                            code = formatUssd(bank, amountNaira, txnRef),
+                        )
+                    }
+                }
+
+                Spacer(Modifier.weight(1f, fill = false))
+            }
         }
+
+        Text(
+            text = "Pump shows USSD codes for 4 major banks. Customer dials on their 2G phone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
 @Composable
-private fun WaitingCard(
+private fun WaitingColumn(
     amountNaira: Int,
     txnRef: String,
-    txnId: String,
-    pricePerLitre: Int,
     expiresInSeconds: Int,
     modifier: Modifier = Modifier,
 ) {
-    BalanceeCard(
-        borderColor = BrandBlue,
+    Column(
         modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                LabelText(text = "Waiting for SMS confirmation", color = BrandBlue)
-                AmountDisplay(
-                    amountNaira = amountNaira,
-                    color = BrandBlue,
-                    style = MaterialTheme.typography.displayMedium,
-                )
+        BalanceeCard(
+            borderColor = BrandBlue,
+            modifier = Modifier.weight(1f),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                StateChip(label = "Awaiting SMS", color = ActiveCyan)
+
+                // Hero block — satellite icon + "WAITING FOR SMS CONFIRMATION".
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "📡", // 📡 satellite antenna
+                        fontSize = 56.sp,
+                    )
+                    Text(
+                        text = "Waiting for",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            color = TextSecondary,
+                            letterSpacing = 1.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                    Text(
+                        text = "SMS CONFIRMATION",
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            color = BrandBlue,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.sp,
+                        ),
+                    )
+                    Text(
+                        text = "Bank sends SMS after USSD completes. Usually 10–30 seconds.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+
+                HorizontalDivider(color = BorderSubtle)
+
+                // Ledger — match the spec, plus EXPIRES IN for the 5-min timeout.
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LedgerLine(
+                        label = "Amount",
+                        value = formatNairaAmount(amountNaira),
+                    )
+                    LedgerLine(
+                        label = "Ref",
+                        value = txnRef,
+                    )
+                    LedgerLine(
+                        label = "Sim status",
+                        value = "MTN · Signal",
+                        valueColor = SuccessGreen,
+                    )
+                    LedgerLine(
+                        label = "Expires in",
+                        value = formatCountdown(expiresInSeconds),
+                    )
+                }
+
+                Spacer(Modifier.weight(1f, fill = false))
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                LedgerRow(label = "Ref", value = txnRef)
-                LedgerRow(label = "Price / L", value = "₦$pricePerLitre")
-                LedgerRow(label = "Txn", value = txnId)
-                LedgerRow(label = "Sim status", value = "MTN · signal OK", valueMonospace = false)
-                LedgerRow(label = "Expires in", value = formatCountdown(expiresInSeconds))
-            }
-            Box(modifier = Modifier.weight(1f))
-            Text(
-                text = "Bank sends an SMS after the USSD completes — usually 10–30 seconds. " +
-                    "The pump listens to its SIM for an inbox match against this reference, " +
-                    "then unlocks automatically.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-            )
         }
+
+        Text(
+            text = "Android monitors pump unit SIM for incoming SMS containing the reference.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
-private fun gtBankCode(amountNaira: Int, txnRef: String): String =
-    "*737*$amountNaira*$txnRef#"
+@Composable
+private fun PrimaryCodeBox(code: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dimensions.cornerCodePanel))
+            .background(SurfaceVariant)
+            .border(
+                Dimensions.borderWidth,
+                BrandBlue.copy(alpha = 0.35f),
+                RoundedCornerShape(Dimensions.cornerCodePanel),
+            )
+            .padding(vertical = 20.dp, horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = code,
+            style = MaterialTheme.typography.headlineLarge.copy(
+                fontFamily = displayMonoFamily(),
+                color = BrandBlue,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.sp,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun BankCodeRow(name: String, code: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+        )
+        Text(
+            text = code,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontFamily = displayMonoFamily(),
+                color = TextPrimary,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun LedgerLine(
+    label: String,
+    value: String,
+    valueColor: androidx.compose.ui.graphics.Color = TextPrimary,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        LabelText(text = label)
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontFamily = displayMonoFamily(),
+                color = valueColor,
+            ),
+        )
+    }
+}
+
+private fun formatUssd(bank: BankCode, amountNaira: Int, txnRef: String): String =
+    "${bank.prefix}*$amountNaira*$txnRef#"
+
+private fun formatNairaAmount(naira: Int): String =
+    "₦" + NumberFormat.getInstance(Locale.UK).format(naira.toLong())
 
 private fun formatCountdown(seconds: Int): String {
     val s = seconds.coerceAtLeast(0)
