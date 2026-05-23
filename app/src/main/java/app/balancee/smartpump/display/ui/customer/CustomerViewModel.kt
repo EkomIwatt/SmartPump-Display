@@ -243,7 +243,7 @@ class CustomerViewModel @Inject constructor(
         // Resume fidelity: when the original method choice is lost (older persisted blob
         // without the FixedDispensing.method field), fall back to the most likely channel
         // per flow. Audit row may show BANK_QR_TRANSFER for what was actually BALANCEE_APP;
-        // backend reconciliation in Phase 6 corrects via the webhook trail.
+        // backend reconciliation in Phase 7 corrects via the webhook trail.
         TransactionFlow.FIXED_PREPAY_DIGITAL -> PaymentMethod.BANK_QR_TRANSFER
         TransactionFlow.USSD_OFFLINE -> PaymentMethod.USSD
         TransactionFlow.CASH_FIXED -> null
@@ -877,7 +877,7 @@ class CustomerViewModel @Inject constructor(
     }
 
     fun onShareReceipt() {
-        // Wired to a real share sheet in Phase 6. Logged-only for now so the button isn't dead.
+        // Wired to a real share sheet in Phase 7. Logged-only for now so the button isn't dead.
     }
 
     fun onDismissComplete() {

@@ -1,5 +1,5 @@
 // Hardware abstraction over the Arduino-via-USB pulse stream.
-// Real impl (Phase 6+) parses raw "PULSE:XXXX\n" frames; mock impl emits synthetic events.
+// Real impl (Phase 7+) parses raw "PULSE:XXXX\n" frames; mock impl emits synthetic events.
 package app.balancee.smartpump.display.domain.hardware
 
 import app.balancee.smartpump.display.domain.model.PulseMessage

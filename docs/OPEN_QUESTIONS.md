@@ -39,8 +39,8 @@ Decisions still owed before V1 ships. Resolved questions are removed (not crosse
 
 ## V1 scope confirmations
 
-20. **Phase 6+ scope.** USB serial driver, real payment SDK, WorkManager sync, SMS listener — which of these is "must ship V1" vs "deferrable to V2"? Spec marks Flow 1, fill-up shutoff, dynamic QR, GTBank SMS as V1-required.
+20. **Phase 7+ scope.** USB serial driver, real payment SDK, WorkManager sync, SMS listener — which of these is "must ship V1" vs "deferrable to V2"? Spec marks Flow 1, fill-up shutoff, dynamic QR, GTBank SMS as V1-required.
 
 ## Resolved
 
-- **#19 (Roles & PIN in V1)** — Resolved 2026-05-23. V1 ships with a single shared 4-digit PIN gating every attendant action (FILL UP AUTHORISE / AUTHORISE CASH / CASH RECEIVED). No roles. PIN set at install during onboarding, stored as PBKDF2-HMAC-SHA256 hash + per-device salt in SQLite. Cashier-tablet → pump PIN-push channel deferred to Phase 6. Role-based PINs (manager vs attendant) deferred to V2.
+- **#19 (Roles & PIN in V1)** — Resolved 2026-05-23. V1 ships with a single shared 4-digit PIN gating every attendant action (FILL UP AUTHORISE / AUTHORISE CASH / CASH RECEIVED). No roles. PIN set at install during onboarding, stored as PBKDF2-HMAC-SHA256 hash + per-device salt in SQLite. Cashier-tablet → pump PIN-push channel deferred to Phase 7. Role-based PINs (manager vs attendant) deferred to V2.

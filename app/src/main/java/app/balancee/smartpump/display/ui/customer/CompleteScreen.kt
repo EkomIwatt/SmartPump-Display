@@ -1,7 +1,7 @@
 // Terminal screen — green-bordered "✓ Done." card with the receipt ledger.
 // Shared by every flow that ends in [TransactionState.Complete]; flow-specific copy
 // is derived from [Complete.flow] (e.g. "Cash · fixed" vs "Pre-pay digital"). The
-// Share-receipt action is a placeholder for Phase 6 wiring (see OPEN_QUESTIONS #14).
+// Share-receipt action is a placeholder for Phase 7 wiring (see OPEN_QUESTIONS #14).
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
