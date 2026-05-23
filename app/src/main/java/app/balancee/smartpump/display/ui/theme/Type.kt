@@ -70,6 +70,33 @@ val HeroSerifItalic = TextStyle(
     lineHeight = 48.sp,
 )
 
+/**
+ * Preview-time fallback. Android Studio's preview sandbox has no Google Play Services, so
+ * the downloadable-fonts loader fails and previews render blank. [SmartPumpDisplayTheme]
+ * swaps to this when [androidx.compose.ui.platform.LocalInspectionMode] is true.
+ * Visuals are degraded vs. runtime — system serif/sans/mono — but the layout is intact.
+ */
+val SmartPumpTypographyPreview: Typography
+    get() = SmartPumpTypography.let { real ->
+        Typography(
+            displayLarge = real.displayLarge.copy(fontFamily = FontFamily.Monospace),
+            displayMedium = real.displayMedium.copy(fontFamily = FontFamily.Monospace),
+            displaySmall = real.displaySmall.copy(fontFamily = FontFamily.Monospace),
+            headlineLarge = real.headlineLarge.copy(fontFamily = FontFamily.SansSerif),
+            headlineMedium = real.headlineMedium.copy(fontFamily = FontFamily.SansSerif),
+            titleLarge = real.titleLarge.copy(fontFamily = FontFamily.SansSerif),
+            titleMedium = real.titleMedium.copy(fontFamily = FontFamily.SansSerif),
+            bodyLarge = real.bodyLarge.copy(fontFamily = FontFamily.SansSerif),
+            bodyMedium = real.bodyMedium.copy(fontFamily = FontFamily.SansSerif),
+            labelLarge = real.labelLarge.copy(fontFamily = FontFamily.SansSerif),
+            labelMedium = real.labelMedium.copy(fontFamily = FontFamily.SansSerif),
+            labelSmall = real.labelSmall.copy(fontFamily = FontFamily.SansSerif),
+        )
+    }
+
+/** Preview-safe alias of [HeroSerifItalic] using the system serif. */
+val HeroSerifItalicPreview = HeroSerifItalic.copy(fontFamily = FontFamily.Serif)
+
 val SmartPumpTypography = Typography(
     // Giant litre count and Naira amounts on dispensing/complete screens (120sp+).
     displayLarge = TextStyle(

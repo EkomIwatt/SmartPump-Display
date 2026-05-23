@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +31,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
@@ -37,6 +39,7 @@ import app.balancee.smartpump.display.ui.components.HeroSerifText
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.Background
+import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
@@ -80,11 +83,18 @@ fun IdleScreen(
                     logoBytes = logoBytes,
                 )
                 Text(
-                    text = "Smart pump · pay any way",
-                    style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),
+                    text = "SmartPump ready",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        color = TextSecondary,
+                        letterSpacing = 2.sp,
+                    ),
                     textAlign = TextAlign.Center,
                 )
-                LabelText(text = "Tap to fuel")
+                HorizontalDivider(
+                    modifier = Modifier.width(220.dp),
+                    color = BorderSubtle,
+                )
+                LabelText(text = "Tap to pay")
                 BalanceeButton(
                     label = "Start transaction",
                     onClick = onStartTransaction,
@@ -92,7 +102,7 @@ fun IdleScreen(
                     modifier = Modifier.width(360.dp),
                 )
                 Text(
-                    text = "Attendant? Swipe up from the bottom edge.",
+                    text = "↑  Swipe up — Attendant",
                     style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary),
                     textAlign = TextAlign.Center,
                 )

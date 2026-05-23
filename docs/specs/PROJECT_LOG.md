@@ -610,3 +610,33 @@ Tiny chrome polish to bring the Idle and Mode-Select screens visually closer to 
 
 **Next:**
 Phase 6b — Flow 1 (Fixed Pre-pay Digital) polish against `docs/Strict design screens/Screenshot 2026-05-11 224956.png`. Highest-value visible flow (V1 hero); divergences I've spotted so far: pre-pay QR screen currently splits into two cards, spec shows one; ledger row ordering may differ; the FixedDispensing screen's running-amount layout vs the spec's compact "LITRES DISPENSED · of 5.75 L authorised" line.
+
+---
+
+### Phase 6a follow-up — Idle copy + divider + Compose preview fix
+**Date:** 2026-05-23
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+Two things rolled into one commit. First, an on-device side-by-side of the Idle screen vs the strict-design mockup (Ekomobong dropped both into `docs/compare/`) turned up four small polish gaps: the subtitle copy, a missing horizontal divider, the action label, and the attendant hint. The wordmark style and the missing droplet icon are *intentional* divergences — boss directed station logo/name in place of any Balanceè branding — so those stay as-is; the rest is now aligned. Second, the Android Studio @Preview canvas was rendering blank for any composable that touched our typography. The cause is structural: Google Fonts uses a downloadable provider that depends on Google Play Services, which doesn't exist in the AS preview sandbox. The theme now detects inspection mode and swaps to system serif / sans / mono just for previews — runtime is unchanged.
+
+**Technical notes:**
+- **`ui/customer/IdleScreen.kt`** — copy + chrome polish:
+  - Subtitle: `"Smart pump · pay any way"` (bodyMedium) → `"SmartPump ready"` (labelLarge + 2sp letter-spacing, all-caps tracked via the label style).
+  - New `HorizontalDivider(width = 220.dp, color = BorderSubtle)` between subtitle and the `"Tap to pay"` label.
+  - Action label: `"Tap to fuel"` → `"Tap to pay"`.
+  - Attendant hint: `"Attendant? Swipe up from the bottom edge."` → `"↑  Swipe up — Attendant"` (shorter, with up-arrow). Spec phrasing.
+  - Imports: added `androidx.compose.material3.HorizontalDivider`, `androidx.compose.ui.unit.sp`, `app.balancee.smartpump.display.ui.theme.BorderSubtle`.
+- **Deliberately NOT changed** in this commit (per boss directive resolved during the Phase 5c kickoff conversation):
+  - The cyan droplet icon at the top of the spec mockup is the Balanceè brand mark. Boss said pump never shows Balanceè branding; station logo goes in that slot if uploaded, else nothing. Our `StationBranding` already handles this.
+  - The spec wordmark "Balanc**è**" in bold sans-serif (white + orange "è") is the original Balanceè brand wordmark. Boss said replace with station name in Playfair Display Italic. Our `HeroSerifText` does this.
+  - Bigger component shifts (non-uppercase Brand-button label, pill-shape corner radius) need to ripple through every screen and were called out as a separate follow-up rather than rolled in here.
+- **`ui/theme/Theme.kt`** — `SmartPumpDisplayTheme` now reads `androidx.compose.ui.platform.LocalInspectionMode.current` and picks `SmartPumpTypographyPreview` (system fonts) when true, `SmartPumpTypography` (Google Fonts) otherwise. Runtime path is unchanged.
+- **`ui/theme/Type.kt`** — added `SmartPumpTypographyPreview` (`Typography` whose `displayLarge` / `displayMedium` / `displaySmall` use `FontFamily.Monospace`, everything else `FontFamily.SansSerif`) and `HeroSerifItalicPreview` (`HeroSerifItalic.copy(fontFamily = FontFamily.Serif)`). Both built by `.copy()`-ing the runtime styles so the sp/letter-spacing/weight settings stay in lockstep.
+- **`ui/components/HeroSerifText.kt`** — composable now checks `LocalInspectionMode.current` and swaps the default `HeroSerifItalic` style to `HeroSerifItalicPreview` for previews. The swap is guarded by `style === HeroSerifItalic` (referential identity) so any caller passing a *custom* style is respected — only the default path falls back. Imports updated.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+- Tablet font symptom is *not* this issue — Ekomobong confirmed the test tablet has Google Play Services, so the runtime path resolves Playfair / Outfit / JetBrains Mono normally. The preview swap is purely for AS @Preview.
+
+**Next:**
+Same as logged on the Phase 6a entry — Phase 6b (Flow 1 polish). The button-styling tweaks (non-uppercase Brand label, pill corner radius) and any further Idle-card resizing wait for boss eyeball on the post-6a-fix tablet rendering.

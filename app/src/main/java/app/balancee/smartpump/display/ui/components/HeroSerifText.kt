@@ -10,11 +10,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.HeroSerifItalic
+import app.balancee.smartpump.display.ui.theme.HeroSerifItalicPreview
 import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 
@@ -25,9 +27,16 @@ fun HeroSerifText(
     color: Color = PrimaryGold,
     style: TextStyle = HeroSerifItalic,
 ) {
+    // In @Preview, swap to the system-serif fallback so AS doesn't crash on the
+    // GoogleFont loader. At runtime, [style] resolves to Playfair Display Italic.
+    val resolvedStyle = if (LocalInspectionMode.current && style === HeroSerifItalic) {
+        HeroSerifItalicPreview
+    } else {
+        style
+    }
     Text(
         text = text,
-        style = style.copy(color = color),
+        style = resolvedStyle.copy(color = color),
         modifier = modifier,
     )
 }
