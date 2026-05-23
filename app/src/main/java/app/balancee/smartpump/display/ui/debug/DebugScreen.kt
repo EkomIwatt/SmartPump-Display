@@ -50,7 +50,7 @@ import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.TextPrimary
@@ -235,8 +235,8 @@ private fun PaymentCard(
     onFailureReason: (String) -> Unit,
     onTriggerInstantResolve: () -> Unit,
 ) {
-    BalanceeCard(borderColor = PrimaryAmber) {
-        LabelText(text = "Mock payment processor", color = PrimaryAmber)
+    BalanceeCard(borderColor = PrimaryGold) {
+        LabelText(text = "Mock payment processor", color = PrimaryGold)
         Spacer(Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -461,16 +461,16 @@ private fun DebugTextField(
             focusedTextColor = TextPrimary,
             unfocusedTextColor = TextPrimary,
             disabledTextColor = TextSecondary,
-            focusedLabelColor = PrimaryAmber,
+            focusedLabelColor = PrimaryGold,
             unfocusedLabelColor = TextSecondary,
-            focusedIndicatorColor = PrimaryAmber,
+            focusedIndicatorColor = PrimaryGold,
             unfocusedIndicatorColor = BorderSubtle,
-            cursorColor = PrimaryAmber,
+            cursorColor = PrimaryGold,
         ),
     )
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 1200)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 1200)
 @Composable
 private fun DebugScreenPreview() {
     SmartPumpDisplayTheme {

@@ -33,7 +33,7 @@ import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.components.QrCodeView
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -60,7 +60,7 @@ fun PrepayAwaitingPaymentScreen(
             pumpId = pumpId,
             mode = "Pre-pay",
             stateLabel = "Waiting",
-            stateColor = PrimaryAmber,
+            stateColor = PrimaryGold,
         )
 
         Row(
@@ -105,7 +105,7 @@ private fun QrCard(
     modifier: Modifier = Modifier,
 ) {
     BalanceeCard(
-        borderColor = PrimaryAmber,
+        borderColor = PrimaryGold,
         modifier = modifier,
     ) {
         Column(
@@ -113,7 +113,7 @@ private fun QrCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            LabelText(text = "Scan to pay", color = PrimaryAmber)
+            LabelText(text = "Scan to pay", color = PrimaryGold)
             Box(modifier = Modifier.size(260.dp)) {
                 QrCodeView(
                     content = qrPayload(method, amountNaira, txnId),
@@ -140,15 +140,15 @@ private fun InfoCard(
     modifier: Modifier = Modifier,
 ) {
     BalanceeCard(
-        borderColor = PrimaryAmber,
+        borderColor = PrimaryGold,
         modifier = modifier,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                LabelText(text = "Amount due", color = PrimaryAmber)
+                LabelText(text = "Amount due", color = PrimaryGold)
                 AmountDisplay(
                     amountNaira = amountNaira,
-                    color = PrimaryAmber,
+                    color = PrimaryGold,
                     style = MaterialTheme.typography.displayMedium,
                 )
             }
@@ -203,7 +203,7 @@ private fun formatCountdown(seconds: Int): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 600)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun PrepayAwaitingPaymentPreview() {
     SmartPumpDisplayTheme {

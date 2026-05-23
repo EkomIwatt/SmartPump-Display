@@ -21,7 +21,7 @@ import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.Surface
@@ -48,7 +48,7 @@ fun BalanceeCard(
     )
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 720)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 720)
 @Composable
 private fun BalanceeCardPreview() {
     SmartPumpDisplayTheme {
@@ -59,7 +59,7 @@ private fun BalanceeCardPreview() {
             horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
         ) {
             BalanceeCard(
-                borderColor = PrimaryAmber,
+                borderColor = PrimaryGold,
                 modifier = Modifier.weight(1f),
             ) {
                 LabelText("QR Waiting")

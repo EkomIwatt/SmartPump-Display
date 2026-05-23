@@ -497,7 +497,7 @@ After the reboot sweep and those two decisions land, `rebuild/strict-design` →
 ### Phase 5c (rebuild) — Station onboarding + PIN gate
 **Date:** 2026-05-23
 **Status:** done
-**Commit(s):** uncommitted
+**Commit(s):** e15073d
 
 **Summary (plain language):**
 Two big changes go in together. First: the pump now refuses to do anything until the station has been set up. On first boot the operator walks a three-step install flow — type the station ID, pick a logo from the gallery (or skip), set a 4-digit attendant PIN — and only after that is the customer screen reachable. The Idle screen used to show "Balanceè" in big blue serif; it now shows the station's logo (or, if they skipped that step, their own name). "Pay via Balanceè" inside the payment-method picker is the only place Balanceè still appears. Second: every attendant action — FILL UP AUTHORISE, AUTHORISE CASH, CASH RECEIVED — now opens a PIN keypad modal before firing. Wrong PIN silently shakes and clears; no action runs without a correct PIN. The PIN never leaves the device — it's hashed with a per-device salt and only the hash is stored. For developer demos a debug-build toggle on the engineering screen skips the PIN modal and auto-provisions a "Demo Station" with PIN 0000 on first boot, so demos don't get bogged down typing. Production builds have neither escape hatch.
@@ -533,3 +533,45 @@ Two big changes go in together. First: the pump now refuses to do anything until
 
 **Next:**
 Phase 5d — typography & palette refresh. Add `res/font/` xml resources for Playfair Display (headings + hero-serif), Outfit (body / UI), JetBrains Mono (already in use). Swap `ui/theme/Color.kt` tokens — `Background #0A0A0F → #0B0B0A`, `BrandBlue #1B3FB8 → #1034A6`, `PrimaryAmber #F5A623 → #C8A84B` (rename to `PrimaryGold` since "amber" no longer fits the muted brass hex), `SuccessGreen #48BB78 → #3AAA6A`, `TextPrimary #F7F7F8 → #E8E4DC`, `TextSecondary #A0A0AB → #A09C94`. `WarningRed` stays as-is unless the boss revisits. `OnPrimary` / `OnBrand` re-derived against the new fills. Orange `#D4622A` deferred — no use yet per the user's 2026-05-23 direction. Update `docs/design-system.md` palette table in lockstep.
+
+---
+
+### Phase 5d (rebuild) — Typography & palette refresh
+**Date:** 2026-05-23
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+The pump app now wears the brand fonts and the new colour palette the boss specified. Headings and body text use Outfit (a clean modern sans), hero phrases use Playfair Display Italic (a high-contrast serif), and every number on the screen — litres, naira amounts, transaction IDs — uses JetBrains Mono. None of the .ttf files are shipped in the app; the fonts download once per device from Google Fonts via Play Services and stay cached. The gold accent shifts from a vibrant fintech orange to a more muted brass (`#C8A84B`), the brand blue deepens (`#1034A6`), the background warms slightly (`#0B0B0A`), and the body text drops to a warmer off-white. The orange the boss mentioned (`#D4622A`) is reserved in the palette but not used anywhere — it'll get a callsite when there's a screen that needs it.
+
+**Technical notes:**
+- **Fonts via Google Fonts downloadable provider:**
+  - New dependency: `androidx.compose.ui:ui-text-google-fonts` (BOM-resolved version; declared in `libs.versions.toml` as `androidx-compose-ui-text-google-fonts` and added to `app/build.gradle.kts`).
+  - New file `app/src/main/res/values/font_certs.xml` — the canonical Google Play Services downloadable-fonts certificate array (`com_google_android_gms_fonts_certs` → `_dev` + `_prod` `string-array`s). Pulled verbatim from `android/user-interface-samples` upstream; don't edit unless Google rotates the cert.
+  - `ui/theme/Type.kt` rewritten — `GoogleFont.Provider(providerAuthority = "com.google.android.gms.fonts", providerPackage = "com.google.android.gms", certificates = R.array.com_google_android_gms_fonts_certs)`. Three `FontFamily`s via the `androidx.compose.ui.text.googlefonts.Font(...)` factory: `BodyFamily` (Outfit, weights 400/500/600), `HeroSerif` (Playfair Display, italic 500 + roman 600), `DisplayMono` (JetBrains Mono, weights 400/600). The Compose `displayLarge` / `displayMedium` / `displaySmall` styles point at `DisplayMono`; everything else (`headlineLarge` → `labelSmall`) at `BodyFamily`. `HeroSerifItalic` style points at `HeroSerif` with `FontStyle.Italic`.
+  - Compile hiccup during the change: had to import `androidx.compose.ui.text.googlefonts.Font` instead of the shadowed `androidx.compose.ui.text.font.Font` so the `(googleFont, fontProvider, weight)` overload resolved. The two `Font` symbols collide; the body-text family needs the googlefonts version.
+- **Palette swap (Color.kt):**
+  - `Background #0A0A0F → #0B0B0A` (warmer near-black)
+  - `BrandBlue #1B3FB8 → #1034A6` (deeper)
+  - `PrimaryAmber #F5A623 → PrimaryGold #C8A84B` — token RENAMED. The hex shifts from vibrant amber to muted brass, and the old name no longer describes the colour. Every reference (23 files) updated via a single PowerShell sweep over `app/src/main/java/**/*.kt` (`PrimaryAmber → PrimaryGold` and `0xFF0A0A0F → 0xFF0B0B0A` in the same pass — 35 files touched). Two "amber" mentions in human-readable comments cleaned up manually (`BalanceeButton.kt` header, `AttendantOverlayHost.kt` swipe-handle comment).
+  - `SuccessGreen #48BB78 → #3AAA6A` (deeper)
+  - `TextPrimary #F7F7F8 → #E8E4DC` (warm off-white)
+  - `TextSecondary #A0A0AB → #A09C94` (warm grey)
+  - `OnPrimary` re-derived to `#0B0B0A` (tracks new Background); `OnBrand` to `#E8E4DC` (tracks new TextPrimary).
+  - New token `AccentOrange #D4622A` — declared but not referenced anywhere. Boss-specified but undirected. Wire on demand.
+  - The previously hardcoded `Color(0xFF0A0A0F)` in `NumericKeypad.kt` (the "text-on-filled-key" colour) was updated to `0xFF0B0B0A` by the bulk sweep so the foreground matches the new on-color token semantically.
+- **`Theme.kt`** — `darkColorScheme.primary` now `PrimaryGold`; no other change. Material 3 Compose components inherit the new gold for FAB-style affordances we don't currently use, but the token rename keeps the linkage correct.
+- **`docs/design-system.md`** — palette table, accents list, text tokens, typography section, and the `BalanceeButton` primitive description all updated in lockstep. State-color → border mapping table refreshed with the new hexes; rule-of-thumb paragraph kept (still gold = "receipt", green = "dispense succeeded").
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL (after the Font import fix). One Kotlin language-level warning still present from Phase 5c (KT-73255, `@ApplicationContext` annotation target) — not addressed here.
+- Memory: updated `project_color_roles.md` with the new hexes + the `PrimaryAmber → PrimaryGold` rename, plus the new typography stack.
+
+**Runtime behaviour note:**
+Google Fonts downloadable provider fetches each font on first use per device and caches indefinitely (the Play Services font cache survives reboots). On a fresh install with no network, the request fails silently and Compose falls back to the system serif/sans/mono — visually degraded but not broken. The kiosk install flow connects to WiFi/4G before onboarding finishes, so the cache will be warm well before the customer sees any of these fonts on the screen. No font-loading UX (placeholder text) is needed.
+
+**Out of scope (intentionally deferred):**
+- Orange `#D4622A` usage — declared in `Color.kt` as `AccentOrange` but no callsite. Boss said "leave out for now."
+- Bundled `.ttf` fallback — if Play Services is ever absent on a target device, we'd want offline-resilient `res/font/` entries. Not in V1.
+- Font weight/size review against the new families — Playfair and Outfit have slightly different x-heights vs. system serif/sans, so the existing sp values may need a fine-tune pass once the boss reviews real renders. Tracked as a Phase 5e candidate.
+
+**Next:**
+Manual visual review on a real device — boss sign-off on the fonts and palette against the strict-design screens. Once approved, merge `rebuild/strict-design` → `main`. Then Phase 6 (production wiring — USB serial, real payment SDK, SMS receiver, WorkManager sync, FCM/HTTP config push, including the cashier-tablet → pump PIN-push channel deferred from Phase 5c).

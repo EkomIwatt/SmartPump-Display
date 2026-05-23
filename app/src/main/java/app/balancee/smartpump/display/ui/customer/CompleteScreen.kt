@@ -40,7 +40,7 @@ import app.balancee.smartpump.display.ui.components.LedgerRow
 import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -63,7 +63,7 @@ fun CompleteScreen(
     // Flow 1 (digital pre-pay) finishes on a gold receipt card; cash, fill-up, and USSD
     // completions land on a green "dispense succeeded" card. Source: strict-design screens.
     val accent = when (flow) {
-        TransactionFlow.FIXED_PREPAY_DIGITAL -> PrimaryAmber
+        TransactionFlow.FIXED_PREPAY_DIGITAL -> PrimaryGold
         else -> SuccessGreen
     }
 
@@ -197,7 +197,7 @@ private fun methodLabel(method: PaymentMethod): String = when (method) {
 private fun formatNaira(value: Int): String =
     java.text.NumberFormat.getNumberInstance(java.util.Locale.UK).format(value)
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 600)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun CompleteScreenPreview() {
     SmartPumpDisplayTheme {

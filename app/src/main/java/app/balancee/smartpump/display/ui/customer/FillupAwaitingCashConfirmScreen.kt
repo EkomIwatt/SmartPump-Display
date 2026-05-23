@@ -29,7 +29,7 @@ import app.balancee.smartpump.display.ui.components.LitresDisplay
 import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 
@@ -54,11 +54,11 @@ fun FillupAwaitingCashConfirmScreen(
             pumpId = pumpId,
             mode = "Fill up · cash",
             stateLabel = "Awaiting cash",
-            stateColor = PrimaryAmber,
+            stateColor = PrimaryGold,
         )
 
         BalanceeCard(
-            borderColor = PrimaryAmber,
+            borderColor = PrimaryGold,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -67,11 +67,11 @@ fun FillupAwaitingCashConfirmScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                LabelText(text = "Hand cash to attendant", color = PrimaryAmber)
+                LabelText(text = "Hand cash to attendant", color = PrimaryGold)
                 Box(modifier = Modifier.fillMaxWidth()) {
                     AmountDisplay(
                         amountNaira = amountDueNaira,
-                        color = PrimaryAmber,
+                        color = PrimaryGold,
                     )
                 }
                 Text(
@@ -105,7 +105,7 @@ fun FillupAwaitingCashConfirmScreen(
                         LabelText(text = "Verified")
                         LitresDisplay(
                             litres = verifiedLitres,
-                            color = PrimaryAmber,
+                            color = PrimaryGold,
                             style = MaterialTheme.typography.displaySmall,
                         )
                     }
@@ -121,7 +121,7 @@ fun FillupAwaitingCashConfirmScreen(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 600)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun FillupAwaitingCashConfirmPreview() {
     SmartPumpDisplayTheme {

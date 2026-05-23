@@ -187,7 +187,7 @@ private fun ActionCard(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 360)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 360)
 @Composable
 private fun AttendantPanelIdlePreview() {
     SmartPumpDisplayTheme {
@@ -201,7 +201,7 @@ private fun AttendantPanelIdlePreview() {
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 360)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 360)
 @Composable
 private fun AttendantPanelAwaitingCashPreview() {
     SmartPumpDisplayTheme {

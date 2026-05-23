@@ -15,14 +15,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.HeroSerifItalic
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 
 @Composable
 fun HeroSerifText(
     text: String,
     modifier: Modifier = Modifier,
-    color: Color = PrimaryAmber,
+    color: Color = PrimaryGold,
     style: TextStyle = HeroSerifItalic,
 ) {
     Text(
@@ -32,7 +32,7 @@ fun HeroSerifText(
     )
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 720)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 720)
 @Composable
 private fun HeroSerifTextPreview() {
     SmartPumpDisplayTheme {

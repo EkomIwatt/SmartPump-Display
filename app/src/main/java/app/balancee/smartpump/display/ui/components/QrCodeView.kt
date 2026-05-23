@@ -80,7 +80,7 @@ private fun renderQrBitmap(
     return Bitmap.createBitmap(pixels, sizePx, sizePx, Bitmap.Config.ARGB_8888)
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 360, heightDp = 360)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 360, heightDp = 360)
 @Composable
 private fun QrCodeViewPreview() {
     SmartPumpDisplayTheme {

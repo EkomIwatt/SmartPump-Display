@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -74,7 +74,7 @@ fun AmountDisplay(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 720)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 720)
 @Composable
 private fun AmountDisplayPreview() {
     SmartPumpDisplayTheme {
@@ -84,7 +84,7 @@ private fun AmountDisplayPreview() {
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            AmountDisplay(amountNaira = 5_000, color = PrimaryAmber)
+            AmountDisplay(amountNaira = 5_000, color = PrimaryGold)
             AmountDisplay(amountNaira = 33_147, color = SuccessGreen)
             AmountDisplay(amountNaira = 2_767, color = ActiveCyan)
         }

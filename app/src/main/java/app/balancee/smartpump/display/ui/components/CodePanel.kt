@@ -47,7 +47,7 @@ fun CodePanel(
     )
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 720)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 720)
 @Composable
 private fun CodePanelPreview() {
     SmartPumpDisplayTheme {

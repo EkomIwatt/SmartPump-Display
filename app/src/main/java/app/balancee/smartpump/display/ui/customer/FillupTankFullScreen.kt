@@ -31,7 +31,7 @@ import app.balancee.smartpump.display.ui.components.LitresDisplay
 import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -59,11 +59,11 @@ fun FillupTankFullScreen(
             pumpId = pumpId,
             mode = "Fill up",
             stateLabel = "Tank full",
-            stateColor = PrimaryAmber,
+            stateColor = PrimaryGold,
         )
 
         BalanceeCard(
-            borderColor = PrimaryAmber,
+            borderColor = PrimaryGold,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -72,11 +72,11 @@ fun FillupTankFullScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                LabelText(text = "Amount due", color = PrimaryAmber)
+                LabelText(text = "Amount due", color = PrimaryGold)
                 Box(modifier = Modifier.fillMaxWidth()) {
                     AmountDisplay(
                         amountNaira = amountDueNaira,
-                        color = PrimaryAmber,
+                        color = PrimaryGold,
                     )
                 }
                 Text(
@@ -109,7 +109,7 @@ fun FillupTankFullScreen(
                         LabelText(text = "Verified")
                         LitresDisplay(
                             litres = verifiedLitres,
-                            color = PrimaryAmber,
+                            color = PrimaryGold,
                             style = MaterialTheme.typography.displaySmall,
                         )
                     }
@@ -143,7 +143,7 @@ fun FillupTankFullScreen(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 600)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun FillupTankFullPreview() {
     SmartPumpDisplayTheme {

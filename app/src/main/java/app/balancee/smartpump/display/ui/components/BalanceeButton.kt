@@ -1,5 +1,5 @@
 // Three button variants for the kiosk:
-//  - Primary: amber background, dark text, 64dp tall — money / authorise actions inside flows.
+//  - Primary: gold background, dark text, 64dp tall — money / authorise actions inside flows.
 //  - Secondary: transparent with border-subtle, text-primary label — neutral actions.
 //  - Brand: brand-blue background, light text — Idle-screen "Start Transaction" and other brand CTAs.
 // All render an all-caps label and disable to a tertiary-text outlined ghost.
@@ -31,7 +31,7 @@ import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.OnBrand
 import app.balancee.smartpump.display.ui.theme.OnPrimary
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
@@ -55,7 +55,7 @@ fun BalanceeButton(
         // "Share receipt" button takes the same gold/green as the card border).
         variant == BalanceeButtonVariant.Primary && accentColor != null ->
             Triple(accentColor, OnPrimary, accentColor)
-        variant == BalanceeButtonVariant.Primary -> Triple(PrimaryAmber, OnPrimary, PrimaryAmber)
+        variant == BalanceeButtonVariant.Primary -> Triple(PrimaryGold, OnPrimary, PrimaryGold)
         variant == BalanceeButtonVariant.Brand -> Triple(BrandBlue, OnBrand, BrandBlue)
         // Secondary with accentColor: outline + label in the accent (used by
         // "Return to Idle" so it matches the receipt border).
@@ -81,7 +81,7 @@ fun BalanceeButton(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 480)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 480)
 @Composable
 private fun BalanceeButtonPreview() {
     SmartPumpDisplayTheme {

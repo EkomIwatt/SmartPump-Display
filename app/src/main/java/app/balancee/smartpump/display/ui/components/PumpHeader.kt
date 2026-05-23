@@ -19,7 +19,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import java.util.Locale
@@ -48,7 +48,7 @@ fun PumpHeader(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 720)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 720)
 @Composable
 private fun PumpHeaderPreview() {
     SmartPumpDisplayTheme {
@@ -68,7 +68,7 @@ private fun PumpHeaderPreview() {
                 pumpId = "Pump 1",
                 mode = "Pre-pay",
                 stateLabel = "Waiting",
-                stateColor = PrimaryAmber,
+                stateColor = PrimaryGold,
             )
         }
     }

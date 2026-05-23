@@ -17,7 +17,7 @@ import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 
@@ -38,7 +38,7 @@ fun ThreeCardRow(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 360)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 360)
 @Composable
 private fun ThreeCardRowPreview() {
     SmartPumpDisplayTheme {
@@ -48,10 +48,10 @@ private fun ThreeCardRowPreview() {
                 .padding(24.dp),
             first = {
                 BalanceeCard(
-                    borderColor = PrimaryAmber,
+                    borderColor = PrimaryGold,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 ) {
-                    StateChip("Waiting", PrimaryAmber)
+                    StateChip("Waiting", PrimaryGold)
                 }
             },
             second = {

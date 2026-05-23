@@ -34,7 +34,7 @@ import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.components.QrCodeView
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 
@@ -61,7 +61,7 @@ fun FillupDigitalAwaitingPaymentScreen(
             pumpId = pumpId,
             mode = "Fill up · digital",
             stateLabel = "QR generated",
-            stateColor = PrimaryAmber,
+            stateColor = PrimaryGold,
         )
 
         Row(
@@ -102,7 +102,7 @@ private fun QrCard(
     modifier: Modifier = Modifier,
 ) {
     BalanceeCard(
-        borderColor = PrimaryAmber,
+        borderColor = PrimaryGold,
         modifier = modifier,
     ) {
         Column(
@@ -110,7 +110,7 @@ private fun QrCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            LabelText(text = "Scan to pay", color = PrimaryAmber)
+            LabelText(text = "Scan to pay", color = PrimaryGold)
             Box(modifier = Modifier.size(260.dp)) {
                 QrCodeView(
                     content = qrContent,
@@ -143,22 +143,22 @@ private fun InfoCard(
     modifier: Modifier = Modifier,
 ) {
     BalanceeCard(
-        borderColor = PrimaryAmber,
+        borderColor = PrimaryGold,
         modifier = modifier,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                LabelText(text = "Exact amount due", color = PrimaryAmber)
+                LabelText(text = "Exact amount due", color = PrimaryGold)
                 AmountDisplay(
                     amountNaira = amountDueNaira,
-                    color = PrimaryAmber,
+                    color = PrimaryGold,
                     style = MaterialTheme.typography.displayMedium,
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LitresDisplay(
                     litres = verifiedLitres,
-                    color = PrimaryAmber,
+                    color = PrimaryGold,
                     style = MaterialTheme.typography.displaySmall,
                 )
                 Text(
@@ -190,7 +190,7 @@ private fun formatExpiry(seconds: Int): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 600)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun FillupDigitalAwaitingPaymentPreview() {
     SmartPumpDisplayTheme {

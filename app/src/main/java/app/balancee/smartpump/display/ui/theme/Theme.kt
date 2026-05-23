@@ -6,7 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
 private val SmartPumpColorScheme = darkColorScheme(
-    primary = PrimaryAmber,
+    primary = PrimaryGold,
     onPrimary = OnPrimary,
     secondary = ActiveCyan,
     onSecondary = OnPrimary,

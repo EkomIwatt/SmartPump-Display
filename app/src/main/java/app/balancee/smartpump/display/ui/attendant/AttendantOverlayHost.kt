@@ -44,7 +44,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 
 private const val OVERLAY_ANIM_MS = 250
 private const val SWIPE_UP_THRESHOLD_DP = 32  // net drag in dp to count as a swipe-up open
@@ -195,7 +195,7 @@ private fun SwipeUpHandle(
                 .clip(RoundedCornerShape(2.dp))
                 .background(BorderSubtle),
         )
-        // Subtle amber tick above the handle so attendants can see it in daylight.
+        // Subtle gold tick above the handle so attendants can see it in daylight.
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -203,7 +203,7 @@ private fun SwipeUpHandle(
                 .width(8.dp)
                 .height(2.dp)
                 .clip(RoundedCornerShape(1.dp))
-                .background(PrimaryAmber.copy(alpha = 0.4f)),
+                .background(PrimaryGold.copy(alpha = 0.4f)),
         )
     }
 }

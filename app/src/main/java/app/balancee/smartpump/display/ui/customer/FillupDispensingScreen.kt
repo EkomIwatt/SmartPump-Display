@@ -123,7 +123,7 @@ fun FillupDispensingScreen(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 600)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun FillupDispensingScreenPreview() {
     SmartPumpDisplayTheme {

@@ -8,43 +8,46 @@ The screenshots under `docs/Strict design screens/` are authoritative. This file
 
 ## Colors
 
+Phase 5d (2026-05-23) palette refresh — gold pivoted from fintech orange to muted brass; brand blue deepened; background warmed; text dropped to a warm off-white. Token names changed (`PrimaryAmber` → `PrimaryGold`).
+
 ### Canvas
-- **Background:** `#0A0A0F` (near-black, slight blue tint)
+- **Background:** `#0B0B0A` (near-black, warm)
 - **Surface:** `#13131A` (cards, elevated elements)
 - **Surface variant:** `#1C1C26` (subtle elevation)
 - **Code-panel surface:** `#0F0F16` (the dark code/log blocks)
 - **Border subtle:** `#2A2A38` (default 1dp card border)
 
 ### Accents
-- **Primary / action amber (gold):** `#F5A623` — AUTHORISE buttons, hero italic display ("Every state. Every flow."), gold borders on cash-mode cards
-- **Primary on-color:** `#0A0A0F`
+- **Primary / action gold:** `#C8A84B` (`PrimaryGold`) — AUTHORISE buttons, hero italic display ("Every state. Every flow."), gold borders on cash-mode cards. Muted brass — not vibrant amber.
+- **Primary on-color:** `#0B0B0A` (`OnPrimary`)
 - **Active cyan (dispensing / filling):** `#4FD1C5` — fill-up dispensing cards, hero numbers in fill mode
-- **Success green:** `#48BB78` — CONFIRMED / PAID / COMPLETE states, green-bordered completion cards
+- **Success green:** `#3AAA6A` — CONFIRMED / PAID / COMPLETE states, green-bordered completion cards
 - **Warning red:** `#F56565` — error banners, "V1 REQUIRED" badges
-- **Brand blue:** `#1B3FB8` — Balanceè brand surface. Used on the **Idle screen** (card border, "balanceè" wordmark, "Start Transaction" CTA) and the Balanceè logo. Also on the spec cover. The Idle screen is the only place the brand-blue dominates — once a transaction starts, the canvas hands over to the per-state accents (amber / cyan / green). Pair with `OnBrand` (`#F7F7F8`) for text on blue.
+- **Brand blue:** `#1034A6` — Balanceè brand surface. Used on the **Idle screen** (card border, "Start Transaction" CTA, station-name fallback) and the Balanceè-app context. Also on the spec cover. The Idle screen is the only place the brand-blue dominates — once a transaction starts, the canvas hands over to the per-state accents (gold / cyan / green). Pair with `OnBrand` (`#E8E4DC`) for text on blue.
+- **Accent orange:** `#D4622A` (`AccentOrange`) — reserved per Phase 5d spec; no current callsite. Use only when a future state explicitly demands an orange accent.
 
 ### Text
-- **Primary:** `#F7F7F8`
-- **Secondary:** `#A0A0AB`
+- **Primary:** `#E8E4DC` (warm off-white)
+- **Secondary:** `#A09C94` (warm grey)
 - **Tertiary:** `#5A5A6B`
-- **On amber:** `#0A0A0F`
-- **On cyan:** `#0A0A0F`
-- **On green:** `#0A0A0F`
+- **On gold:** `#0B0B0A`
+- **On cyan:** `#0B0B0A`
+- **On green:** `#0B0B0A`
 
 ### State-color → border mapping (critical)
 Cards carry a 1dp border in the state color:
 
 | State                                 | Border color   | Token        |
 |---------------------------------------|----------------|--------------|
-| WAITING (pre-pay QR shown)            | gold           | `#F5A623`    |
-| AWAITING SMS (USSD)                   | blue/gold mix  | `#F5A623`    |
-| DISPENSING — fixed/pre-pay            | green          | `#48BB78`    |
+| WAITING (pre-pay QR shown)            | gold           | `#C8A84B`    |
+| AWAITING SMS (USSD)                   | gold           | `#C8A84B`    |
+| DISPENSING — fixed/pre-pay            | green          | `#3AAA6A`    |
 | DISPENSING — fill-up                  | cyan           | `#4FD1C5`    |
-| DISPENSING — cash fixed               | gold           | `#F5A623`    |
-| TANK FULL (verified count)            | gold           | `#F5A623`    |
-| CONFIRMED / PAID                      | green          | `#48BB78`    |
-| COMPLETE — Flow 1 receipt (digital pre-pay) | gold     | `#F5A623`    |
-| COMPLETE — cash / fill-up / USSD      | green          | `#48BB78`    |
+| DISPENSING — cash fixed               | gold           | `#C8A84B`    |
+| TANK FULL (verified count)            | gold           | `#C8A84B`    |
+| CONFIRMED / PAID                      | green          | `#3AAA6A`    |
+| COMPLETE — Flow 1 receipt (digital pre-pay) | gold     | `#C8A84B`    |
+| COMPLETE — cash / fill-up / USSD      | green          | `#3AAA6A`    |
 | IDLE / default                        | border-subtle  | `#2A2A38`    |
 
 Rule of thumb: the **gold** completion is the "receipt" feeling — the customer paid up front and now sees their itemised receipt. The **green** completion is the "dispense succeeded" feeling — the action just finished. Flow 1 is the only flow that pays before fuelling, so it's the only flow whose Complete is gold.
@@ -55,12 +58,14 @@ The state's chip pill (top-left of card) uses the same color, filled with ~15% a
 
 ## Typography
 
-- **Display serif italic** (hero phrases — "Every state. Every flow.", "Fixed amount, pay before fuel flows."): a high-contrast serif italic. Use `PlayfairDisplay-Italic` or system serif italic. Weight 400–500. Used at 32sp+ on headings, gold color.
-- **Display monospace** (litre counts, naira amounts on dispensing/complete screens): JetBrains Mono or Space Mono. **120sp+** for the live litre count — this is non-negotiable.
-- **Headings:** Inter / system sans-serif, weight 600.
-- **Body:** Inter, weight 400.
-- **Labels (small all-caps):** Inter, weight 500, letter-spacing 0.1em, all uppercase, color = text-secondary or text-tertiary.
-- **Code / monospace panel:** JetBrains Mono, weight 400, color text-secondary on the code-panel surface. Syntax highlighting tokens: keywords cyan-ish (`#4FD1C5`), strings green-ish (`#48BB78`), numbers gold (`#F5A623`), comments tertiary.
+All three families load via Google Fonts downloadable provider (`androidx.compose.ui:ui-text-google-fonts`). No `.ttf` shipped in `res/font`. Cert array lives in `res/values/font_certs.xml` — standard Google Play Services certs, do not edit.
+
+- **Display serif italic** (hero phrases — "Every state. Every flow.", "Fixed amount, pay before fuel flows."): **Playfair Display Italic**, weight 500. Used at 32sp+ on headings, gold color by default.
+- **Display monospace** (litre counts, naira amounts on dispensing/complete screens): **JetBrains Mono**, weight 400 or 600. **120sp+** for the live litre count — this is non-negotiable.
+- **Headings:** **Outfit**, weight 600.
+- **Body:** **Outfit**, weight 400.
+- **Labels (small all-caps):** Outfit, weight 500, letter-spacing 0.1em, all uppercase, color = text-secondary or text-tertiary.
+- **Code / monospace panel:** JetBrains Mono, weight 400, color text-secondary on the code-panel surface. Syntax highlighting tokens: keywords cyan-ish (`#4FD1C5`), strings green-ish (`#3AAA6A`), numbers gold (`#C8A84B`), comments tertiary.
 
 ---
 
@@ -80,7 +85,7 @@ The state's chip pill (top-left of card) uses the same color, filled with ~15% a
 ## Component primitives
 
 - **`BalanceeCard`** — surface background, 1dp border (color from state), 12dp radius, 24dp internal padding. The border-color parameter is required.
-- **`BalanceeButton`** — primary variant: amber bg, dark text, 64dp tall, all-caps label (AUTHORISE-style actions inside flows). Secondary variant: transparent bg, border-subtle border, text-primary label. Brand variant: brand-blue bg, light text — used by the Idle-screen "Start Transaction" CTA only. Disabled: text-tertiary, border-subtle, no fill.
+- **`BalanceeButton`** — primary variant: gold bg, dark text, 64dp tall, all-caps label (AUTHORISE-style actions inside flows). Secondary variant: transparent bg, border-subtle border, text-primary label. Brand variant: brand-blue bg, light text — used by the Idle-screen "Start Transaction" CTA only. Disabled: text-tertiary, border-subtle, no fill.
 - **`LitresDisplay`** — giant monospace number (e.g. "3.42") with "L" appended in text-secondary at ~40% of the number size. Color follows state (cyan for fill-up, green for confirmed, gold for cash-fixed).
 - **`AmountDisplay`** — same scale as `LitresDisplay` but with the ₦ prefix. Used for the cash-fixed and post-fill QR screens.
 - **`StateChip`** — 6dp radius pill, padding 4dp/8dp, all-caps label in label type. Filled color from the state table at ~15% alpha. Outline 1dp at full color. Includes a 6dp leading dot at full color (e.g. `• WAITING`).

@@ -34,7 +34,7 @@ import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
@@ -52,8 +52,8 @@ fun FixedDispensingScreen(
     pumpId: String = "Pump 1",
 ) {
     val isCash = flow == TransactionFlow.CASH_FIXED
-    val figureColor = if (isCash) PrimaryAmber else ActiveCyan
-    val borderColor = if (isCash) PrimaryAmber else ActiveCyan
+    val figureColor = if (isCash) PrimaryGold else ActiveCyan
+    val borderColor = if (isCash) PrimaryGold else ActiveCyan
     val progressFraction = if (litresAuthorised > 0) {
         (litresSoFar / litresAuthorised).coerceIn(0.0, 1.0)
     } else 0.0
@@ -174,7 +174,7 @@ private fun ProgressBar(
 private fun formatNaira(value: Int): String =
     java.text.NumberFormat.getNumberInstance(java.util.Locale.UK).format(value)
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 600)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun FixedDispensingPreview() {
     SmartPumpDisplayTheme {

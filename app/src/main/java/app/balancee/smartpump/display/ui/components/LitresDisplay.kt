@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.TextSecondary
@@ -55,7 +55,7 @@ fun LitresDisplay(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 480)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 480)
 @Composable
 private fun LitresDisplayPreview() {
     SmartPumpDisplayTheme {
@@ -67,7 +67,7 @@ private fun LitresDisplayPreview() {
         ) {
             LitresDisplay(litres = 3.42, color = SuccessGreen)
             LitresDisplay(litres = 0.18, color = ActiveCyan)
-            LitresDisplay(litres = 5.75, color = PrimaryAmber)
+            LitresDisplay(litres = 5.75, color = PrimaryGold)
         }
     }
 }

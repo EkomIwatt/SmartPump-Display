@@ -18,21 +18,21 @@ fun TransactionState.borderColor(): Color = when (this) {
     is TransactionState.UssdAwaitingSms,
     is TransactionState.FillupTankFull,
     is TransactionState.FillupAwaitingCashConfirm,
-    is TransactionState.FillupDigitalAwaitingPayment -> PrimaryAmber
+    is TransactionState.FillupDigitalAwaitingPayment -> PrimaryGold
 
     is TransactionState.FillupDispensing -> ActiveCyan
 
-    is TransactionState.CashFixedDispensing -> PrimaryAmber
+    is TransactionState.CashFixedDispensing -> PrimaryGold
 
     is TransactionState.FixedDispensing -> when (flow) {
-        TransactionFlow.CASH_FIXED -> PrimaryAmber
+        TransactionFlow.CASH_FIXED -> PrimaryGold
         else -> SuccessGreen
     }
 
     // Per strict-design Flow 1 (Screenshot 224956) the digital-pre-pay receipt
     // is gold-bordered; cash, fill-up, and USSD completions stay green.
     is TransactionState.Complete -> when (flow) {
-        TransactionFlow.FIXED_PREPAY_DIGITAL -> PrimaryAmber
+        TransactionFlow.FIXED_PREPAY_DIGITAL -> PrimaryGold
         else -> SuccessGreen
     }
 

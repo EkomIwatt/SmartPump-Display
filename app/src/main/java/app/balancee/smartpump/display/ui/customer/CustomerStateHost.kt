@@ -229,7 +229,7 @@ private fun ErrorScreen(
 
 @androidx.compose.ui.tooling.preview.Preview(
     showBackground = true,
-    backgroundColor = 0xFF0A0A0F,
+    backgroundColor = 0xFF0B0B0A,
     widthDp = 1024,
     heightDp = 600,
 )
@@ -256,7 +256,7 @@ private fun CustomerStateHostIdlePreview() {
 
 @androidx.compose.ui.tooling.preview.Preview(
     showBackground = true,
-    backgroundColor = 0xFF0A0A0F,
+    backgroundColor = 0xFF0B0B0A,
     widthDp = 1024,
     heightDp = 600,
 )

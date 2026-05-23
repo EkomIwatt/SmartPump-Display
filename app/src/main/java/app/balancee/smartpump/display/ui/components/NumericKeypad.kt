@@ -128,7 +128,7 @@ private fun DigitKey(
     }
     val fg = when {
         !enabled -> TextPrimary.copy(alpha = 0.3f)
-        filled -> Color(0xFF0A0A0F)
+        filled -> Color(0xFF0B0B0A)
         else -> TextPrimary
     }
     Box(
@@ -144,7 +144,7 @@ private fun DigitKey(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 360, heightDp = 480)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 360, heightDp = 480)
 @Composable
 private fun NumericKeypadPreview() {
     SmartPumpDisplayTheme {

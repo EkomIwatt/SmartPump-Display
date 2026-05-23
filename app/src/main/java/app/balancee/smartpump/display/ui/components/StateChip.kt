@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import java.util.Locale
@@ -61,7 +61,7 @@ fun StateChip(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A)
 @Composable
 private fun StateChipPreview() {
     SmartPumpDisplayTheme {
@@ -71,7 +71,7 @@ private fun StateChipPreview() {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            StateChip("Waiting", PrimaryAmber)
+            StateChip("Waiting", PrimaryGold)
             StateChip("Dispensing", ActiveCyan)
             StateChip("Confirmed", SuccessGreen)
         }

@@ -44,7 +44,7 @@ fun LedgerRow(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A)
 @Composable
 private fun LedgerRowPreview() {
     SmartPumpDisplayTheme {

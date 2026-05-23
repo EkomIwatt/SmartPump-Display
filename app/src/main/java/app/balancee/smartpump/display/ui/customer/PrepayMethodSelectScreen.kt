@@ -31,7 +31,7 @@ import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
-import app.balancee.smartpump.display.ui.theme.PrimaryAmber
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.TextPrimary
@@ -72,7 +72,7 @@ private val MethodTiles = listOf(
         title = "USSD *737#",
         tag = "Offline",
         description = "Dial from any phone. We listen for the SMS.",
-        accent = PrimaryAmber,
+        accent = PrimaryGold,
     ),
     MethodTile(
         method = PaymentMethod.CASH_SEE_ATTENDANT,
@@ -201,7 +201,7 @@ private fun MethodCard(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0A0A0F, widthDp = 1024, heightDp = 600)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun PrepayMethodSelectPreview() {
     SmartPumpDisplayTheme {
