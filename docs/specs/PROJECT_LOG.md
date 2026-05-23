@@ -640,3 +640,44 @@ Two things rolled into one commit. First, an on-device side-by-side of the Idle 
 
 **Next:**
 Same as logged on the Phase 6a entry — Phase 6b (Flow 1 polish). The button-styling tweaks (non-uppercase Brand label, pill corner radius) and any further Idle-card resizing wait for boss eyeball on the post-6a-fix tablet rendering.
+
+---
+
+### Phase 6b (rebuild) — Unified Mode + Amount + Method screen
+**Date:** 2026-05-23
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+The pre-pay path used to walk the customer through three separate screens — pick PRE-PAY vs FILL UP, pick a Naira amount, pick a payment method — one tap → next screen → next screen. The strict-design spec (and the side-by-side at `docs/compare/required.png`) collapses all three into a single screen with progressive reveal: you pick PRE-PAY and the amount section drops in below; you pick an amount and the payment-method section drops in below that; the Confirm button at the bottom enables only when everything is set. FILL UP is the same screen but with the amount and method sections hidden — one tap on FILL UP, then Confirm. The two old screens (`PrepayAmountSelectScreen`, `PrepayMethodSelectScreen`) are gone; the new `ModeSelectScreen` does the whole job. Custom amount works inline — tapping the Custom tile reveals a numeric keypad below the amount grid; typing + ✓ commits the value and unhides the method section.
+
+**Technical notes:**
+- **New domain enum** `domain/model/TransactionMode.kt` — `PRE_PAY` / `FILL_UP`. Distinct from `TransactionFlow` (modes are the two coarse user choices; flows are the five concrete state machines the mode + method resolve to).
+- **`TransactionState.kt`** — `ModeSelect` promoted from `data object` to `data class ModeSelect(mode: TransactionMode? = null, amountNaira: Int? = null, method: PaymentMethod? = null)`. All fields default to null so older persisted JSON blobs (the `data object` shape) still deserialise into a blank ModeSelect on boot. `PrepayAmountSelect` and `PrepayMethodSelect` states deleted — they were the two stops that 6b collapses into ModeSelect.
+- **`CustomerViewModel.kt`** — old per-screen handlers (`onSelectPrePay`, `onSelectFillUp`, `onPrepayAmountChosen`, `onPrepayMethodChosen`) replaced with four ModeSelect handlers: `onModeTileTap(mode)`, `onAmountTileTap(amount)`, `onMethodTileTap(method)`, and `onModeConfirm()`. The confirm dispatcher mirrors the old `onPrepayMethodChosen` routing — USSD → `startUssdFlow`, CASH → `onCancel`, everything else → `startPrepayPayment` — and FILL_UP transitions to `FillupAwaitingAttendantAuth`. `onStartTransaction` now sets a blank `ModeSelect()`. Boot resume's pure-UI branch dropped its references to the two deleted states.
+- **`ui/components/SelectableTile.kt`** — new primitive. Brand-blue filled when selected; dark surface + subtle border when not. Generic `content` slot so the same primitive serves mode tiles (tall, icon + title + subtitle), amount tiles (compact centred figure), and method tiles (wide horizontal row with optional badge).
+- **`ui/customer/ModeSelectScreen.kt`** — rewritten. Header row (station logo if uploaded else Playfair displayName, gold `PUMP 1` chip on the right) → `STATE 1 — CHOOSE MODE` label → vertical-scroll content column → bottom Cancel/Confirm row.
+  - `ModeSection` always visible: two `ModeTile`s in a `Row` with weight 1f each — ⚡ glyph + "PRE-PAY" / "Fixed amount" and ⛽ glyph + "FILL UP" / "Pay after".
+  - `AmountSection` shown only when `state.mode == PRE_PAY`. 2×3 grid of `AmountTile`s (₦2k / ₦5k / ₦10k / ₦20k / ₦50k / Custom). Tapping Custom flips a local `customKeypadOpen` flag and reveals an inline `NumericKeypad` with a typed-amount display above it; min ₦200, max ₦200,000. The ✓ key commits the typed value via `onAmountTileTap`. Tapping a preset (or switching back to FILL UP) cancels any open keypad.
+  - `MethodSection` shown only when `state.amountNaira != null && !customKeypadOpen`. Four method tiles in a vertical column: Balanceè App (FASTEST badge), Bank QR / Transfer, NFC card, USSD · *737# (WORKS ON 2G badge). Cash dropped from this list — pre-pay never uses cash (cash goes through Cash Fixed via the attendant overlay).
+  - `BottomBar` — Cancel (Secondary, weight 1) + Confirm (Brand, weight 2). Confirm label is `Confirm ₦X,XXX` (PRE_PAY w/ amount), `Confirm FILL UP` (FILL_UP), or just `Confirm` (initial state). Enabled when the selection is complete for the current mode.
+- **`CustomerStateHost.kt`** — removed dispatches for the deleted states; `ModeSelect` now forwards the four tile handlers + `onConfirm` + `identity` (so the new ModeSelectScreen can render the station-identity header). Previews updated.
+- **`MainActivity.kt`** — wired the new VM methods into the host.
+- **`StateColors.kt`** — `PrepayAmountSelect` / `PrepayMethodSelect` cases removed.
+- **Deleted**: `ui/customer/PrepayAmountSelectScreen.kt`, `ui/customer/PrepayMethodSelectScreen.kt`.
+- **Visual treatments** (per `docs/compare/required.png`):
+  - Mode tiles are 120dp tall with the glyph + title + subtitle column-centred. Glyph colour matches the tile accent in the unselected state (PRE-PAY → gold ⚡, FILL UP → cyan ⛽); both flip to OnBrand when selected.
+  - Amount tiles are 56dp tall, label centred, label "₦2k" style for round thousands.
+  - Method tiles are 56dp tall horizontal rows with a leading filled-circle (OnBrand when selected, BorderSubtle when not), the method label in the middle, and an optional all-caps gold badge on the right (FASTEST / WORKS ON 2G).
+  - `PUMP 1` chip uses `PrimaryGold` at 10% alpha fill with full-colour text — matches the spec's gold-bordered chip in the top-right.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+- **Boot-resume compatibility**: persisted `ModeSelect` blobs from before this commit deserialise as `ModeSelect(mode=null, amountNaira=null, method=null)` thanks to kotlinx default values + the repo's existing `Json { ignoreUnknownKeys = true }`. The customer sees a blank ModeSelect after the power cut and re-makes their selections — no crash, no data loss (the dispense never started).
+
+**Out of scope (intentionally):**
+- The grey-disabled treatment for amount tiles that aren't tappable (spec dims `₦5k`, `₦10k`, etc. once `₦2k` is selected, but that contradicts the affordance — the user must be able to switch presets without cancelling first). Kept the spec's selected/unselected only.
+- Mode icons as proper vector drawables. The ⚡ and ⛽ glyphs render as text emoji for V1; Material Icons or custom SVGs can land if the boss wants pixel-perfect glyphs.
+- Method-tile icons (the spec shows tiny brand glyphs next to "Balanceè App", "Bank QR / Transfer"). Replaced with the dot affordance for now — gives the same selected/unselected signal without needing brand assets.
+- BalanceeButton primitive changes (non-uppercase Brand label, pill corner radius). The bottom Confirm button is still all-caps and 8dp radius. Pinned for a separate small commit if the boss wants the pill look.
+
+**Next:**
+Phase 6c — Flow 4 (Cash Fixed) polish against `docs/Strict design screens/Screenshot 2026-05-11 225053.png`. Should be a smaller scope — the cash-fixed amount-entry screen already uses a keypad layout, just needs the new section-header treatment and header chrome (station-identity row + PUMP chip) to match the spec.

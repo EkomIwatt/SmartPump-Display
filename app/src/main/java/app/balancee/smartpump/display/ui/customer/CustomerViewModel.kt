@@ -41,6 +41,7 @@ import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PulseMessage
 import app.balancee.smartpump.display.domain.model.Transaction
 import app.balancee.smartpump.display.domain.model.TransactionFlow
+import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
@@ -148,8 +149,6 @@ class CustomerViewModel @Inject constructor(
         when (restored) {
             is TransactionState.Idle,
             is TransactionState.ModeSelect,
-            is TransactionState.PrepayAmountSelect,
-            is TransactionState.PrepayMethodSelect,
             is TransactionState.FillupAwaitingAttendantAuth,
             is TransactionState.FillupTankFull,
             is TransactionState.FillupAwaitingCashConfirm,
@@ -273,7 +272,7 @@ class CustomerViewModel @Inject constructor(
             when (val result = canStartTransaction()) {
                 is CanStartTransactionUseCase.Result.Allowed -> {
                     pricePerLitre = (result.config.koboPerLitre / 100).toInt()
-                    setState(TransactionState.ModeSelect)
+                    setState(TransactionState.ModeSelect())
                 }
                 CanStartTransactionUseCase.Result.PriceNotSet -> {
                     setState(
@@ -287,15 +286,58 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    fun onSelectPrePay() {
-        if (currentState() is TransactionState.ModeSelect) {
-            setState(TransactionState.PrepayAmountSelect)
-        }
+    /**
+     * Tile-tap handlers on the unified ModeSelect screen. Each one updates the
+     * current ModeSelect state in place; on switching to FILL_UP we clear any
+     * lingering amount/method choices so the visible UI matches the new mode.
+     */
+    fun onModeTileTap(mode: TransactionMode) {
+        val current = currentState() as? TransactionState.ModeSelect ?: return
+        setState(
+            current.copy(
+                mode = mode,
+                // FILL_UP doesn't take a customer-side amount or method — clear them.
+                amountNaira = if (mode == TransactionMode.FILL_UP) null else current.amountNaira,
+                method = if (mode == TransactionMode.FILL_UP) null else current.method,
+            )
+        )
     }
 
-    fun onSelectFillUp() {
-        if (currentState() is TransactionState.ModeSelect) {
-            setState(TransactionState.FillupAwaitingAttendantAuth)
+    fun onAmountTileTap(amountNaira: Int) {
+        val current = currentState() as? TransactionState.ModeSelect ?: return
+        if (current.mode != TransactionMode.PRE_PAY) return
+        setState(current.copy(amountNaira = amountNaira))
+    }
+
+    fun onMethodTileTap(method: PaymentMethod) {
+        val current = currentState() as? TransactionState.ModeSelect ?: return
+        if (current.mode != TransactionMode.PRE_PAY) return
+        setState(current.copy(method = method))
+    }
+
+    /**
+     * Commit the ModeSelect choices. PRE_PAY routes through the same payment paths the
+     * old PrepayMethodSelect screen used (USSD → USSD flow; cash → cancel back to Idle;
+     * everything else → digital pre-pay). FILL_UP transitions straight to
+     * FillupAwaitingAttendantAuth.
+     */
+    fun onModeConfirm() {
+        val current = currentState() as? TransactionState.ModeSelect ?: return
+        when (current.mode) {
+            TransactionMode.FILL_UP ->
+                setState(TransactionState.FillupAwaitingAttendantAuth)
+
+            TransactionMode.PRE_PAY -> {
+                val amount = current.amountNaira ?: return
+                val method = current.method ?: return
+                when (method) {
+                    PaymentMethod.CASH_SEE_ATTENDANT -> onCancel()
+                    PaymentMethod.USSD -> startUssdFlow(amountNaira = amount)
+                    else -> startPrepayPayment(amountNaira = amount, method = method)
+                }
+            }
+
+            null -> Unit
         }
     }
 
@@ -616,23 +658,6 @@ class CustomerViewModel @Inject constructor(
 
     private fun generateCashTxnId(): String =
         "BLC-${System.currentTimeMillis().toString().takeLast(5)}"
-
-    // ---- Pre-pay flow --------------------------------------------------------------
-
-    fun onPrepayAmountChosen(amountNaira: Int) {
-        if (currentState() is TransactionState.PrepayAmountSelect) {
-            setState(TransactionState.PrepayMethodSelect(amountNaira = amountNaira))
-        }
-    }
-
-    fun onPrepayMethodChosen(method: PaymentMethod) {
-        val current = currentState() as? TransactionState.PrepayMethodSelect ?: return
-        when (method) {
-            PaymentMethod.CASH_SEE_ATTENDANT -> onCancel()
-            PaymentMethod.USSD -> startUssdFlow(amountNaira = current.amountNaira)
-            else -> startPrepayPayment(amountNaira = current.amountNaira, method = method)
-        }
-    }
 
     // ---- USSD offline (Flow 5) ------------------------------------------------------
 

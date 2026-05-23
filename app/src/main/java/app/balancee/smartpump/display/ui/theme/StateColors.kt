@@ -9,8 +9,6 @@ import app.balancee.smartpump.display.domain.model.TransactionState
 fun TransactionState.borderColor(): Color = when (this) {
     is TransactionState.Idle,
     is TransactionState.ModeSelect,
-    is TransactionState.PrepayAmountSelect,
-    is TransactionState.PrepayMethodSelect,
     is TransactionState.FillupAwaitingAttendantAuth,
     is TransactionState.CashFixedAmountEntry -> BorderSubtle
 

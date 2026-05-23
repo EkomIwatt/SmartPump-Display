@@ -1,13 +1,4 @@
 // Typography for the industrial-fintech display language.
-// - Hero serif italic: Playfair Display Italic — gold display phrases.
-// - Display mono: JetBrains Mono — giant litre counts, naira amounts, ledger values, ref codes.
-// - Headings / body: Outfit — every sans-serif surface on the customer + attendant screens.
-// - Labels: Outfit, ALL CAPS tracked — field names, state chips.
-//
-// Fonts resolve via the Google Fonts downloadable provider — no .ttf in res/font, no asset
-// shipping. The provider fetches once per font per device and caches indefinitely. On a
-// pump kiosk that comes up on WiFi/4G during install, the cache is warm before the
-// onboarding flow finishes.
 package app.balancee.smartpump.display.ui.theme
 
 import androidx.compose.material3.Typography
@@ -20,176 +11,179 @@ import androidx.compose.ui.text.googlefonts.GoogleFont
 import androidx.compose.ui.unit.sp
 import app.balancee.smartpump.display.R
 
-private val GoogleFontsProvider = GoogleFont.Provider(
-    providerAuthority = "com.google.android.gms.fonts",
-    providerPackage = "com.google.android.gms",
-    certificates = R.array.com_google_android_gms_fonts_certs,
-)
+// — Google Fonts Setup ————————————————————————————————————————————————————
+private val GoogleFontsProvider: GoogleFont.Provider
+    get() = GoogleFont.Provider(
+        providerAuthority = "com.google.android.gms.fonts",
+        providerPackage = "com.google.android.gms",
+        certificates = R.array.com_google_android_gms_fonts_certs,
+    )
 
-// — Outfit (body / UI / headings / labels) ————————————————————————————————
-private val OutfitGoogle = GoogleFont("Outfit")
-val BodyFamily: FontFamily = FontFamily(
-    Font(googleFont = OutfitGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.Normal),
-    Font(googleFont = OutfitGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.Medium),
-    Font(googleFont = OutfitGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.SemiBold),
-)
+private val OutfitGoogle get() = GoogleFont("Outfit")
+private val PlayfairGoogle get() = GoogleFont("Playfair Display")
+private val JetBrainsMonoGoogle get() = GoogleFont("JetBrains Mono")
 
-// — Playfair Display (hero serif) —————————————————————————————————————————
-private val PlayfairGoogle = GoogleFont("Playfair Display")
-val HeroSerif: FontFamily = FontFamily(
-    Font(
-        googleFont = PlayfairGoogle,
-        fontProvider = GoogleFontsProvider,
-        weight = FontWeight.Medium,
-        style = FontStyle.Italic,
-    ),
-    Font(
-        googleFont = PlayfairGoogle,
-        fontProvider = GoogleFontsProvider,
-        weight = FontWeight.SemiBold,
-    ),
-)
+val BodyFamily: FontFamily
+    get() = FontFamily(
+        Font(googleFont = OutfitGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.Normal),
+        Font(googleFont = OutfitGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.Medium),
+        Font(googleFont = OutfitGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.SemiBold),
+    )
 
-// — JetBrains Mono (numbers, ledger values, codes) ————————————————————————
-private val JetBrainsMonoGoogle = GoogleFont("JetBrains Mono")
-val DisplayMono: FontFamily = FontFamily(
-    Font(googleFont = JetBrainsMonoGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.Normal),
-    Font(googleFont = JetBrainsMonoGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.SemiBold),
-)
+val HeroSerif: FontFamily
+    get() = FontFamily(
+        Font(googleFont = PlayfairGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.Medium, style = FontStyle.Italic),
+        Font(googleFont = PlayfairGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.SemiBold),
+    )
 
-/**
- * Hero serif italic — used for gold display phrases on cover / section headers
- * (e.g. "Every state. Every flow.", "Fixed amount, pay before fuel flows.").
- * Color is applied at call site so it can carry the state colour.
- */
-val HeroSerifItalic = TextStyle(
-    fontFamily = HeroSerif,
+val DisplayMono: FontFamily
+    get() = FontFamily(
+        Font(googleFont = JetBrainsMonoGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.Normal),
+        Font(googleFont = JetBrainsMonoGoogle, fontProvider = GoogleFontsProvider, weight = FontWeight.SemiBold),
+    )
+
+// — Base Styles (Font-agnostic) ———————————————————————————————————————————
+private val HeroSerifItalicBase = TextStyle(
     fontStyle = FontStyle.Italic,
     fontWeight = FontWeight.Medium,
     fontSize = 40.sp,
     lineHeight = 48.sp,
 )
 
+private val DisplayLargeBase = TextStyle(
+    fontWeight = FontWeight.Normal,
+    fontSize = 120.sp,
+    lineHeight = 120.sp,
+    letterSpacing = (-2).sp,
+    color = TextPrimary,
+)
+
+private val DisplayMediumBase = TextStyle(
+    fontWeight = FontWeight.Normal,
+    fontSize = 72.sp,
+    lineHeight = 72.sp,
+    letterSpacing = (-1).sp,
+    color = TextPrimary,
+)
+
+private val DisplaySmallBase = TextStyle(
+    fontWeight = FontWeight.Normal,
+    fontSize = 48.sp,
+    lineHeight = 52.sp,
+    color = TextPrimary,
+)
+
+private val HeadlineLargeBase = TextStyle(
+    fontWeight = FontWeight.SemiBold,
+    fontSize = 28.sp,
+    lineHeight = 36.sp,
+    color = TextPrimary,
+)
+
+private val HeadlineMediumBase = TextStyle(
+    fontWeight = FontWeight.SemiBold,
+    fontSize = 22.sp,
+    lineHeight = 28.sp,
+    color = TextPrimary,
+)
+
+private val TitleLargeBase = TextStyle(
+    fontWeight = FontWeight.SemiBold,
+    fontSize = 18.sp,
+    lineHeight = 24.sp,
+    color = TextPrimary,
+)
+
+private val TitleMediumBase = TextStyle(
+    fontWeight = FontWeight.Medium,
+    fontSize = 16.sp,
+    lineHeight = 20.sp,
+    color = TextPrimary,
+)
+
+private val BodyLargeBase = TextStyle(
+    fontWeight = FontWeight.Normal,
+    fontSize = 16.sp,
+    lineHeight = 24.sp,
+    color = TextPrimary,
+)
+
+private val BodyMediumBase = TextStyle(
+    fontWeight = FontWeight.Normal,
+    fontSize = 14.sp,
+    lineHeight = 20.sp,
+    color = TextSecondary,
+)
+
+private val LabelLargeBase = TextStyle(
+    fontWeight = FontWeight.Medium,
+    fontSize = 11.sp,
+    lineHeight = 16.sp,
+    letterSpacing = 1.1.sp,
+    color = TextSecondary,
+)
+
+private val LabelMediumBase = TextStyle(
+    fontWeight = FontWeight.Medium,
+    fontSize = 10.sp,
+    lineHeight = 14.sp,
+    letterSpacing = 1.0.sp,
+    color = TextTertiary,
+)
+
+private val LabelSmallBase = TextStyle(
+    fontWeight = FontWeight.Medium,
+    fontSize = 9.sp,
+    lineHeight = 12.sp,
+    letterSpacing = 0.9.sp,
+    color = TextTertiary,
+)
+
+// — Public Tokens —————————————————————————————————————————————————————————
+
+/** Hero serif italic — used for gold display phrases. */
+val HeroSerifItalic: TextStyle
+    get() = HeroSerifItalicBase.copy(fontFamily = HeroSerif)
+
+/** Preview-safe fallback using system serif. */
+val HeroSerifItalicPreview: TextStyle
+    get() = HeroSerifItalicBase.copy(fontFamily = FontFamily.Serif)
+
 /**
- * Preview-time fallback. Android Studio's preview sandbox has no Google Play Services, so
- * the downloadable-fonts loader fails and previews render blank. [SmartPumpDisplayTheme]
- * swaps to this when [androidx.compose.ui.platform.LocalInspectionMode] is true.
- * Visuals are degraded vs. runtime — system serif/sans/mono — but the layout is intact.
+ * Main typography for the app. Uses downloadable Google Fonts.
+ */
+val SmartPumpTypography: Typography
+    get() = Typography(
+        displayLarge = DisplayLargeBase.copy(fontFamily = DisplayMono),
+        displayMedium = DisplayMediumBase.copy(fontFamily = DisplayMono),
+        displaySmall = DisplaySmallBase.copy(fontFamily = DisplayMono),
+        headlineLarge = HeadlineLargeBase.copy(fontFamily = BodyFamily),
+        headlineMedium = HeadlineMediumBase.copy(fontFamily = BodyFamily),
+        titleLarge = TitleLargeBase.copy(fontFamily = BodyFamily),
+        titleMedium = TitleMediumBase.copy(fontFamily = BodyFamily),
+        bodyLarge = BodyLargeBase.copy(fontFamily = BodyFamily),
+        bodyMedium = BodyMediumBase.copy(fontFamily = BodyFamily),
+        labelLarge = LabelLargeBase.copy(fontFamily = BodyFamily),
+        labelMedium = LabelMediumBase.copy(fontFamily = BodyFamily),
+        labelSmall = LabelSmallBase.copy(fontFamily = BodyFamily),
+    )
+
+/**
+ * Preview-time fallback using system fonts (Monospace, SansSerif).
+ * This avoids touching the Google Fonts provider during initialization in the IDE.
  */
 val SmartPumpTypographyPreview: Typography
-    get() = SmartPumpTypography.let { real ->
-        Typography(
-            displayLarge = real.displayLarge.copy(fontFamily = FontFamily.Monospace),
-            displayMedium = real.displayMedium.copy(fontFamily = FontFamily.Monospace),
-            displaySmall = real.displaySmall.copy(fontFamily = FontFamily.Monospace),
-            headlineLarge = real.headlineLarge.copy(fontFamily = FontFamily.SansSerif),
-            headlineMedium = real.headlineMedium.copy(fontFamily = FontFamily.SansSerif),
-            titleLarge = real.titleLarge.copy(fontFamily = FontFamily.SansSerif),
-            titleMedium = real.titleMedium.copy(fontFamily = FontFamily.SansSerif),
-            bodyLarge = real.bodyLarge.copy(fontFamily = FontFamily.SansSerif),
-            bodyMedium = real.bodyMedium.copy(fontFamily = FontFamily.SansSerif),
-            labelLarge = real.labelLarge.copy(fontFamily = FontFamily.SansSerif),
-            labelMedium = real.labelMedium.copy(fontFamily = FontFamily.SansSerif),
-            labelSmall = real.labelSmall.copy(fontFamily = FontFamily.SansSerif),
-        )
-    }
-
-/** Preview-safe alias of [HeroSerifItalic] using the system serif. */
-val HeroSerifItalicPreview = HeroSerifItalic.copy(fontFamily = FontFamily.Serif)
-
-val SmartPumpTypography = Typography(
-    // Giant litre count and Naira amounts on dispensing/complete screens (120sp+).
-    displayLarge = TextStyle(
-        fontFamily = DisplayMono,
-        fontWeight = FontWeight.Normal,
-        fontSize = 120.sp,
-        lineHeight = 120.sp,
-        letterSpacing = (-2).sp,
-        color = TextPrimary,
-    ),
-    // Medium numeric display e.g. amount-due on awaiting-cash screen.
-    displayMedium = TextStyle(
-        fontFamily = DisplayMono,
-        fontWeight = FontWeight.Normal,
-        fontSize = 72.sp,
-        lineHeight = 72.sp,
-        letterSpacing = (-1).sp,
-        color = TextPrimary,
-    ),
-    // Smaller monospace numbers e.g. running total in Naira.
-    displaySmall = TextStyle(
-        fontFamily = DisplayMono,
-        fontWeight = FontWeight.Normal,
-        fontSize = 48.sp,
-        lineHeight = 52.sp,
-        color = TextPrimary,
-    ),
-    // Screen headings e.g. "HOW DO YOU WANT TO FUEL?".
-    headlineLarge = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 28.sp,
-        lineHeight = 36.sp,
-        color = TextPrimary,
-    ),
-    headlineMedium = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        color = TextPrimary,
-    ),
-    titleLarge = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 18.sp,
-        lineHeight = 24.sp,
-        color = TextPrimary,
-    ),
-    titleMedium = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 16.sp,
-        lineHeight = 20.sp,
-        color = TextPrimary,
-    ),
-    bodyLarge = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        color = TextPrimary,
-    ),
-    bodyMedium = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
-        color = TextSecondary,
-    ),
-    // ALL-CAPS field labels e.g. "LITRES DISPENSED", "PRICE/L", "TXN".
-    labelLarge = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 1.1.sp, // ~0.1em at 11sp
-        color = TextSecondary,
-    ),
-    labelMedium = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 10.sp,
-        lineHeight = 14.sp,
-        letterSpacing = 1.0.sp,
-        color = TextTertiary,
-    ),
-    labelSmall = TextStyle(
-        fontFamily = BodyFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 9.sp,
-        lineHeight = 12.sp,
-        letterSpacing = 0.9.sp,
-        color = TextTertiary,
-    ),
-)
+    get() = Typography(
+        displayLarge = DisplayLargeBase.copy(fontFamily = FontFamily.Monospace),
+        displayMedium = DisplayMediumBase.copy(fontFamily = FontFamily.Monospace),
+        displaySmall = DisplaySmallBase.copy(fontFamily = FontFamily.Monospace),
+        headlineLarge = HeadlineLargeBase.copy(fontFamily = FontFamily.SansSerif),
+        headlineMedium = HeadlineMediumBase.copy(fontFamily = FontFamily.SansSerif),
+        titleLarge = TitleLargeBase.copy(fontFamily = FontFamily.SansSerif),
+        titleMedium = TitleMediumBase.copy(fontFamily = FontFamily.SansSerif),
+        bodyLarge = BodyLargeBase.copy(fontFamily = FontFamily.SansSerif),
+        bodyMedium = BodyMediumBase.copy(fontFamily = FontFamily.SansSerif),
+        labelLarge = LabelLargeBase.copy(fontFamily = FontFamily.SansSerif),
+        labelMedium = LabelMediumBase.copy(fontFamily = FontFamily.SansSerif),
+        labelSmall = LabelSmallBase.copy(fontFamily = FontFamily.SansSerif),
+    )

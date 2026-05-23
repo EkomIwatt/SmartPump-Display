@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
@@ -37,7 +36,6 @@ import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.HeroSerifText
 import app.balancee.smartpump.display.ui.components.LabelText
-import app.balancee.smartpump.display.ui.components.PumpHeader
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.BrandBlue
@@ -51,7 +49,6 @@ fun IdleScreen(
     displayName: String,
     logoBytes: ByteArray?,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
 ) {
     Box(
         modifier = modifier
@@ -59,13 +56,7 @@ fun IdleScreen(
             .background(Background)
             .padding(Dimensions.screenPadding),
     ) {
-        PumpHeader(
-            pumpId = pumpId,
-            mode = "Idle",
-            stateLabel = "Idle",
-            stateColor = BrandBlue,
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
+
 
         BalanceeCard(
             borderColor = BrandBlue,

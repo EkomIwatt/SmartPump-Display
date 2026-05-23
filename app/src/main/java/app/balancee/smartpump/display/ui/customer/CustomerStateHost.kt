@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.StationIdentity
 import app.balancee.smartpump.display.domain.model.TransactionFlow
+import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeCard
@@ -36,10 +37,10 @@ fun CustomerStateHost(
     uiState: CustomerUiState,
     identity: StationIdentity?,
     onStartTransaction: () -> Unit,
-    onSelectPrePay: () -> Unit,
-    onSelectFillUp: () -> Unit,
-    onPrepayAmountChosen: (Int) -> Unit,
-    onPrepayMethodChosen: (PaymentMethod) -> Unit,
+    onModeTileTap: (TransactionMode) -> Unit,
+    onAmountTileTap: (Int) -> Unit,
+    onMethodTileTap: (PaymentMethod) -> Unit,
+    onModeConfirm: () -> Unit,
     onCashFixedAuthorise: (Int) -> Unit,
     onFillupPayCash: () -> Unit,
     onFillupPayDigital: () -> Unit,
@@ -57,22 +58,14 @@ fun CustomerStateHost(
         )
 
         is TransactionState.ModeSelect -> ModeSelectScreen(
-            onSelectPrePay = onSelectPrePay,
-            onSelectFillUp = onSelectFillUp,
+            state = state,
+            displayName = identity?.displayName.orEmpty(),
+            logoBytes = identity?.logoBytes,
+            onModeTileTap = onModeTileTap,
+            onAmountTileTap = onAmountTileTap,
+            onMethodTileTap = onMethodTileTap,
+            onConfirm = onModeConfirm,
             onCancel = onCancel,
-            modifier = modifier,
-        )
-
-        is TransactionState.PrepayAmountSelect -> PrepayAmountSelectScreen(
-            onAmountChosen = onPrepayAmountChosen,
-            onBack = onCancel,
-            modifier = modifier,
-        )
-
-        is TransactionState.PrepayMethodSelect -> PrepayMethodSelectScreen(
-            amountNaira = state.amountNaira,
-            onMethodChosen = onPrepayMethodChosen,
-            onBack = onCancel,
             modifier = modifier,
         )
 
@@ -240,10 +233,10 @@ private fun CustomerStateHostIdlePreview() {
             uiState = CustomerUiState(state = TransactionState.Idle, pricePerLitre = 870),
             identity = null,
             onStartTransaction = {},
-            onSelectPrePay = {},
-            onSelectFillUp = {},
-            onPrepayAmountChosen = {},
-            onPrepayMethodChosen = {},
+            onModeTileTap = {},
+            onAmountTileTap = {},
+            onMethodTileTap = {},
+            onModeConfirm = {},
             onCashFixedAuthorise = {},
             onFillupPayCash = {},
             onFillupPayDigital = {},
@@ -261,16 +254,18 @@ private fun CustomerStateHostIdlePreview() {
     heightDp = 600,
 )
 @Composable
-private fun CustomerStateHostPrepayAmountPreview() {
+private fun CustomerStateHostModeSelectPreview() {
     SmartPumpDisplayTheme {
         CustomerStateHost(
-            uiState = CustomerUiState(state = TransactionState.PrepayAmountSelect),
+            uiState = CustomerUiState(
+                state = TransactionState.ModeSelect(mode = TransactionMode.PRE_PAY, amountNaira = 5000),
+            ),
             identity = null,
             onStartTransaction = {},
-            onSelectPrePay = {},
-            onSelectFillUp = {},
-            onPrepayAmountChosen = {},
-            onPrepayMethodChosen = {},
+            onModeTileTap = {},
+            onAmountTileTap = {},
+            onMethodTileTap = {},
+            onModeConfirm = {},
             onCashFixedAuthorise = {},
             onFillupPayCash = {},
             onFillupPayDigital = {},

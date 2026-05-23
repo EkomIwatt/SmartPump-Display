@@ -25,14 +25,14 @@ fun HeroSerifText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = PrimaryGold,
-    style: TextStyle = HeroSerifItalic,
+    style: TextStyle? = null,
 ) {
     // In @Preview, swap to the system-serif fallback so AS doesn't crash on the
-    // GoogleFont loader. At runtime, [style] resolves to Playfair Display Italic.
-    val resolvedStyle = if (LocalInspectionMode.current && style === HeroSerifItalic) {
+    // GoogleFont loader. At runtime, resolving to Playfair Display Italic.
+    val resolvedStyle = style ?: if (LocalInspectionMode.current) {
         HeroSerifItalicPreview
     } else {
-        style
+        HeroSerifItalic
     }
     Text(
         text = text,

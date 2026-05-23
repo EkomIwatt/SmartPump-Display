@@ -17,21 +17,26 @@ sealed class TransactionState {
     @Serializable @SerialName("idle")
     data object Idle : TransactionState()
 
-    /** Customer tapped "Start Transaction" — choosing PRE-PAY vs FILL UP. */
+    /**
+     * Unified pre-pay/fill-up selection screen.
+     *
+     * Phase 6b collapsed three previous states (ModeSelect / PrepayAmountSelect /
+     * PrepayMethodSelect) into this one so the customer sees mode + amount + method
+     * on a single progressive-reveal screen matching `docs/Strict design screens/...`.
+     * All three selections start null. PRE_PAY needs all three before Confirm enables;
+     * FILL_UP only needs `mode`.
+     *
+     * Kotlinx defaults to null on each field, so persisted blobs from the old
+     * `data object ModeSelect` still deserialise into a blank ModeSelect on boot.
+     */
     @Serializable @SerialName("mode_select")
-    data object ModeSelect : TransactionState()
+    data class ModeSelect(
+        val mode: TransactionMode? = null,
+        val amountNaira: Int? = null,
+        val method: PaymentMethod? = null,
+    ) : TransactionState()
 
     // ---- PRE-PAY (Flow 1, Flow 5 entry) ----
-
-    /** Customer picking an amount tile (₦2k/₦5k/₦10k/₦20k/₦50k/Custom). */
-    @Serializable @SerialName("prepay_amount_select")
-    data object PrepayAmountSelect : TransactionState()
-
-    /** Customer picking a payment method. */
-    @Serializable @SerialName("prepay_method_select")
-    data class PrepayMethodSelect(
-        val amountNaira: Int,
-    ) : TransactionState()
 
     /** QR / NFC / digital wait. 5-min expiry, then auto-cancel back to Idle. */
     @Serializable @SerialName("prepay_awaiting_payment")
