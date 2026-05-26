@@ -9,8 +9,10 @@ import app.balancee.smartpump.display.data.db.entities.StationIdentityEntity
 import app.balancee.smartpump.display.domain.model.StationIdentity
 import app.balancee.smartpump.display.domain.repository.StationIdentityRepository
 import app.balancee.smartpump.display.domain.security.PinHasher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,7 +35,9 @@ class StationIdentityRepositoryImpl @Inject constructor(
         rawPin: String,
     ) {
         val salt = PinHasher.newSalt()
-        val hash = PinHasher.hash(rawPin, salt)
+        // PBKDF2 (100k iterations) is CPU-bound — keep it off the caller's thread (the
+        // attendant PIN modal verifies from a main-thread LaunchedEffect).
+        val hash = withContext(Dispatchers.Default) { PinHasher.hash(rawPin, salt) }
         dao.save(
             StationIdentityEntity(
                 stationId = stationId,
@@ -48,16 +52,22 @@ class StationIdentityRepositoryImpl @Inject constructor(
 
     override suspend fun verifyPin(rawPin: String): Boolean {
         val row = dao.get() ?: return false
-        return PinHasher.verify(rawPin, row.pinSalt, row.pinHash)
+        // Off the main thread: the PIN modal calls this from a main-thread LaunchedEffect,
+        // and PBKDF2 at 100k iterations would otherwise block the UI (janks the shake).
+        return withContext(Dispatchers.Default) {
+            PinHasher.verify(rawPin, row.pinSalt, row.pinHash)
+        }
     }
 
     override suspend fun updatePin(oldRawPin: String, newRawPin: String): Boolean {
         val row = dao.get() ?: return false
-        if (!PinHasher.verify(oldRawPin, row.pinSalt, row.pinHash)) return false
-        // Keep the same salt — a PIN rotation does not need a new device-scoped salt.
-        val newHash = PinHasher.hash(newRawPin, row.pinSalt)
-        dao.save(row.copy(pinHash = newHash))
-        return true
+        return withContext(Dispatchers.Default) {
+            if (!PinHasher.verify(oldRawPin, row.pinSalt, row.pinHash)) return@withContext false
+            // Keep the same salt — a PIN rotation does not need a new device-scoped salt.
+            val newHash = PinHasher.hash(newRawPin, row.pinSalt)
+            dao.save(row.copy(pinHash = newHash))
+            true
+        }
     }
 
     override suspend fun reset() = dao.delete()
