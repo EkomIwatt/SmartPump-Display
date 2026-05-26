@@ -5,6 +5,7 @@
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +15,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -122,11 +125,21 @@ fun CompleteScreen(
                     HeroSerifText(text = "Done.", color = accent)
                     LabelText(text = "Transaction complete")
 
+                    // Receipt ledger in the same state-tinted rounded panel the dispensing
+                    // screens use (accent @7% fill, @30% border). Gold for the Flow 1 pre-pay
+                    // receipt, green for cash / fill-up / USSD — matches the card border.
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                            .clip(RoundedCornerShape(Dimensions.cornerCodePanel))
+                            .background(accent.copy(alpha = 0.07f))
+                            .border(
+                                Dimensions.borderWidth,
+                                accent.copy(alpha = 0.30f),
+                                RoundedCornerShape(Dimensions.cornerCodePanel),
+                            )
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         LedgerRow(label = "Litres", value = "%.2f L".format(litres))
                         LedgerRow(label = "Paid", value = "₦${formatNaira(amountNaira)}")
@@ -141,10 +154,11 @@ fun CompleteScreen(
                         LedgerRow(label = "Txn", value = txnId)
                     }
 
-                    // Two paired actions side-by-side. Share-receipt only shares — never
-                    // dismisses — and tapping it resets the auto-return countdown so the
-                    // customer can share multiple times without timing out. Return to Idle
-                    // is the explicit dismissal; the countdown text below also auto-returns.
+                    // Two paired actions side-by-side. Share receipt only shares (never
+                    // dismisses) and resets the auto-return countdown so the customer can
+                    // share repeatedly without timing out; Return to idle frees the pump
+                    // early. The caption below carries the WhatsApp note + the passive
+                    // auto-return fallback.
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -159,7 +173,7 @@ fun CompleteScreen(
                             modifier = Modifier.weight(1f),
                         )
                         BalanceeButton(
-                            label = "Return to Idle",
+                            label = "Return to idle",
                             onClick = onDismiss,
                             variant = BalanceeButtonVariant.Secondary,
                             accentColor = accent,
@@ -167,7 +181,7 @@ fun CompleteScreen(
                         )
                     }
                     Text(
-                        text = "Returns to idle in ${secondsRemaining}s",
+                        text = "Also sent to WhatsApp · returns to idle in ${secondsRemaining}s",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
                         textAlign = TextAlign.Center,
