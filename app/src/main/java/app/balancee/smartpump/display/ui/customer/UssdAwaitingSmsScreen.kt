@@ -57,6 +57,7 @@ import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
+import app.balancee.smartpump.display.ui.util.isPortrait
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -94,46 +95,73 @@ fun UssdAwaitingSmsScreen(
             stateColor = ActiveCyan,
         )
 
-        // Two column headers above the cards — match expected.png.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
-        ) {
-            Box(
-                modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.Center,
+        if (isPortrait()) {
+            // Portrait: stack the dial card over the waiting card. Each card carries its own
+            // chip, so the side-by-side column headers are dropped in this orientation.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                LabelText(text = "USSD Code Displayed")
+                DialColumn(
+                    amountNaira = amountNaira,
+                    txnRef = txnRef,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+                WaitingColumn(
+                    amountNaira = amountNaira,
+                    txnRef = txnRef,
+                    expiresInSeconds = expiresInSeconds,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
             }
-            Box(
-                modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.Center,
+        } else {
+            // Landscape: two column headers above the cards — match expected.png.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
             ) {
-                LabelText(text = "Waiting for SMS")
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    LabelText(text = "USSD Code Displayed")
+                }
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    LabelText(text = "Waiting for SMS")
+                }
             }
-        }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
-        ) {
-            DialColumn(
-                amountNaira = amountNaira,
-                txnRef = txnRef,
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-            )
-            WaitingColumn(
-                amountNaira = amountNaira,
-                txnRef = txnRef,
-                expiresInSeconds = expiresInSeconds,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-            )
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
+            ) {
+                DialColumn(
+                    amountNaira = amountNaira,
+                    txnRef = txnRef,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+                WaitingColumn(
+                    amountNaira = amountNaira,
+                    txnRef = txnRef,
+                    expiresInSeconds = expiresInSeconds,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+            }
         }
 
         BalanceeButton(

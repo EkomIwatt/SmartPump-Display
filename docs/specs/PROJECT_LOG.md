@@ -742,3 +742,66 @@ Two more customer screens were rebuilt to match the strict-design spec — the U
 
 **Next:**
 Phase 6c — Flow 4 (Cash Fixed) polish against the strict-design screenshot. With pre-pay (Flow 1), USSD (Flow 5) and fill-up (Flows 2/3) all polished, cash-fixed is the last customer flow needing strict-design alignment.
+
+---
+
+### Phase 6f (rebuild) — Device rotation + portrait-aware layouts + FixedDispensing spec rebuild
+**Date:** 2026-05-26
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+Three things this session. (1) The pump app was locked to landscape; it now rotates with the device — turn the tablet and the screen follows, with no flicker or restart. (2) Every screen that placed two panels side-by-side now stacks them top-to-bottom in portrait (e.g. the QR-waiting screen shows the QR with the receipt details underneath instead of beside it), so nothing gets squashed when the device is upright. (3) The "dispensing" screen (the live litre count shown while fuel flows for pre-pay, USSD, and cash-fixed) was rebuilt to match the strict-design screenshot: the pre-pay/USSD version is now green (was wrongly cyan) with a white litre number, the cash version is gold with a gold litre number, both centered, with a clean ledger panel (Station / Price / Txn — or Price / Cutoff for cash) and a "₦ used · ₦ authorised" line.
+
+**Technical notes:**
+- **Rotation** — `AndroidManifest.xml` `MainActivity`: `screenOrientation` `landscape` → `fullSensor` (follows the physical device, all four orientations, independent of the system auto-rotate lock — right for a mounted kiosk). Added `configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"` so rotation reflows in place — no activity recreation, so the immersive kiosk flags set in `onCreate` (hidden system bars, keep-screen-on, swallowed back press) don't flicker/re-run, and in-flight transaction state is untouched. `fullUser` is the alternative if respecting the auto-rotate lock is ever wanted.
+- **Portrait helper** — new `ui/util/Orientation.kt` → `@Composable isPortrait()` reading `LocalConfiguration.orientation`. Recomposes on rotation.
+- **Portrait stacking** — each side-by-side `Row` branches to a stacked `Column` when `isPortrait()`. Stacked panes stay **height-bounded** (equal `weight(1f)` each) — deliberately NOT wrapped in `verticalScroll`, because mixing scroll with the panes' existing `weight`/`fillMaxHeight` measures against an infinite height constraint and crashes. Screens touched: `PrepayAwaitingPaymentScreen` (QR over ledger — extracted `ArtifactPane`/`LedgerPane`), `UssdAwaitingSmsScreen` (dial card over waiting card; drops the side-by-side column headers in portrait since the cards carry their own chips), `FillupDigitalAwaitingPaymentScreen` (QR over info), `CashFixedAmountEntryScreen` (amount card over keypad — extracted to local `@Composable (Modifier)` slots), and the single-card screens' bottom ledger/figure rows: `FixedDispensingScreen`, `FillupDispensingScreen`, `FillupTankFullScreen` (+ its two pay buttons stack), `FillupAwaitingCashConfirmScreen`. Single-centered screens (Idle, ModeSelect, Complete, FillupAwaitingAttendantAuth, Error) already reflow and were left alone.
+  - Caveat: bounded equal-weight stacking can clip a content-heavy pane on a *small phone* in portrait (notably the USSD dial card / digital-fillup info card). Fine on tablet kiosks (ample height). Making it bulletproof on small screens needs a scroll pass that first neutralises the panes' internal `weight` spacers.
+- **`FixedDispensingScreen` rebuild** (against `docs/Strict design screens/Screenshot 2026-05-11 224956.png` Flow 1 "PAYMENT CONFIRMED" + `…225053.png` Flow 4 "DISPENSING TO CUTOFF"; pixel-sampled from the source PNGs):
+  - **Colour fix:** pre-pay/USSD accent was wrongly `ActiveCyan` — now `SuccessGreen` (border/chip/progress) per the design-system DISPENSING-fixed/pre-pay row. Cash stays `PrimaryGold`.
+  - **Litres figure:** the shared mono `LitresDisplay` (JetBrains Mono, displayLarge), centered, coloured white (`TextPrimary`) for pre-pay/USSD and gold for cash. (A serif treatment was briefly tried to match the strict screen's rendering but reverted — the mono-120sp display rule in `docs/design-system.md` is non-negotiable and governs here too.)
+  - **Layout:** in-card header row (StateChip left + activity word "DISPENSING"/"CASH" right — kept *alongside* the PumpHeader chip per Ekomobong's call, matching the `UssdAwaitingSms` precedent), centered "LITRES DISPENSED" label + figure + "of X.XXL authorised|target" sub-line (weight 1f, vertically centered), progress bar, a "₦{used} used · ₦{amount} auth|cash" muted-mono split line, then the ledger in a subtly state-tinted rounded panel (`accent` at 7% fill / 30% border). Ledger rows: pre-pay/USSD = STATION / PRICE-L / TXN; cash = PRICE-L / CUTOFF AT. Removed the old two-column "PAID ₦X" block and the "Progress %" ledger row.
+  - **Station name:** new `stationName` param; `CustomerStateHost` passes `identity?.displayName` at both callsites (FixedDispensing + CashFixedDispensing). The new layout is inherently portrait-friendly (single-column ledger + split line), so no `isPortrait` branch is needed on this screen.
+  - Three `@Preview`s: prepay (green), cash (gold), portrait.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+- `docs/design-system.md` updated: the layout note (kiosk is now rotatable + portrait-stacking rule). (A serif-figure exception was briefly added to the typography note then reverted along with the figure — mono stays non-negotiable.)
+
+**Out of scope (intentionally):**
+- A scroll pass for portrait so content-heavy panes never clip on small phones (see caveat above) — deferred until a small-phone target actually matters; kiosk hardware is tablet-class.
+- Per-screen portrait tuning beyond the side-by-side→stacked swap (e.g. resizing the QR or keypad for portrait proportions). The equal-weight stack is the first pass.
+
+**Next:**
+Phase 6c — Flow 4 (Cash Fixed) amount-entry screen polish against `docs/Strict design screens/Screenshot 2026-05-11 225053.png` (the entry screen; the cash *dispensing* card is now covered by this FixedDispensing rebuild). Still the last customer flow's entry screen needing strict-design alignment.
+
+---
+
+### Phase 6g (rebuild) — Fill-up demo shutoff + dispensing-family design unification
+**Date:** 2026-05-26
+**Status:** done
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+Two related pieces of fill-up work. (1) Demos kept "running forever": with no real fuel dispenser to trigger the nozzle-shutoff, an open-ended fill-up only stops once the mock's simulated ~60 L tank fills (~2 minutes). The attendant overlay now has an **"End fill-up"** button that appears while a fill-up is running — one tap ends it on demand, locking whatever litres have flowed as the amount due, exactly as the real auto-shutoff would. (2) The fill-up screens were brought in line with the rebuilt dispensing card so the whole family looks like one product: the live fill-up screen, the "tank full / amount due" screen, and the "awaiting cash" screen now all use the same header chip + word, centered hero, and tinted ledger panel.
+
+**Technical notes:**
+- **Demo nozzle-shutoff stub:**
+  - `CustomerViewModel` — extracted the watchdog's TankFull transition into a shared `fillupShutoff(current)` (de-energise relay → lock verified litres → compute amount due → `FillupTankFull` → cancel pulse collector). The 3-second pulse-timeout watchdog now calls it, and a new public `onSimulateNozzleShutoff()` calls it on demand (guarded to `FillupDispensing`; cancels the watchdog first). Real-hardware path unchanged.
+  - `AttendantOverlay` (`AttendantPanel`) — new `onEndFillup` slot; a cyan full-width "End fill-up · nozzle full" `BalanceeButton` rendered only when `state is FillupDispensing` (all three normal action cards are disabled during a fill-up, so the overlay otherwise has nothing actionable then). New `FillupDispensing` preview.
+  - `AttendantOverlayHost` — new `onAttendantEndFillup` param; fires straight through **without** the PIN gate (ending a fill-up early only locks fewer litres — it can't move money like the authorise/cash-received actions), then closes the panel.
+  - `MainActivity` — wires `onAttendantEndFillup = customerVm::onSimulateNozzleShutoff`. Left available on all build types (reads as a plausible real attendant "stop"); gate behind `BuildConfig.DEBUG` later if it shouldn't reach a real attendant.
+- **Dispensing-family design unification** (adopting the `FixedDispensingScreen` language — in-card `StateChip` + activity word, centered "LITRES/AMOUNT" hero, subtly state-tinted rounded ledger panel at `accent` 7% fill / 30% border):
+  - `FillupDispensingScreen` (live open-ended fill) — cyan throughout (design-system "fill mode" hero number), **no progress bar** (no preset target), the fixed card's "used · authorised" line becomes "₦{running total} so far · no preset limit", ledger = Station / Price·L / Txn. New `stationName` param (host passes `identity?.displayName`). Now single-column → the old portrait `Row→Column` branch removed.
+  - `FillupTankFullScreen` (post-fill amount due) — gold; hero is the **AMOUNT DUE** (`AmountDisplay`, displayMedium) with a "X.XX L · verified" sub-line; ledger = Litres / Price·L / Txn. The "Pay cash / Pay digitally" actions stay below the card (side-by-side landscape, stacked portrait).
+  - `FillupAwaitingCashConfirmScreen` (cash hold) — gold; same AMOUNT DUE hero + verified sub-line + ledger; the attendant-handoff explainer is the below-card caption, Cancel button beneath.
+  - `CashFixedDispensing` already renders through `FixedDispensingScreen`, so it inherited the language with no change.
+  - Ledger panel is inlined per-screen (matches the existing inline pattern in Fixed/Fillup dispensing) rather than extracted to a shared primitive — a shared `LedgerPanel` was tried and dropped to avoid a cross-file `internal` reference from a screen file.
+- Every adapted screen ships landscape + portrait `@Preview`s.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+
+**Out of scope (intentionally):**
+- Extracting the tinted ledger panel + the centered-hero block into shared `ui/components` primitives and refactoring all four dispensing screens onto them. Worth doing if a fifth consumer appears; today four inlined copies match the codebase's existing style.
+- A real attendant force-stop feature (vs the demo stub) — same surface, but production semantics (audit note, manager approval) are a separate decision.
+
+**Next:**
+Phase 6c — Flow 4 (Cash Fixed) amount-entry screen polish, as still pending from Phase 6f.

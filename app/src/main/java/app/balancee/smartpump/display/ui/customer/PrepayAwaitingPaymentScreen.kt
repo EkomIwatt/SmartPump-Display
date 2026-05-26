@@ -59,6 +59,7 @@ import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
+import app.balancee.smartpump.display.ui.util.isPortrait
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -114,62 +115,57 @@ fun PrepayAwaitingPaymentScreen(
                     StateChip(label = "Waiting", color = accent)
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(24.dp),
-                ) {
-                    // Left column: artefact + captions.
+                if (isPortrait()) {
+                    // Portrait: stack the artefact over the ledger.
                     Column(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        LabelText(text = artifactLabel(method), color = TextSecondary)
-                        PaymentArtifact(
+                        ArtifactPane(
                             method = method,
                             amountNaira = amountNaira,
                             txnId = txnId,
                             accent = accent,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
                         )
-                        Text(
-                            text = methodCaption(method),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
+                        LedgerPane(
+                            amountNaira = amountNaira,
+                            txnId = txnId,
+                            expiresInSeconds = expiresInSeconds,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
                         )
                     }
-
-                    // Right column: ledger.
-                    Column(
+                } else {
+                    // Landscape: artefact and ledger side-by-side.
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.Center,
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
                     ) {
-                        HorizontalDivider(color = BorderSubtle)
-                        LedgerLine(
-                            label = "Amount",
-                            value = formatNairaAmount(amountNaira),
-                            modifier = Modifier.padding(vertical = 14.dp),
+                        ArtifactPane(
+                            method = method,
+                            amountNaira = amountNaira,
+                            txnId = txnId,
+                            accent = accent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                         )
-                        HorizontalDivider(color = BorderSubtle)
-                        LedgerLine(
-                            label = "Txn",
-                            value = txnId,
-                            modifier = Modifier.padding(vertical = 14.dp),
+                        LedgerPane(
+                            amountNaira = amountNaira,
+                            txnId = txnId,
+                            expiresInSeconds = expiresInSeconds,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                         )
-                        HorizontalDivider(color = BorderSubtle)
-                        LedgerLine(
-                            label = "Expires",
-                            value = formatCountdown(expiresInSeconds),
-                            modifier = Modifier.padding(vertical = 14.dp),
-                        )
-                        HorizontalDivider(color = BorderSubtle)
                     }
                 }
             }
@@ -189,6 +185,71 @@ fun PrepayAwaitingPaymentScreen(
             variant = BalanceeButtonVariant.Secondary,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/** Artefact (QR / NFC prompt) with its label + method caption. Fills the modifier it's given. */
+@Composable
+private fun ArtifactPane(
+    method: PaymentMethod,
+    amountNaira: Int,
+    txnId: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        LabelText(text = artifactLabel(method), color = TextSecondary)
+        PaymentArtifact(
+            method = method,
+            amountNaira = amountNaira,
+            txnId = txnId,
+            accent = accent,
+        )
+        Text(
+            text = methodCaption(method),
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** AMOUNT / TXN / EXPIRES ledger, divider-separated. Fills the modifier it's given. */
+@Composable
+private fun LedgerPane(
+    amountNaira: Int,
+    txnId: String,
+    expiresInSeconds: Int,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        HorizontalDivider(color = BorderSubtle)
+        LedgerLine(
+            label = "Amount",
+            value = formatNairaAmount(amountNaira),
+            modifier = Modifier.padding(vertical = 14.dp),
+        )
+        HorizontalDivider(color = BorderSubtle)
+        LedgerLine(
+            label = "Txn",
+            value = txnId,
+            modifier = Modifier.padding(vertical = 14.dp),
+        )
+        HorizontalDivider(color = BorderSubtle)
+        LedgerLine(
+            label = "Expires",
+            value = formatCountdown(expiresInSeconds),
+            modifier = Modifier.padding(vertical = 14.dp),
+        )
+        HorizontalDivider(color = BorderSubtle)
     }
 }
 

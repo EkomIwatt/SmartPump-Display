@@ -66,6 +66,7 @@ fun AttendantOverlayHost(
     onAttendantFillUp: () -> Unit,
     onAttendantCashFixed: () -> Unit,
     onAttendantCashReceived: () -> Unit,
+    onAttendantEndFillup: () -> Unit,
     pinBypassEnabled: Boolean,
     verifyPin: suspend (String) -> Boolean,
     modifier: Modifier = Modifier,
@@ -145,6 +146,13 @@ fun AttendantOverlayHost(
                     onFillUpAuthorise = { requestAction(AttendantAction.FillUp) },
                     onAuthoriseCash = { requestAction(AttendantAction.CashFixed) },
                     onCashReceived = { requestAction(AttendantAction.CashReceived) },
+                    // Manual nozzle-shutoff fires straight through (no PIN gate) — it only ends
+                    // an in-progress fill-up early and locks the litres already dispensed, so it
+                    // can't move money the way the authorise/cash-received actions can.
+                    onEndFillup = {
+                        onAttendantEndFillup()
+                        visible = false
+                    },
                     onDismiss = { visible = false },
                 )
             }

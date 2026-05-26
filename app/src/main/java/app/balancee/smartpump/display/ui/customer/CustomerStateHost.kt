@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.domain.model.PaymentMethod
+import app.balancee.smartpump.display.domain.model.PostFillIntent
 import app.balancee.smartpump.display.domain.model.StationIdentity
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionMode
@@ -42,6 +43,7 @@ fun CustomerStateHost(
     onMethodTileTap: (PaymentMethod) -> Unit,
     onModeConfirm: () -> Unit,
     onCashFixedAuthorise: (Int) -> Unit,
+    onFillupSelectIntent: (PostFillIntent) -> Unit,
     onFillupPayCash: () -> Unit,
     onFillupPayDigital: () -> Unit,
     onShareReceipt: () -> Unit,
@@ -96,6 +98,7 @@ fun CustomerStateHost(
             amountNaira = state.amountNaira,
             litresAuthorised = state.litresAuthorised,
             litresSoFar = state.litresSoFar,
+            stationName = identity?.displayName.orEmpty(),
             modifier = modifier,
         )
 
@@ -113,10 +116,15 @@ fun CustomerStateHost(
             amountNaira = state.cashAmountNaira,
             litresAuthorised = state.litresCutoff,
             litresSoFar = state.litresSoFar,
+            stationName = identity?.displayName.orEmpty(),
             modifier = modifier,
         )
 
         is TransactionState.FillupAwaitingAttendantAuth -> FillupAwaitingAttendantAuthScreen(
+            intent = state.intent,
+            displayName = identity?.displayName.orEmpty(),
+            logoBytes = identity?.logoBytes,
+            onSelectIntent = onFillupSelectIntent,
             onCancel = onCancel,
             modifier = modifier,
         )
@@ -125,6 +133,7 @@ fun CustomerStateHost(
             txnId = state.txnId,
             pricePerLitre = state.pricePerLitre,
             litresSoFar = state.litresSoFar,
+            stationName = identity?.displayName.orEmpty(),
             modifier = modifier,
         )
 
@@ -238,6 +247,7 @@ private fun CustomerStateHostIdlePreview() {
             onMethodTileTap = {},
             onModeConfirm = {},
             onCashFixedAuthorise = {},
+            onFillupSelectIntent = {},
             onFillupPayCash = {},
             onFillupPayDigital = {},
             onShareReceipt = {},
@@ -267,6 +277,7 @@ private fun CustomerStateHostModeSelectPreview() {
             onMethodTileTap = {},
             onModeConfirm = {},
             onCashFixedAuthorise = {},
+            onFillupSelectIntent = {},
             onFillupPayCash = {},
             onFillupPayDigital = {},
             onShareReceipt = {},

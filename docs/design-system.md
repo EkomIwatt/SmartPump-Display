@@ -71,7 +71,7 @@ All three families load via Google Fonts downloadable provider (`androidx.compos
 
 ## Layout
 
-- **Full-bleed, no app bar, no nav bar** — kiosk mode. Landscape locked.
+- **Full-bleed, no app bar, no nav bar** — kiosk mode. Rotatable: the activity follows the device orientation (`fullSensor`) and reflows in place (handled via `configChanges`, no recreation). Screens are designed landscape-first; in portrait the side-by-side panes stack vertically (QR/ledger, dial/waiting, amount/keypad, dispensing ledger/figure) via the `ui/util/isPortrait()` helper. Stacked panes stay height-bounded (equal weights) — never combine the stacked column with `verticalScroll` while panes still use `weight`/`fillMaxHeight`, or Compose measures against an infinite height constraint and crashes.
 - **Screen padding:** 32dp default.
 - **Card padding:** 24dp internal.
 - **Card border:** 1dp solid in the state color (see table above). **No shadows** — shadows look soft; we want crisp/industrial.

@@ -9,8 +9,11 @@ import app.balancee.smartpump.display.domain.model.TransactionState
 fun TransactionState.borderColor(): Color = when (this) {
     is TransactionState.Idle,
     is TransactionState.ModeSelect,
-    is TransactionState.FillupAwaitingAttendantAuth,
     is TransactionState.CashFixedAmountEntry -> BorderSubtle
+
+    // FILL UP confirm screen wears the fill-up cyan from the moment the customer
+    // commits to FILL UP — matches the strict-design FILL UP chip in the top-right.
+    is TransactionState.FillupAwaitingAttendantAuth -> ActiveCyan
 
     is TransactionState.PrepayAwaitingPayment,
     is TransactionState.UssdAwaitingSms,

@@ -59,9 +59,20 @@ sealed class TransactionState {
 
     // ---- FILL-UP (Flow 2, Flow 3) ----
 
-    /** Customer-initiated fill-up; waiting for attendant to tap FILL UP AUTHORISE. */
+    /**
+     * Customer-initiated fill-up; waiting for attendant to tap FILL UP AUTHORISE.
+     *
+     * Phase 6d: customer pre-declares how they want to pay *after* the tank is full
+     * via [intent]. Null = not picked yet. The choice is advisory — the customer can
+     * still change it at FillupTankFull — but capturing it here means the screen has
+     * an actual call-to-action ("Tell attendant to start") that the strict-design
+     * spec calls for. Default value keeps older persisted `data object` JSON blobs
+     * deserialisable into `FillupAwaitingAttendantAuth(intent = null)` on boot.
+     */
     @Serializable @SerialName("fillup_awaiting_attendant_auth")
-    data object FillupAwaitingAttendantAuth : TransactionState()
+    data class FillupAwaitingAttendantAuth(
+        val intent: PostFillIntent? = null,
+    ) : TransactionState()
 
     /** Open-ended dispense. No litre target. Live count. */
     @Serializable @SerialName("fillup_dispensing")

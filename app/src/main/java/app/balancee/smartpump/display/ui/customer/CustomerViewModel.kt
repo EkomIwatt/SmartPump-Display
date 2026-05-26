@@ -38,6 +38,7 @@ import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentResult
+import app.balancee.smartpump.display.domain.model.PostFillIntent
 import app.balancee.smartpump.display.domain.model.PulseMessage
 import app.balancee.smartpump.display.domain.model.Transaction
 import app.balancee.smartpump.display.domain.model.TransactionFlow
@@ -325,7 +326,7 @@ class CustomerViewModel @Inject constructor(
         val current = currentState() as? TransactionState.ModeSelect ?: return
         when (current.mode) {
             TransactionMode.FILL_UP ->
-                setState(TransactionState.FillupAwaitingAttendantAuth)
+                setState(TransactionState.FillupAwaitingAttendantAuth())
 
             TransactionMode.PRE_PAY -> {
                 val amount = current.amountNaira ?: return
@@ -342,6 +343,16 @@ class CustomerViewModel @Inject constructor(
     }
 
     // ---- Fill-up cash (Flow 2) -----------------------------------------------------
+
+    /**
+     * Phase 6d — customer pre-declares their post-shutoff payment intent on the
+     * FILL UP confirm screen. Advisory only: the choice is captured on the state so
+     * boot-resume preserves it, but the actual routing still happens at FillupTankFull.
+     */
+    fun onFillupSelectIntent(intent: PostFillIntent) {
+        val current = currentState() as? TransactionState.FillupAwaitingAttendantAuth ?: return
+        setState(current.copy(intent = intent))
+    }
 
     fun onAttendantFillUpAuthorise() {
         val current = currentState()
@@ -414,22 +425,47 @@ class CustomerViewModel @Inject constructor(
                 val current = currentState() as? TransactionState.FillupDispensing ?: break
                 val now = System.currentTimeMillis()
                 if (lastPulseMs > 0L && (now - lastPulseMs) > FILLUP_SHUTOFF_TIMEOUT_MS) {
-                    relay.stopFuelFlow()
-                    val verifiedLitres = current.litresSoFar
-                    val amountDue = (verifiedLitres * current.pricePerLitre).toInt()
-                    setState(
-                        TransactionState.FillupTankFull(
-                            txnId = current.txnId,
-                            pricePerLitre = current.pricePerLitre,
-                            verifiedLitres = verifiedLitres,
-                            amountDueNaira = amountDue,
-                        )
-                    )
-                    dispenseJob?.cancel()
-                    dispenseJob = null
+                    fillupShutoff(current)
                     break
                 }
             }
+        }
+    }
+
+    /**
+     * Locks the verified litre count and moves FillupDispensing → FillupTankFull. Called by the
+     * 3-second pulse-timeout watchdog when the real nozzle shuts, and by [onSimulateNozzleShutoff]
+     * for demos on the mock stack. Cancels the pulse collector; the relay is de-energised first.
+     */
+    private suspend fun fillupShutoff(current: TransactionState.FillupDispensing) {
+        relay.stopFuelFlow()
+        val verifiedLitres = current.litresSoFar
+        val amountDue = (verifiedLitres * current.pricePerLitre).toInt()
+        setState(
+            TransactionState.FillupTankFull(
+                txnId = current.txnId,
+                pricePerLitre = current.pricePerLitre,
+                verifiedLitres = verifiedLitres,
+                amountDueNaira = amountDue,
+            )
+        )
+        dispenseJob?.cancel()
+        dispenseJob = null
+    }
+
+    /**
+     * Manual nozzle-shutoff — the attendant ends an open-ended fill-up on demand from the
+     * swipe-up overlay. On real hardware the nozzle auto-shuts and the watchdog catches the
+     * flow gap; on the mock stack there is no physical nozzle, so a fill-up would otherwise run
+     * until the simulated ~60 L tank fills. This triggers the same FillupTankFull transition the
+     * watchdog does — whatever litres have flowed become the verified, billable amount.
+     */
+    fun onSimulateNozzleShutoff() {
+        val current = currentState() as? TransactionState.FillupDispensing ?: return
+        viewModelScope.launch {
+            fillupWatchdogJob?.cancel()
+            fillupWatchdogJob = null
+            fillupShutoff(current)
         }
     }
 

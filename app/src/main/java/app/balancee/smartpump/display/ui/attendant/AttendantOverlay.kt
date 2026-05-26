@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.domain.model.TransactionState
+import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.HeroSerifText
 import app.balancee.smartpump.display.ui.components.LabelText
@@ -53,6 +54,7 @@ fun AttendantPanel(
     onFillUpAuthorise: () -> Unit,
     onAuthoriseCash: () -> Unit,
     onCashReceived: () -> Unit,
+    onEndFillup: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -60,6 +62,7 @@ fun AttendantPanel(
         state is TransactionState.FillupAwaitingAttendantAuth
     val cashFixedEnabled = state is TransactionState.Idle
     val cashReceivedEnabled = state is TransactionState.FillupAwaitingCashConfirm
+    val fillupInProgress = state is TransactionState.FillupDispensing
 
     Column(
         modifier = modifier
@@ -141,6 +144,19 @@ fun AttendantPanel(
                 onClick = { if (cashReceivedEnabled) onCashReceived() },
             )
         }
+
+        // Manual nozzle-shutoff — demo stand-in for the hardware flow-gap signal. The mock
+        // pump never stops on its own until its simulated ~60 L tank fills, so this lets the
+        // attendant end an open-ended fill-up on demand. The litres dispensed so far become
+        // the verified amount due — exactly what the real auto-shutoff produces.
+        if (fillupInProgress) {
+            BalanceeButton(
+                label = "End fill-up · nozzle full",
+                onClick = onEndFillup,
+                accentColor = ActiveCyan,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -196,6 +212,7 @@ private fun AttendantPanelIdlePreview() {
             onFillUpAuthorise = {},
             onAuthoriseCash = {},
             onCashReceived = {},
+            onEndFillup = {},
             onDismiss = {},
         )
     }
@@ -214,6 +231,26 @@ private fun AttendantPanelAwaitingCashPreview() {
             onFillUpAuthorise = {},
             onAuthoriseCash = {},
             onCashReceived = {},
+            onEndFillup = {},
+            onDismiss = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 440)
+@Composable
+private fun AttendantPanelFillingPreview() {
+    SmartPumpDisplayTheme {
+        AttendantPanel(
+            state = TransactionState.FillupDispensing(
+                txnId = "BLC-00342",
+                pricePerLitre = 870,
+                litresSoFar = 12.4,
+            ),
+            onFillUpAuthorise = {},
+            onAuthoriseCash = {},
+            onCashReceived = {},
+            onEndFillup = {},
             onDismiss = {},
         )
     }

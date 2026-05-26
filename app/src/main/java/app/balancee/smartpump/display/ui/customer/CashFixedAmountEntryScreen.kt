@@ -40,6 +40,7 @@ import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.util.isPortrait
 
 private const val CASH_MIN_NAIRA = 200
 private const val CASH_MAX_NAIRA = 200_000
@@ -86,19 +87,14 @@ fun CashFixedAmountEntryScreen(
             )
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
-        ) {
+        // Two panes — the amount/summary card and the keypad. Side-by-side in landscape,
+        // stacked (amount on top, keypad below) in portrait.
+        val amountCard: @Composable (Modifier) -> Unit = { paneModifier ->
             BalanceeCard(
                 borderColor = BrandBlue,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
+                modifier = paneModifier,
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     LabelText(text = "Cash amount", color = ActiveCyan)
                     Box(modifier = Modifier.fillMaxWidth()) {
                         AmountDisplay(
@@ -108,7 +104,7 @@ fun CashFixedAmountEntryScreen(
                         )
                     }
 
-                    LabelText(text = "Litres cutoff", color = BrandBlue)
+                    LabelText(text = "Litres", color = BrandBlue)
                     Box(modifier = Modifier.fillMaxWidth()) {
                         LitresDisplay(
                             litres = litresCutoff,
@@ -136,11 +132,10 @@ fun CashFixedAmountEntryScreen(
                     )
                 }
             }
-
+        }
+        val keypadPane: @Composable (Modifier) -> Unit = { paneModifier ->
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
+                modifier = paneModifier,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 NumericKeypad(
@@ -153,6 +148,28 @@ fun CashFixedAmountEntryScreen(
                     confirmEnabled = valid,
                     modifier = Modifier.weight(1f),
                 )
+            }
+        }
+
+        if (isPortrait()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
+            ) {
+                amountCard(Modifier.fillMaxWidth().weight(1f))
+                keypadPane(Modifier.fillMaxWidth().weight(1f))
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
+            ) {
+                amountCard(Modifier.weight(1f).fillMaxHeight())
+                keypadPane(Modifier.weight(1f).fillMaxHeight())
             }
         }
 
