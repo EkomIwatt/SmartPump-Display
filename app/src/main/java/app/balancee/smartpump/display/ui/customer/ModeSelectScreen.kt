@@ -4,22 +4,31 @@
 // (ModeSelect / PrepayAmountSelect / PrepayMethodSelect) into one progressive-reveal
 // screen matching `docs/Strict design screens/...` and `docs/compare/required.png`.
 //
+// Boss edits (2026-05-26):
+//   - "By amount (₦) / By litres (L)" segmented toggle atop the SELECT AMOUNT section.
+//   - ₦/L price shown beside the SELECT AMOUNT header (was a suffix on the preview line).
+//   - Live conversion preview in a gold tinted panel (dispensing-ledger style).
+//   - Custom keypad has a decimal key instead of ✓ — the bottom CONFIRM button is the
+//     single commit, so the custom value commits LIVE as it's typed (when valid).
+//   - NFC dropped from the pre-pay method list for V1.
+// The toggle, the litre selection, and the decimal entry are all LOCAL UI state — every
+// path commits naira into ModeSelect.amountNaira (litres × ₦/L, rounded), so the state
+// machine, persistence, and dispensing are untouched.
+//
 // Reveal logic:
 //   - Mode tiles always visible (PRE-PAY / FILL UP).
 //   - SELECT AMOUNT section shows only when mode == PRE_PAY.
-//   - PAY WITH section shows only when an amount is set.
+//   - PAY WITH section shows only when a valid amount is set.
 //   - Bottom CONFIRM button enables when:
-//       PRE_PAY → mode + amount + method all set
+//       PRE_PAY → mode + amount + method all set and the custom entry isn't mid-invalid
 //       FILL_UP → mode set
-//
-// Custom amount: tapping the Custom tile reveals an inline NumericKeypad; the typed value
-// commits on the keypad's ✓ key, sets ModeSelect.amountNaira, hides the keypad, and
-// reveals the PAY WITH section as usual.
 package app.balancee.smartpump.display.ui.customer
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -70,15 +80,25 @@ import app.balancee.smartpump.display.ui.theme.heroSerifFamily
 import app.balancee.smartpump.display.ui.theme.OnBrand
 import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
+import app.balancee.smartpump.display.ui.theme.Surface
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
 import java.text.NumberFormat
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private val PRESET_AMOUNTS_NAIRA: List<Int> = listOf(2_000, 5_000, 10_000, 20_000, 50_000)
 private const val CUSTOM_MIN_NAIRA = 200
 private const val CUSTOM_MAX_NAIRA = 200_000
+
+private val PRESET_LITRES: List<Int> = listOf(5, 10, 20, 30, 50)
+private const val CUSTOM_MIN_LITRES = 1
+private const val CUSTOM_MAX_LITRES = 200
+
+/** How the customer is entering the pre-pay amount. Local UI state only — both paths
+ *  commit naira into [TransactionState.ModeSelect.amountNaira]. */
+private enum class AmountEntryMode { AMOUNT, LITRES }
 
 /**
  * Methods offered in the PAY WITH section. The CASH option is informational — confirming
@@ -86,11 +106,13 @@ private const val CUSTOM_MAX_NAIRA = 200_000
  * AUTHORISE CASH action. Phase 6c will replace the short-circuit with a proper
  * "see attendant" state so the customer screen acknowledges the choice instead of
  * silently returning to Idle.
+ *
+ * NFC dropped for V1 (boss edit 2026-05-26) — PaymentMethod.NFC_CARD is kept in the enum
+ * (persisted txns + exhaustive `when`s reference it) and can be re-added here trivially.
  */
 private val PRE_PAY_METHODS: List<PaymentMethod> = listOf(
     PaymentMethod.BALANCEE_APP,
     PaymentMethod.BANK_QR_TRANSFER,
-    PaymentMethod.NFC_CARD,
     PaymentMethod.USSD,
     PaymentMethod.CASH_SEE_ATTENDANT,
 )
@@ -100,6 +122,7 @@ fun ModeSelectScreen(
     state: TransactionState.ModeSelect,
     displayName: String,
     logoBytes: ByteArray?,
+    pricePerLitre: Int,
     onModeTileTap: (TransactionMode) -> Unit,
     onAmountTileTap: (Int) -> Unit,
     onMethodTileTap: (PaymentMethod) -> Unit,
@@ -107,13 +130,41 @@ fun ModeSelectScreen(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Local-only state — the customer is mid-typing a custom amount. Not persisted; if the
-    // pump reboots while the keypad is open, resume lands on plain ModeSelect (mode=PRE_PAY,
-    // amount=null) and the keypad reopens by tapping Custom again.
+    // Local-only state — not persisted. If the pump reboots mid-selection, resume lands on
+    // plain ModeSelect and the customer re-enters; the toggle defaults back to "By amount".
+    var entryMode by remember { mutableStateOf(AmountEntryMode.AMOUNT) }
     var customKeypadOpen by remember { mutableStateOf(false) }
+    // The custom value as typed — a string so it can hold a decimal point mid-entry.
     var customTyped by remember { mutableStateOf("") }
-    val customTypedInt = customTyped.toIntOrNull() ?: 0
-    val customValid = customTypedInt in CUSTOM_MIN_NAIRA..CUSTOM_MAX_NAIRA
+    // Which litre value is selected (preset only) — drives the litre-tile highlight + the
+    // live preview when the keypad is closed. amountNaira remains the single committed value.
+    var selectedLitres by remember { mutableStateOf<Int?>(null) }
+
+    val customTypedValue: Double? = customTyped.toDoubleOrNull()
+    val customValid = when (entryMode) {
+        AmountEntryMode.AMOUNT ->
+            customTypedValue != null && customTypedValue >= CUSTOM_MIN_NAIRA && customTypedValue <= CUSTOM_MAX_NAIRA
+        AmountEntryMode.LITRES ->
+            customTypedValue != null && customTypedValue >= CUSTOM_MIN_LITRES && customTypedValue <= CUSTOM_MAX_LITRES
+    }
+    // The custom entry is "ok" when the keypad is closed, or open with a valid value. Used
+    // to gate the bottom CONFIRM and the PAY WITH reveal so a mid-typed invalid value can't
+    // be confirmed (no keypad ✓ to commit a discrete value any more — commit is live).
+    val customEntryOk = !customKeypadOpen || customValid
+
+    // Live commit: whenever the typed value is valid, push the equivalent naira into the
+    // state so the preview, the PAY WITH section and CONFIRM stay in lockstep with the keys.
+    fun commitCustom(typed: String) {
+        val v = typed.toDoubleOrNull() ?: return
+        when (entryMode) {
+            AmountEntryMode.AMOUNT ->
+                if (v >= CUSTOM_MIN_NAIRA && v <= CUSTOM_MAX_NAIRA) onAmountTileTap(v.roundToInt())
+            AmountEntryMode.LITRES ->
+                if (v >= CUSTOM_MIN_LITRES && v <= CUSTOM_MAX_LITRES) {
+                    onAmountTileTap((v * pricePerLitre).roundToInt())
+                }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -146,41 +197,67 @@ fun ModeSelectScreen(
                 onModeTileTap = { mode ->
                     customKeypadOpen = false
                     customTyped = ""
+                    selectedLitres = null
                     onModeTileTap(mode)
                 },
             )
 
             if (state.mode == TransactionMode.PRE_PAY) {
                 AmountSection(
+                    entryMode = entryMode,
+                    pricePerLitre = pricePerLitre,
                     selectedAmount = state.amountNaira,
+                    selectedLitres = selectedLitres,
                     customKeypadOpen = customKeypadOpen,
                     customTyped = customTyped,
                     customValid = customValid,
-                    onPresetTap = { naira ->
+                    onEntryModeChange = { newMode ->
+                        if (newMode != entryMode) {
+                            entryMode = newMode
+                            customKeypadOpen = false
+                            customTyped = ""
+                            selectedLitres = null
+                        }
+                    },
+                    onAmountPresetTap = { naira ->
                         customKeypadOpen = false
                         customTyped = ""
+                        selectedLitres = null
                         onAmountTileTap(naira)
+                    },
+                    onLitrePresetTap = { litres ->
+                        customKeypadOpen = false
+                        customTyped = ""
+                        selectedLitres = litres
+                        onAmountTileTap(litresToNaira(litres, pricePerLitre))
                     },
                     onCustomTap = {
                         customKeypadOpen = true
                         customTyped = ""
+                        selectedLitres = null
                     },
                     onCustomDigit = { digit ->
-                        if (customTyped.length < 6) customTyped += digit.toString()
+                        val next = appendDigit(customTyped, digit)
+                        if (next != customTyped) {
+                            customTyped = next
+                            commitCustom(next)
+                        }
+                    },
+                    onCustomDecimal = {
+                        val next = appendDecimal(customTyped)
+                        if (next != customTyped) {
+                            customTyped = next
+                            commitCustom(next)
+                        }
                     },
                     onCustomBackspace = {
+                        // Don't re-commit on delete — amountNaira keeps its last valid value
+                        // but CONFIRM/PAY WITH are gated by customEntryOk until it's valid again.
                         if (customTyped.isNotEmpty()) customTyped = customTyped.dropLast(1)
-                    },
-                    onCustomConfirm = {
-                        if (customValid) {
-                            onAmountTileTap(customTypedInt)
-                            customKeypadOpen = false
-                            customTyped = ""
-                        }
                     },
                 )
 
-                if (state.amountNaira != null && !customKeypadOpen) {
+                if (state.amountNaira != null && customEntryOk) {
                     MethodSection(
                         selectedMethod = state.method,
                         onMethodTileTap = onMethodTileTap,
@@ -191,7 +268,7 @@ fun ModeSelectScreen(
 
         BottomBar(
             state = state,
-            customKeypadOpen = customKeypadOpen,
+            customEntryOk = customEntryOk,
             onConfirm = onConfirm,
             onCancel = onCancel,
         )
@@ -249,17 +326,37 @@ private fun HeaderRow(
     }
 }
 
+/** Section header. With [trailingText] set, the value sits directly beside the label
+ *  (amber) rather than spanning to the far edge — used to surface the ₦/L price where it's
+ *  easy to spot next to SELECT AMOUNT. */
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text.uppercase(Locale.ROOT),
-        style = MaterialTheme.typography.labelLarge.copy(
-            color = TextSecondary,
-            letterSpacing = 1.5.sp,
-            fontWeight = FontWeight.SemiBold,
-        ),
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
+private fun SectionHeader(text: String, trailingText: String? = null) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text.uppercase(Locale.ROOT),
+            style = MaterialTheme.typography.labelLarge.copy(
+                color = TextSecondary,
+                letterSpacing = 1.5.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+        )
+        if (trailingText != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "· $trailingText",
+                style = MaterialTheme.typography.labelLarge.copy(
+                    color = PrimaryGold,
+                    letterSpacing = 0.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+        }
+    }
 }
 
 @Composable
@@ -299,7 +396,7 @@ private fun ModeSection(
 private fun ModeTile(
     selected: Boolean,
     glyph: String,
-    glyphColor: androidx.compose.ui.graphics.Color,
+    glyphColor: Color,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
@@ -342,75 +439,131 @@ private fun ModeTile(
 
 @Composable
 private fun AmountSection(
+    entryMode: AmountEntryMode,
+    pricePerLitre: Int,
     selectedAmount: Int?,
+    selectedLitres: Int?,
     customKeypadOpen: Boolean,
     customTyped: String,
     customValid: Boolean,
-    onPresetTap: (Int) -> Unit,
+    onEntryModeChange: (AmountEntryMode) -> Unit,
+    onAmountPresetTap: (Int) -> Unit,
+    onLitrePresetTap: (Int) -> Unit,
     onCustomTap: () -> Unit,
     onCustomDigit: (Int) -> Unit,
+    onCustomDecimal: () -> Unit,
     onCustomBackspace: () -> Unit,
-    onCustomConfirm: () -> Unit,
 ) {
     Column {
-        SectionHeader("Select amount")
-        // 2 rows × 3 cols.
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                PRESET_AMOUNTS_NAIRA.take(3).forEach { naira ->
-                    AmountTile(
-                        selected = !customKeypadOpen && selectedAmount == naira,
-                        label = formatAmountShort(naira),
-                        onClick = { onPresetTap(naira) },
-                        modifier = Modifier.weight(1f),
-                    )
+        SectionHeader(
+            text = "Select amount",
+            trailingText = if (pricePerLitre > 0) "₦ $pricePerLitre/L" else null,
+        )
+        EntryModeToggle(entryMode = entryMode, onChange = onEntryModeChange)
+        Spacer(Modifier.height(12.dp))
+
+        when (entryMode) {
+            AmountEntryMode.AMOUNT -> {
+                val selIdx = if (customKeypadOpen) {
+                    null
+                } else {
+                    PRESET_AMOUNTS_NAIRA.indexOf(selectedAmount).takeIf { it >= 0 }
                 }
+                PresetGrid(
+                    presetLabels = PRESET_AMOUNTS_NAIRA.map { formatAmountShort(it) },
+                    selectedIndex = selIdx,
+                    customSelected = customKeypadOpen,
+                    onPresetTap = { i -> onAmountPresetTap(PRESET_AMOUNTS_NAIRA[i]) },
+                    onCustomTap = onCustomTap,
+                )
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                PRESET_AMOUNTS_NAIRA.drop(3).forEach { naira ->
-                    AmountTile(
-                        selected = !customKeypadOpen && selectedAmount == naira,
-                        label = formatAmountShort(naira),
-                        onClick = { onPresetTap(naira) },
-                        modifier = Modifier.weight(1f),
-                    )
+
+            AmountEntryMode.LITRES -> {
+                val selIdx = if (customKeypadOpen) {
+                    null
+                } else {
+                    PRESET_LITRES.indexOf(selectedLitres).takeIf { it >= 0 }
                 }
-                AmountTile(
-                    selected = customKeypadOpen,
-                    label = "Custom",
-                    onClick = onCustomTap,
-                    modifier = Modifier.weight(1f),
+                PresetGrid(
+                    presetLabels = PRESET_LITRES.map { "$it L" },
+                    selectedIndex = selIdx,
+                    customSelected = customKeypadOpen,
+                    onPresetTap = { i -> onLitrePresetTap(PRESET_LITRES[i]) },
+                    onCustomTap = onCustomTap,
+                )
+            }
+        }
+
+        // Live conversion preview in a gold tinted panel (dispensing-ledger styling).
+        // Amount mode → "≈ X.XX L"; litres mode → "= ₦X,XXX". The ₦/L sits in the header.
+        val previewText = amountPreview(
+            entryMode = entryMode,
+            pricePerLitre = pricePerLitre,
+            selectedAmount = selectedAmount,
+            selectedLitres = selectedLitres,
+            customKeypadOpen = customKeypadOpen,
+            customTyped = customTyped,
+            customValid = customValid,
+        )
+        if (previewText != null) {
+            Spacer(Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Dimensions.cornerCodePanel))
+                    .background(PrimaryGold.copy(alpha = 0.07f))
+                    .border(
+                        Dimensions.borderWidth,
+                        PrimaryGold.copy(alpha = 0.30f),
+                        RoundedCornerShape(Dimensions.cornerCodePanel),
+                    )
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = previewText,
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        color = PrimaryGold,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    textAlign = TextAlign.Center,
                 )
             }
         }
 
         if (customKeypadOpen) {
             Spacer(Modifier.height(12.dp))
-            // Inline keypad — typed value displayed above, NumericKeypad below.
+            // Inline keypad — typed value displayed above, NumericKeypad below. The keypad's
+            // ✓ is replaced by a decimal key; commit is live (see commitCustom in the parent).
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(Dimensions.cornerCard))
-                    .background(app.balancee.smartpump.display.ui.theme.Surface)
+                    .background(Surface)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val display = when (entryMode) {
+                    AmountEntryMode.AMOUNT -> formatTypedAmount(customTyped)
+                    AmountEntryMode.LITRES ->
+                        if (customTyped.isEmpty()) "__ L" else "$customTyped L"
+                }
                 Text(
-                    text = if (customTyped.isEmpty()) "₦____" else "₦" + formatGrouped(customTyped),
+                    text = display,
                     style = MaterialTheme.typography.displaySmall.copy(
                         color = if (customValid) PrimaryGold else TextSecondary,
                     ),
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                val limits = when (entryMode) {
+                    AmountEntryMode.AMOUNT ->
+                        "Min ₦$CUSTOM_MIN_NAIRA · Max ₦${formatAmountShort(CUSTOM_MAX_NAIRA)}"
+                    AmountEntryMode.LITRES ->
+                        "Min $CUSTOM_MIN_LITRES L · Max $CUSTOM_MAX_LITRES L"
+                }
                 Text(
-                    text = "Min ₦$CUSTOM_MIN_NAIRA · Max ₦${formatAmountShort(CUSTOM_MAX_NAIRA)}",
+                    text = limits,
                     style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary),
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
@@ -418,10 +571,113 @@ private fun AmountSection(
                 NumericKeypad(
                     onDigit = onCustomDigit,
                     onBackspace = onCustomBackspace,
-                    onConfirm = onCustomConfirm,
-                    confirmEnabled = customValid,
+                    onDecimal = onCustomDecimal,
+                    showConfirmKey = false,
+                    showDecimalKey = true,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun EntryModeToggle(
+    entryMode: AmountEntryMode,
+    onChange: (AmountEntryMode) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dimensions.cornerCard))
+            .background(Surface)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        ToggleSegment(
+            label = "By amount (₦)",
+            selected = entryMode == AmountEntryMode.AMOUNT,
+            onClick = { onChange(AmountEntryMode.AMOUNT) },
+            modifier = Modifier.weight(1f),
+        )
+        ToggleSegment(
+            label = "By litres (L)",
+            selected = entryMode == AmountEntryMode.LITRES,
+            onClick = { onChange(AmountEntryMode.LITRES) },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun ToggleSegment(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(Dimensions.cornerChip))
+            .background(if (selected) BrandBlue else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge.copy(
+                color = if (selected) OnBrand else TextSecondary,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.5.sp,
+            ),
+        )
+    }
+}
+
+/**
+ * 2×3 tile grid: five presets + a trailing Custom tile. Shared by the amount and litres
+ * entry modes — only the labels and selection index differ.
+ */
+@Composable
+private fun PresetGrid(
+    presetLabels: List<String>,
+    selectedIndex: Int?,
+    customSelected: Boolean,
+    onPresetTap: (Int) -> Unit,
+    onCustomTap: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            (0..2).forEach { i ->
+                AmountTile(
+                    selected = selectedIndex == i,
+                    label = presetLabels[i],
+                    onClick = { onPresetTap(i) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            (3..4).forEach { i ->
+                AmountTile(
+                    selected = selectedIndex == i,
+                    label = presetLabels[i],
+                    onClick = { onPresetTap(i) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            AmountTile(
+                selected = customSelected,
+                label = "Custom",
+                onClick = onCustomTap,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -538,13 +794,13 @@ private fun methodBadge(method: PaymentMethod): String? = when (method) {
 @Composable
 private fun BottomBar(
     state: TransactionState.ModeSelect,
-    customKeypadOpen: Boolean,
+    customEntryOk: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
     val canConfirm = when (state.mode) {
         TransactionMode.FILL_UP -> true
-        TransactionMode.PRE_PAY -> state.amountNaira != null && state.method != null && !customKeypadOpen
+        TransactionMode.PRE_PAY -> state.amountNaira != null && state.method != null && customEntryOk
         null -> false
     }
     val confirmLabel = when {
@@ -573,6 +829,75 @@ private fun BottomBar(
     }
 }
 
+/** litres × ₦/L, rounded to the nearest naira. The single conversion point for litres mode. */
+private fun litresToNaira(litres: Int, pricePerLitre: Int): Int = litres * pricePerLitre
+
+/**
+ * The live preview string under the preset grid, or null when there's no active value yet.
+ * Amount mode shows the litres the money buys; litres mode shows the naira the litres cost.
+ * The ₦/L price is shown in the section header, not repeated here.
+ */
+private fun amountPreview(
+    entryMode: AmountEntryMode,
+    pricePerLitre: Int,
+    selectedAmount: Int?,
+    selectedLitres: Int?,
+    customKeypadOpen: Boolean,
+    customTyped: String,
+    customValid: Boolean,
+): String? {
+    if (pricePerLitre <= 0) return null
+    return when (entryMode) {
+        AmountEntryMode.AMOUNT -> {
+            val naira = if (customKeypadOpen) {
+                customTyped.toDoubleOrNull()?.takeIf { customValid }
+            } else {
+                selectedAmount?.toDouble()
+            } ?: return null
+            val litres = naira / pricePerLitre
+            "≈ ${String.format(Locale.UK, "%.2f", litres)} L"
+        }
+
+        AmountEntryMode.LITRES -> {
+            val litres = if (customKeypadOpen) {
+                customTyped.toDoubleOrNull()?.takeIf { customValid }
+            } else {
+                selectedLitres?.toDouble()
+            } ?: return null
+            "= ₦${formatGrouped((litres * pricePerLitre).roundToInt().toString())}"
+        }
+    }
+}
+
+/** Append a digit to the typed custom value, enforcing ≤2 decimals, a 6-digit integer cap,
+ *  and blocking trailing digits after a lone leading zero (use the decimal key instead). */
+private fun appendDigit(typed: String, digit: Int): String {
+    if (typed == "0") return typed
+    val candidate = typed + digit.toString()
+    val dot = candidate.indexOf('.')
+    if (dot >= 0 && candidate.length - dot - 1 > 2) return typed
+    val intLen = if (dot >= 0) dot else candidate.length
+    if (intLen > 6) return typed
+    return candidate
+}
+
+/** Append a single decimal point (no-op if one is already present). */
+private fun appendDecimal(typed: String): String {
+    if (typed.contains('.')) return typed
+    return if (typed.isEmpty()) "0." else "$typed."
+}
+
+private fun formatTypedAmount(typed: String): String {
+    if (typed.isEmpty()) return "₦____"
+    val dot = typed.indexOf('.')
+    val intPart = if (dot >= 0) typed.substring(0, dot) else typed
+    val decPart = if (dot >= 0) typed.substring(dot) else ""
+    val groupedInt = intPart.toLongOrNull()
+        ?.let { NumberFormat.getInstance(Locale.UK).format(it) }
+        ?: intPart.ifEmpty { "0" }
+    return "₦$groupedInt$decPart"
+}
+
 private fun formatAmountShort(naira: Int): String = when {
     naira >= 1_000 && naira % 1_000 == 0 -> "₦${naira / 1_000}k"
     else -> "₦" + formatGrouped(naira.toString())
@@ -595,6 +920,7 @@ private fun ModeSelectScreenPrepayPreview() {
             ),
             displayName = "Total Lekki Ph2",
             logoBytes = null,
+            pricePerLitre = 870,
             onModeTileTap = {},
             onAmountTileTap = {},
             onMethodTileTap = {},
@@ -612,6 +938,7 @@ private fun ModeSelectScreenInitialPreview() {
             state = TransactionState.ModeSelect(),
             displayName = "Total Lekki Ph2",
             logoBytes = null,
+            pricePerLitre = 870,
             onModeTileTap = {},
             onAmountTileTap = {},
             onMethodTileTap = {},

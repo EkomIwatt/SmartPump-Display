@@ -1,10 +1,14 @@
 // 3×4 monospace keypad for cash-amount entry (Flow 4) and custom pre-pay amount.
-// Layout:
+// Bottom row depends on mode:
+//   confirm mode (default):  ⌫ 0 ✓
+//   decimal mode:            . 0 ⌫
+//   neither:                 ⌫ 0 —
 //   1 2 3
 //   4 5 6
 //   7 8 9
-//   ⌫ 0 ✓
-// Buttons are 64dp minimum so they remain reliable with gloves in daylight.
+// Decimal mode (showDecimalKey, used by the pre-pay amount step, which has its own bottom
+// CONFIRM button so the keypad's ✓ is redundant) swaps ✓ for ⌫ and moves the decimal point
+// into the bottom-left slot. Buttons are 64dp minimum so they stay reliable with gloves.
 package app.balancee.smartpump.display.ui.components
 
 import androidx.compose.foundation.background
@@ -14,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -51,9 +56,12 @@ private val KeyLabelStyleBase = TextStyle(
 fun NumericKeypad(
     onDigit: (Int) -> Unit,
     onBackspace: () -> Unit,
-    onConfirm: () -> Unit,
+    onConfirm: () -> Unit = {},
+    onDecimal: () -> Unit = {},
     modifier: Modifier = Modifier,
     confirmEnabled: Boolean = true,
+    showConfirmKey: Boolean = true,
+    showDecimalKey: Boolean = false,
     cellHeight: androidx.compose.ui.unit.Dp = Dimensions.buttonHeightPrimary,
 ) {
     Column(
@@ -83,28 +91,49 @@ fun NumericKeypad(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            DigitKey(
-                label = "⌫",
-                height = cellHeight,
-                modifier = Modifier.weight(1f),
-                onClick = onBackspace,
-                accentColor = WarningRed,
-            )
+            // Left cell: decimal point in decimal mode, otherwise backspace.
+            if (showDecimalKey && !showConfirmKey) {
+                DigitKey(
+                    label = ".",
+                    height = cellHeight,
+                    modifier = Modifier.weight(1f),
+                    onClick = onDecimal,
+                )
+            } else {
+                DigitKey(
+                    label = "⌫",
+                    height = cellHeight,
+                    modifier = Modifier.weight(1f),
+                    onClick = onBackspace,
+                    accentColor = WarningRed,
+                )
+            }
             DigitKey(
                 label = "0",
                 height = cellHeight,
                 modifier = Modifier.weight(1f),
                 onClick = { onDigit(0) },
             )
-            DigitKey(
-                label = "✓",
-                height = cellHeight,
-                modifier = Modifier.weight(1f),
-                onClick = onConfirm,
-                accentColor = BrandBlue,
-                filled = true,
-                enabled = confirmEnabled,
-            )
+            // Right cell: confirm (✓), backspace in decimal mode, or empty.
+            when {
+                showConfirmKey -> DigitKey(
+                    label = "✓",
+                    height = cellHeight,
+                    modifier = Modifier.weight(1f),
+                    onClick = onConfirm,
+                    accentColor = BrandBlue,
+                    filled = true,
+                    enabled = confirmEnabled,
+                )
+                showDecimalKey -> DigitKey(
+                    label = "⌫",
+                    height = cellHeight,
+                    modifier = Modifier.weight(1f),
+                    onClick = onBackspace,
+                    accentColor = WarningRed,
+                )
+                else -> Spacer(modifier = Modifier.weight(1f))
+            }
         }
     }
 }

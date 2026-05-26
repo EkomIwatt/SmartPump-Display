@@ -314,15 +314,15 @@ private fun SecurityCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Skip PIN modal on attendant actions",
+                    text = "Skip PIN when opening the attendant panel",
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
                 )
                 Text(
                     text = if (pinBypassEnabled) {
-                        "ON · attendant actions fire immediately."
+                        "ON · swipe-up opens the panel immediately."
                     } else {
-                        "OFF · each action prompts for the 4-digit PIN."
+                        "OFF · swipe-up prompts for the 4-digit PIN first."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,

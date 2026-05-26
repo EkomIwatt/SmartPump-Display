@@ -5,6 +5,12 @@
 //  - A scrim above the customer surface darkens the screen while the panel is open;
 //    tapping the scrim or swiping the panel back down dismisses it.
 //
+// PIN gating (boss edit 2026-05-26): the PIN is demanded ONCE, to open the panel — not
+// per action. The handle triggers a PIN modal; on success the panel slides up and every
+// action (FILL UP AUTHORISE / AUTHORISE CASH / CASH RECEIVED) fires directly with no
+// further prompt. Cancelling the PIN keeps the panel closed; each fresh open re-asks.
+// Debug builds skip the gate via pinBypassEnabled.
+//
 // Animation: 250ms ease-out slide-up / ease-in slide-down — matches design-system.md.
 package app.balancee.smartpump.display.ui.attendant
 
@@ -50,16 +56,6 @@ private const val OVERLAY_ANIM_MS = 250
 private const val SWIPE_UP_THRESHOLD_DP = 32  // net drag in dp to count as a swipe-up open
 private const val SWIPE_DOWN_THRESHOLD_DP = 48 // net drag in dp on the panel to dismiss
 
-/**
- * Which action the attendant has tapped. Used to (a) park the requested action while the
- * PIN modal is showing and (b) pick a contextual modal title.
- */
-private enum class AttendantAction(val title: String) {
-    FillUp("Authorise FILL UP"),
-    CashFixed("Authorise CASH"),
-    CashReceived("Confirm CASH RECEIVED"),
-}
-
 @Composable
 fun AttendantOverlayHost(
     state: TransactionState,
@@ -73,22 +69,13 @@ fun AttendantOverlayHost(
     content: @Composable BoxScope.() -> Unit,
 ) {
     var visible by rememberSaveable { mutableStateOf(false) }
-    var pendingAction by remember { mutableStateOf<AttendantAction?>(null) }
+    // Whether the PIN modal is up, gating the panel open. Local (not saveable): a process
+    // death mid-PIN simply re-shows the closed handle, which is the correct safe default.
+    var pinGateVisible by remember { mutableStateOf(false) }
 
-    // Fires the action and closes both the modal and the panel. Used by the bypass path
-    // and the PIN-modal success path.
-    fun fireAndDismiss(action: AttendantAction) {
-        when (action) {
-            AttendantAction.FillUp -> onAttendantFillUp()
-            AttendantAction.CashFixed -> onAttendantCashFixed()
-            AttendantAction.CashReceived -> onAttendantCashReceived()
-        }
-        pendingAction = null
-        visible = false
-    }
-
-    fun requestAction(action: AttendantAction) {
-        if (pinBypassEnabled) fireAndDismiss(action) else pendingAction = action
+    // The handle was activated. Debug builds open straight away; otherwise demand the PIN.
+    fun requestOpen() {
+        if (pinBypassEnabled) visible = true else pinGateVisible = true
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -101,7 +88,7 @@ fun AttendantOverlayHost(
         if (!visible) {
             SwipeUpHandle(
                 modifier = Modifier.align(Alignment.BottomCenter),
-                onActivate = { visible = true },
+                onActivate = { requestOpen() },
             )
         }
 
@@ -141,14 +128,22 @@ fun AttendantOverlayHost(
                 onDismiss = { visible = false },
                 modifier = Modifier.fillMaxWidth(),
             ) {
+                // The panel only opens after the PIN gate clears, so every action fires
+                // directly and then closes the panel — no per-action prompt.
                 AttendantPanel(
                     state = state,
-                    onFillUpAuthorise = { requestAction(AttendantAction.FillUp) },
-                    onAuthoriseCash = { requestAction(AttendantAction.CashFixed) },
-                    onCashReceived = { requestAction(AttendantAction.CashReceived) },
-                    // Manual nozzle-shutoff fires straight through (no PIN gate) — it only ends
-                    // an in-progress fill-up early and locks the litres already dispensed, so it
-                    // can't move money the way the authorise/cash-received actions can.
+                    onFillUpAuthorise = {
+                        onAttendantFillUp()
+                        visible = false
+                    },
+                    onAuthoriseCash = {
+                        onAttendantCashFixed()
+                        visible = false
+                    },
+                    onCashReceived = {
+                        onAttendantCashReceived()
+                        visible = false
+                    },
                     onEndFillup = {
                         onAttendantEndFillup()
                         visible = false
@@ -158,14 +153,17 @@ fun AttendantOverlayHost(
             }
         }
 
-        // PIN gate — sits on top of the panel + scrim. Released action fires inside
-        // fireAndDismiss(), which also tears down the panel.
-        pendingAction?.let { action ->
+        // PIN gate — demanded once to open the panel. Sits on top of the (still-closed) panel
+        // + scrim. On success the panel slides up; cancelling leaves everything closed.
+        if (pinGateVisible) {
             PinEntryModal(
-                title = action.title,
+                title = "Unlock attendant",
                 onVerify = verifyPin,
-                onSuccess = { fireAndDismiss(action) },
-                onCancel = { pendingAction = null },
+                onSuccess = {
+                    pinGateVisible = false
+                    visible = true
+                },
+                onCancel = { pinGateVisible = false },
             )
         }
     }

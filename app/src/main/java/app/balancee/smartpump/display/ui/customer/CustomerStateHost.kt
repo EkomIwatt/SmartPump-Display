@@ -63,6 +63,7 @@ fun CustomerStateHost(
             state = state,
             displayName = identity?.displayName.orEmpty(),
             logoBytes = identity?.logoBytes,
+            pricePerLitre = uiState.pricePerLitre,
             onModeTileTap = onModeTileTap,
             onAmountTileTap = onAmountTileTap,
             onMethodTileTap = onMethodTileTap,
@@ -269,6 +270,7 @@ private fun CustomerStateHostModeSelectPreview() {
         CustomerStateHost(
             uiState = CustomerUiState(
                 state = TransactionState.ModeSelect(mode = TransactionMode.PRE_PAY, amountNaira = 5000),
+                pricePerLitre = 870,
             ),
             identity = null,
             onStartTransaction = {},

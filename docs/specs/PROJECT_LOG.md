@@ -805,3 +805,64 @@ Two related pieces of fill-up work. (1) Demos kept "running forever": with no re
 
 **Next:**
 Phase 6c — Flow 4 (Cash Fixed) amount-entry screen polish, as still pending from Phase 6f.
+
+---
+
+### Boss edits (2026-05-26) — ₦/L toggle, single PIN on swipe-up, NFC removed
+**Date:** 2026-05-26
+**Status:** done (3 of 4 boss edits; kiosk-lock deferred)
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+Three changes the boss asked for after seeing the build. (1) On the pre-pay amount step the customer can now choose **by litres** instead of by naira — a "By amount (₦) / By litres (L)" toggle sits above the amount tiles. Amount mode shows a live "≈ X.XX L" preview; litres mode offers 5/10/20/30/50 L presets (plus a custom keypad) and shows a live "= ₦X,XXX" price. Either way the pump still charges in naira under the hood, so nothing downstream changed. (2) The attendant PIN is now asked **once, when the swipe-up panel opens**, instead of every time an action is tapped — unlock once, then FILL UP AUTHORISE / AUTHORISE CASH / CASH RECEIVED all fire without re-prompting. (3) The **NFC card** option was removed from the pre-pay payment list for V1. The fourth boss edit — locking the app so it can't be closed once set up (kiosk lock-task) — was deferred by the boss and is not built.
+
+**Technical notes:**
+- **Edit 1 — ₦/L toggle (`ui/customer/ModeSelectScreen.kt`):**
+  - New local `AmountEntryMode { AMOUNT, LITRES }` enum + `entryMode` / `selectedLitres` UI state. Toggle and litre selection are **local-only** — never persisted, never on the state machine. Every path commits naira into `ModeSelect.amountNaira` via the existing `onAmountTileTap(Int)` callback, so the FSM, persistence and dispensing are untouched (memory `[[project_boss_edits]]` decision: Option 1).
+  - Conversion is single-point: `litresToNaira(litres, price) = litres * price` (whole-litre presets only for V1 — `NumericKeypad` is integer-only; decimal litres deferred). Litre presets `5/10/20/30/50`, custom range `1..200 L`.
+  - New `EntryModeToggle` + `ToggleSegment` (brand-blue filled when active). Extracted `PresetGrid` (shared 2×3 grid: 5 presets + Custom) so amount and litre modes reuse one grid — only labels + selected-index differ.
+  - Live preview line under the grid via `amountPreview(...)`: amount mode → "≈ X.XX L · ₦{price}/L"; litres mode → "= ₦{naira} · ₦{price}/L". Reflects the typed-and-valid custom value when the keypad is open, else the current selection. Hidden when `pricePerLitre <= 0`.
+  - Custom keypad is now mode-aware: display "₦____" vs "__ L", min/max line in naira vs litres, and `customValid` checks the matching range. Toggling modes resets keypad + litre selection.
+  - `ModeSelectScreen` gained a `pricePerLitre: Int` param; `CustomerStateHost` passes `uiState.pricePerLitre`. Previews updated to pass `870`.
+- **Edit 2 — single PIN on swipe-up (`ui/attendant/AttendantOverlayHost.kt`):**
+  - Removed the per-action `AttendantAction` enum, `pendingAction`, `requestAction()`, and `fireAndDismiss()`. The handle now calls `requestOpen()` → if `pinBypassEnabled` opens directly, else raises a single `PinEntryModal(title = "Unlock attendant")`. On PIN success the panel slides up (`visible = true`); cancel leaves it closed. Each fresh open re-asks (gate state is plain `remember`, resets after success/cancel).
+  - Inside the open panel, all four actions (`onFillUpAuthorise` / `onAuthoriseCash` / `onCashReceived` / `onEndFillup`) fire their VM callback directly then `visible = false` — no second prompt. `AttendantPanel`, `PinEntryModal`, `SecurityPreferences`/`PinHasher` (via `gateVm::verifyPin`) and the debug `pinBypassEnabled` toggle are all unchanged — only the gating point moved.
+- **Edit 3 — remove NFC (`ui/customer/ModeSelectScreen.kt`):**
+  - `PaymentMethod.NFC_CARD` dropped from `PRE_PAY_METHODS`, so the tile disappears. The enum value is **kept** (persisted txns + exhaustive `when`s in `methodLabel`, `StateColors`, the QR screen's `PaymentArtifact` still reference it) — re-adding the tile is a one-line change.
+- **Edit 4 — kiosk lock-task:** deferred by the boss; not started. (App still uses immersive flags + swallowed back press in `MainActivity`; true lock-task / device-owner pinning is the deployment-time step.)
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+
+**Out of scope (intentionally):**
+- Decimal-litre custom entry (`NumericKeypad` is integer-only) — whole litres for V1 unless the boss asks.
+- Clearing `amountNaira` when toggling entry mode — the committed amount persists across a toggle (the preview always reflects it); only the local litre highlight resets. Adding a "clear amount" path would need a new VM callback for no real gain.
+
+**Next:**
+Phase 6c — Flow 4 (Cash Fixed) amount-entry screen polish, still pending from Phase 6f. Kiosk lock-task (boss edit 4) whenever the boss picks it up.
+
+---
+
+### Boss edits — UI refinements on the pre-pay amount step + PIN copy
+**Date:** 2026-05-26
+**Status:** done
+**Commit(s):** (this commit — also carries the prior "Boss edits (2026-05-26)" entry's work, which was uncommitted when logged)
+
+**Summary (plain language):**
+Follow-up polish after the boss eyeballed the ₦/L toggle work. (1) The live conversion line on the amount step is now bigger and sits inside a gold-tinted panel like the receipt/dispensing ledgers, so it reads as a real readout instead of a caption. (2) The price-per-litre now sits directly beside the "SELECT AMOUNT" heading in amber (e.g. `SELECT AMOUNT · ₦870/L`) rather than floated off to the far right where it was easy to miss. (3) The custom-amount keypad lost its tick (✓) key — the screen already has a big "Confirm" button — and gained a decimal point, so litres can be entered with fractions (e.g. 12.5 L); the typed value now commits live as you type. (4) On that keypad the decimal point and backspace were swapped so the decimal sits bottom-left and backspace bottom-right. (5) Clarified the debug screen's PIN-bypass switch copy to match the new "PIN on panel open" behaviour — this is also the answer to "why don't I see the PIN": on debug builds the bypass seeds ON by design, and the switch turns it off to test the gate.
+
+**Technical notes:**
+- **`ui/customer/ModeSelectScreen.kt`:**
+  - Live preview moved into a gold tinted panel (`PrimaryGold` 0.07 fill / 0.30 border, `cornerCodePanel` radius — the dispensing-ledger treatment) and bumped to `headlineSmall` semibold gold. The `· ₦/L` suffix was dropped from the preview string since the price now lives in the header.
+  - `SectionHeader` trailing slot changed from `Arrangement.SpaceBetween` (label-left / value-far-right) to a left-packed `Row` with an 8dp spacer and a `· ` separator, so `₦{price}/L` sits immediately after the label in `PrimaryGold`.
+  - Custom keypad rendered with `showConfirmKey = false, showDecimalKey = true`. `customTyped` is now a `String` (was effectively integer) so it can hold a decimal point; `customTypedValue: Double?` drives validity. New `commitCustom()` pushes `value.roundToInt()` (amount mode) or `(litres × price).roundToInt()` (litres mode) into `amountNaira` on every valid keystroke — live commit, since there's no ✓ to commit a discrete value. `customEntryOk = !customKeypadOpen || customValid` gates both the PAY WITH reveal and the bottom CONFIRM, so a mid-typed/backspaced invalid value can't be confirmed and `amountNaira` never goes stale at the moment Confirm is enabled.
+  - New input helpers: `appendDigit` (≤2 decimals, 6-digit integer cap, blocks digits after a lone leading `0`), `appendDecimal` (single `.`, seeds `0.` from empty), `formatTypedAmount` (groups the integer part, keeps the in-progress decimal).
+- **`ui/components/NumericKeypad.kt`:** added `onDecimal` / `showConfirmKey` / `showDecimalKey` params (defaults keep the existing ✓ layout, so PIN modal, cash-fixed and onboarding keypads are untouched). Bottom row is now mode-dependent: confirm mode `⌫ 0 ✓`, decimal mode `. 0 ⌫` (decimal bottom-left, backspace bottom-right per the swap request), neither `⌫ 0 —`.
+- **`ui/debug/DebugScreen.kt`:** PIN-bypass switch copy updated from per-action wording ("Skip PIN modal on attendant actions" / "attendant actions fire immediately") to panel-open wording ("Skip PIN when opening the attendant panel" / "swipe-up opens the panel immediately" vs "swipe-up prompts for the 4-digit PIN first"), matching the boss-edit #2 gating change. No behaviour change — `SecurityPreferences` still seeds the flag from `BuildConfig.DEBUG` (ON in debug, hard-OFF in release).
+- **`ui/customer/CustomerStateHost.kt`:** unchanged this round beyond the earlier `pricePerLitre` pass-through.
+- Verified with `gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL.
+
+**Out of scope (intentionally):**
+- Restricting the decimal key to litres mode only. It's present in both; in amount (₦) mode a typed decimal just rounds to whole naira on commit. Gate to litres-only if the boss dislikes a decimal on naira entry.
+- Changing the debug PIN-bypass default to OFF. Left ON in debug (dev-demo convenience); the switch is the documented way to test the gate.
+
+**Next:**
+Phase 6c — Flow 4 (Cash Fixed) amount-entry screen polish, still pending. Kiosk lock-task (boss edit 4) whenever the boss picks it up.
