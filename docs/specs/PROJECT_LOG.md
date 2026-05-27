@@ -866,3 +866,25 @@ Follow-up polish after the boss eyeballed the ₦/L toggle work. (1) The live co
 
 **Next:**
 Phase 6c — Flow 4 (Cash Fixed) amount-entry screen polish, still pending. Kiosk lock-task (boss edit 4) whenever the boss picks it up.
+
+### Codebase cleanup — unused-resource sweep, lint pass, security hardening
+**Date:** 2026-05-27
+**Status:** done
+**Commit(s):** 6682d3c, c3cae06, 26f428c, 1b364a8 — on branch `chore/cleanup`, not yet merged to `main`
+
+**Summary (plain language):**
+A housekeeping pass with no new features. We deleted leftover template files, ran the Android linter to confirm what was unused, and closed a few safety gaps. The most important fix: the hidden engineering "debug" screen — which can mark a payment as paid and edit the price and bank account — could be opened on a real production device by anyone who knew the secret corner tap; it is now switched off entirely in production builds. We also stopped the device from backing up its private data (PIN, station details, transaction log) to the cloud, and removed unused phone-SMS permissions that were making the build fail its own checks. Two unused libraries (crash-reporting and a background-task scheduler) were removed; the USB hardware library was kept for the upcoming real-pump work.
+
+**Technical notes:**
+- **Unused removals:** `res/values/colors.xml` (all 7 AS-template colors, lint `UnusedResources` confirmed), the two `ExampleUnitTest`/`ExampleInstrumentedTest` stubs, the redundant activity `android:label` (lint `RedundantLabel`), and the unreferenced `kotlin-android` plugin alias from the version catalog. Renamed `SmartPumpApp.kt` → `SmartPumpApplication.kt` to match the class.
+- **Security/permissions:** removed `RECEIVE_SMS` + `READ_SMS` (no receiver exists; USSD is mocked — these were the 2 `lintDebug` errors). Set `android:allowBackup="false"` and deleted the empty backup-rule stubs. Gated the debug long-press hotspot in `MainActivity` behind `BuildConfig.DEBUG` so the payment force-resolve and live DeviceConfig editing (price, virtual account) are compiled out of release.
+- **Dependencies:** dropped `sentry-android` (dormant — auto-init off, no DSN, no capture calls; NDK lib also failed lint `Aligned16KB`) including its auto-init manifest meta-data, and `workmanager-ktx` (no `Worker` exists). Kept `usbserial` for the Phase 7 hardware path.
+- **Verification:** `:app:lintDebug` → BUILD SUCCESSFUL, **0 errors** (was 2). Tooling note: Gradle needs `JAVA_HOME` pointed at `C:\Program Files\Android\Android Studio\jbr` in a bare shell.
+
+**Flagged but intentionally NOT done (need dedicated tasks, not blind cleanup):**
+- Room `fallbackToDestructiveMigration(dropAllTables = true)` (`DatabaseModule.kt:35`) — wipes the local DB on any schema change; needs real migrations before production.
+- `isMinifyEnabled = false` for release — enabling R8/`shrinkResources` needs ProGuard keep rules + a test pass.
+- Kobo-precision: `pricePerLitre = (koboPerLitre / 100).toInt()` discards sub-naira precision across `CustomerViewModel`; the minimum-dispense message (`:630`) shows a truncated ₦8 instead of ₦8.70. Keep money in kobo (`Long`) end-to-end; touches money logic, so it wants tests.
+
+**Next:**
+Decide whether to merge `chore/cleanup` into `main`. Then the three deferred items above as their own tasks.
