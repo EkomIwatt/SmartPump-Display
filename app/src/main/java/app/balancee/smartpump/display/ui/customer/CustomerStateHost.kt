@@ -46,7 +46,7 @@ fun CustomerStateHost(
     onAmountTileTap: (Int) -> Unit,
     onMethodTileTap: (PaymentMethod) -> Unit,
     onModeConfirm: () -> Unit,
-    onCashFixedAuthorise: (Int) -> Unit,
+    onCashFixedAuthorise: (Long) -> Unit,
     onFillupSelectIntent: (PostFillIntent) -> Unit,
     onFillupPayCash: () -> Unit,
     onFillupPayDigital: () -> Unit,

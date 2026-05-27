@@ -84,6 +84,8 @@ import app.balancee.smartpump.display.ui.theme.Surface
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
+import app.balancee.smartpump.display.ui.util.appendDecimal
+import app.balancee.smartpump.display.ui.util.appendDigit
 import app.balancee.smartpump.display.ui.util.formatNaira
 import java.text.NumberFormat
 import java.util.Locale
@@ -871,24 +873,6 @@ private fun amountPreview(
             "= ${formatNaira((litres * priceKoboPerLitre).roundToLong())}"
         }
     }
-}
-
-/** Append a digit to the typed custom value, enforcing ≤2 decimals, a 6-digit integer cap,
- *  and blocking trailing digits after a lone leading zero (use the decimal key instead). */
-private fun appendDigit(typed: String, digit: Int): String {
-    if (typed == "0") return typed
-    val candidate = typed + digit.toString()
-    val dot = candidate.indexOf('.')
-    if (dot >= 0 && candidate.length - dot - 1 > 2) return typed
-    val intLen = if (dot >= 0) dot else candidate.length
-    if (intLen > 6) return typed
-    return candidate
-}
-
-/** Append a single decimal point (no-op if one is already present). */
-private fun appendDecimal(typed: String): String {
-    if (typed.contains('.')) return typed
-    return if (typed.isEmpty()) "0." else "$typed."
 }
 
 private fun formatTypedAmount(typed: String): String {

@@ -617,7 +617,7 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    fun onCashFixedAuthorise(cashAmountNaira: Int) {
+    fun onCashFixedAuthorise(cashAmountKobo: Long) {
         if (currentState() !is TransactionState.CashFixedAmountEntry) return
         if (priceKoboPerLitre <= 0L) {
             setState(
@@ -628,10 +628,9 @@ class CustomerViewModel @Inject constructor(
             )
             return
         }
-        val amountKobo = cashAmountNaira.toLong() * 100
         viewModelScope.launch {
-            val cutoff = deviceConfig()?.litresCutoff(amountKobo)
-                ?: (Math.floor((amountKobo.toDouble() / priceKoboPerLitre) * 100.0) / 100.0)
+            val cutoff = deviceConfig()?.litresCutoff(cashAmountKobo)
+                ?: (Math.floor((cashAmountKobo.toDouble() / priceKoboPerLitre) * 100.0) / 100.0)
             if (cutoff <= 0.0) {
                 // Smallest dispensable step is 0.01 L, i.e. priceKoboPerLitre / 100 kobo.
                 setState(
@@ -649,12 +648,12 @@ class CustomerViewModel @Inject constructor(
                 TransactionState.CashFixedDispensing(
                     txnId = txnId,
                     priceKoboPerLitre = priceKoboPerLitre,
-                    cashAmountKobo = amountKobo,
+                    cashAmountKobo = cashAmountKobo,
                     litresCutoff = cutoff,
                     litresSoFar = 0.0,
                 )
             )
-            startCashFixedDispensing(cutoff, amountKobo, txnId)
+            startCashFixedDispensing(cutoff, cashAmountKobo, txnId)
         }
     }
 
