@@ -46,7 +46,6 @@ import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
-import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.util.appendDecimal
 import app.balancee.smartpump.display.ui.util.appendDigit
 import app.balancee.smartpump.display.ui.util.formatNaira
@@ -141,12 +140,6 @@ fun CashFixedAmountEntryScreen(
                                 formatNaira(CASH_MAX_NAIRA * 100L),
                         )
                     }
-                    Box(modifier = Modifier.weight(1f))
-                    BalanceeButton(
-                        label = "Cancel",
-                        onClick = onCancel,
-                        variant = BalanceeButtonVariant.Secondary,
-                    )
                 }
             }
         }
@@ -160,12 +153,6 @@ fun CashFixedAmountEntryScreen(
                     style = MaterialTheme.typography.headlineMedium,
                     color = TextPrimary,
                 )
-                Text(
-                    text = "System computes the litre cutoff; the pump cuts at exactly that " +
-                        "amount. Floored — never dispenses more than was paid.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                )
                 NumericKeypad(
                     onDigit = { d -> typed = appendDigit(typed, d) },
                     onBackspace = { if (typed.isNotEmpty()) typed = typed.dropLast(1) },
@@ -173,6 +160,12 @@ fun CashFixedAmountEntryScreen(
                     showConfirmKey = false,
                     showDecimalKey = true,
                     modifier = Modifier.weight(1f),
+                )
+                BalanceeButton(
+                    label = "Cancel",
+                    onClick = onCancel,
+                    variant = BalanceeButtonVariant.Secondary,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
