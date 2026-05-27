@@ -3,9 +3,11 @@ package app.balancee.smartpump.display.di
 
 import android.content.Context
 import androidx.room.Room
+import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.data.db.DeviceConfigDao
 import app.balancee.smartpump.display.data.db.PulseStateDao
 import app.balancee.smartpump.display.data.db.SmartPumpDatabase
+import app.balancee.smartpump.display.data.db.SmartPumpMigrations
 import app.balancee.smartpump.display.data.db.StationIdentityDao
 import app.balancee.smartpump.display.data.db.TransactionDao
 import app.balancee.smartpump.display.data.repository.DeviceConfigRepositoryImpl
@@ -32,7 +34,13 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SmartPumpDatabase =
         Room.databaseBuilder(context, SmartPumpDatabase::class.java, "smartpump.db")
-            .fallbackToDestructiveMigration(dropAllTables = true) // TODO: replace with proper migrations before production
+            .addMigrations(*SmartPumpMigrations.ALL)
+            .apply {
+                // Debug builds may iterate the schema freely. Release builds carry NO
+                // destructive fallback: a missing migration must fail loudly rather than
+                // silently drop a station's transaction log / identity / PIN hash.
+                if (BuildConfig.DEBUG) fallbackToDestructiveMigration(dropAllTables = true)
+            }
             .build()
 
     @Provides

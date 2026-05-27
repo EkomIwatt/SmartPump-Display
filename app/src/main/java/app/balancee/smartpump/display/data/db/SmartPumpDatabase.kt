@@ -18,7 +18,7 @@ import app.balancee.smartpump.display.data.db.entities.TransactionEntity
         StationIdentityEntity::class,
     ],
     version = 2,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class SmartPumpDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao

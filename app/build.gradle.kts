@@ -44,12 +44,22 @@ android {
         compose = true
         buildConfig = true
     }
+
+    // Room's exported schema JSONs (app/schemas) are bundled as androidTest assets so
+    // MigrationTestHelper can load them when migration tests are added.
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
 }
 
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
+}
+
+ksp {
+    // Export the Room schema to app/schemas (committed to git) so migrations can be
+    // authored and tested against a baseline. Destructive fallback is debug-only.
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -91,6 +101,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.room.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
