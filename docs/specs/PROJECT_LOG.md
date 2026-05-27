@@ -888,3 +888,21 @@ A housekeeping pass with no new features. We deleted leftover template files, ra
 
 **Next:**
 Decide whether to merge `chore/cleanup` into `main`. Then the three deferred items above as their own tasks.
+
+### Kobo precision — money carried as kobo end-to-end (sub-naira prices)
+**Date:** 2026-05-27
+**Status:** done
+**Commit(s):** 556d535 (foundation + tests), 6af8660 (state machine + screens) — on branch `feature/kobo-precision`, not yet merged to `main`
+
+**Summary (plain language):**
+The boss confirmed fuel prices can include kobo (e.g. ₦870.50/L). Previously the app collapsed any price to whole naira deep in its logic, so on a fill-up it would have under-billed — e.g. 38.1 L at ₦870.50 would charge ₦33,166 instead of ₦33,166.05, and the saved record would be wrong too. Now every price and amount is handled to the exact kobo from end to end, and every money figure on screen shows two decimal places (e.g. `₦870.50/L`, `₦33,166.05`). What the customer is shown always matches what they're charged. This is a deliberate change from the original screen designs, which only ever drew whole-naira amounts — noted in OPEN_QUESTIONS for the boss to confirm the look.
+
+**Technical notes:**
+- Foundation (`556d535`): new `ui/util/formatNaira(kobo: Long)` (the single money-render point, always 2 dp) and `DeviceConfig.costKobo(litres)` (rounds to nearest kobo). 10 unit tests cover the formatter + `costKobo`/`litresCutoff`/`nairaPerLitre` — the project's first real tests (replacing the deleted template stubs).
+- Wiring (`6af8660`): `TransactionState` money fields renamed to kobo `Long` (`amountKobo`, `amountDueKobo`, `cashAmountKobo`, `priceKoboPerLitre`). `CustomerViewModel` computes in kobo throughout; fill-up total is `Math.round(litres * priceKoboPerLitre)` (round, not truncate). Customer-typed entry (amount tiles, cash keypad) stays whole-naira at the screen→VM boundary and is ×100 to kobo in the VM, so pre-pay/USSD payloads still encode whole naira. All 11 customer screens + `AmountDisplay` + the attendant overlay render via `formatNaira`. The cash-fixed minimum-dispense message now reads `₦8.70` (was a truncated `₦8`). The debug DeviceConfig form accepts a decimal price.
+- **Persistence compat:** the kobo field renames mean a `TransactionState` blob persisted before this change fails to deserialise and falls back to `Idle` via `PulseRepositoryImpl`'s `runCatching{…}.getOrDefault(Idle)` (+ `Json { ignoreUnknownKeys = true }`) — acceptable for an in-flight transaction across an app upgrade, consistent with prior phases.
+- **Design deviation:** strict-design screens only show whole naira; full 2-dp display is a deliberate deviation, logged under OPEN_QUESTIONS "Money precision & display (Resolved 2026-05-27)". If the boss wants whole amounts without a trailing `.00`, that's a `formatNaira` tweak, not a state change.
+- **Verification:** `:app:testDebugUnitTest` green (kobo math tests pass); `:app:lintDebug` → BUILD SUCCESSFUL, 0 errors.
+
+**Next:**
+Boss to eyeball the 2-dp money display on a real run and confirm (or ask for whole-naira amounts to drop `.00`). Then decide whether to merge `feature/kobo-precision` into `main`. Remaining deferred items: Room migrations, R8/minify.
