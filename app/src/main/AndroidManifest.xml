@@ -5,27 +5,17 @@
     <!-- USB OTG host for Arduino pulse-tap adapter -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
-    <!-- SMS receive for USSD payment confirmation (Flow 5) -->
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.READ_SMS" />
-
     <!-- Keep screen on — kiosk tablet is always-on -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:name=".SmartPumpApplication"
-        android:allowBackup="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.SmartPumpDisplay">
-
-        <!-- Disable Sentry's auto-init ContentProvider until a real DSN is wired in.
-             Without this, Sentry crashes the app on startup with "DSN is required". -->
-        <meta-data android:name="io.sentry.auto-init" android:value="false" />
 
         <activity
             android:name=".MainActivity"

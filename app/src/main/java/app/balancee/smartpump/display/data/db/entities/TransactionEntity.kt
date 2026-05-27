@@ -1,4 +1,4 @@
-// Append-only audit row for a completed transaction. Synced to backend by WorkManager.
+// Append-only audit row for a completed transaction. Synced to the backend in a later phase.
 package app.balancee.smartpump.display.data.db.entities
 
 import androidx.room.Entity

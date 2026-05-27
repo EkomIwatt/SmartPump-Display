@@ -76,17 +76,11 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 
-    // WorkManager
-    implementation(libs.workmanager.ktx)
-
     // Hardware
     implementation(libs.usbserial)
 
     // Payments / QR
     implementation(libs.zxing)
-
-    // Crash reporting — DSN configured at runtime, set SENTRY_DSN build property for production
-    implementation(libs.sentry.android)
 
     // Serialization (state persistence to Room)
     implementation(libs.kotlinx.serialization.json)

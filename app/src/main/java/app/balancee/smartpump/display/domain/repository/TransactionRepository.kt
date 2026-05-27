@@ -13,6 +13,6 @@ interface TransactionRepository {
     /** Live stream of recent transactions ordered newest-first. */
     fun getRecentTransactions(limit: Int = 50): Flow<List<Transaction>>
 
-    /** Transactions not yet synced to the Balanceè backend, oldest-first (for WorkManager sync). */
+    /** Transactions not yet synced to the Balanceè backend, oldest-first (for the future sync job). */
     suspend fun getPendingSync(): List<Transaction>
 }
