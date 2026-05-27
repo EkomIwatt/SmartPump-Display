@@ -27,4 +27,11 @@ data class DeviceConfig(
      */
     fun litresCutoff(amountKobo: Long): Double =
         Math.floor((amountKobo.toDouble() / koboPerLitre) * 100.0) / 100.0
+
+    /**
+     * Total cost in kobo for [litres] dispensed, rounded to the nearest kobo. Kept in kobo
+     * (not naira) so a sub-naira price — e.g. 87_050 = ₦870.50/L — bills exactly:
+     * 38.1 L → 3_316_605 kobo (₦33,166.05) rather than a truncated ₦33,166.
+     */
+    fun costKobo(litres: Double): Long = Math.round(litres * koboPerLitre)
 }
