@@ -27,7 +27,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
@@ -41,7 +40,6 @@ import app.balancee.smartpump.display.ui.components.LedgerRow
 import app.balancee.smartpump.display.ui.components.LitresDisplay
 import app.balancee.smartpump.display.ui.components.NumericKeypad
 import app.balancee.smartpump.display.ui.components.PumpHeader
-import app.balancee.smartpump.display.ui.components.StateChip
 import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BrandBlue
@@ -97,16 +95,6 @@ fun CashFixedAmountEntryScreen(
         val amountCard: @Composable (Modifier) -> Unit = { paneModifier ->
             BalanceeCard(borderColor = accent, modifier = paneModifier) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // In-card header: state chip (left) + activity word (right).
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        StateChip(label = "Cash", color = accent)
-                        LabelText(text = "Enter amount")
-                    }
-
                     LabelText(text = "Cash amount", color = ActiveCyan)
                     Box(modifier = Modifier.fillMaxWidth()) {
                         AmountDisplay(
