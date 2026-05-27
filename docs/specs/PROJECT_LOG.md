@@ -906,3 +906,20 @@ The boss confirmed fuel prices can include kobo (e.g. ₦870.50/L). Previously t
 
 **Next:**
 Boss to eyeball the 2-dp money display on a real run and confirm (or ask for whole-naira amounts to drop `.00`). Then decide whether to merge `feature/kobo-precision` into `main`. Remaining deferred items: Room migrations, R8/minify.
+
+### Phase 6c — Cash Fixed entry polish + decimal keypad
+**Date:** 2026-05-27
+**Status:** done
+**Commit(s):** 3cbfbe7 — on branch `feature/cash-fixed-6c`, not yet merged to `main`
+
+**Summary (plain language):**
+The last customer screen that hadn't been brought up to the design — the one where the attendant types a cash amount for a fixed-cash sale — now matches the look of the other screens (the tinted summary panel showing price, litre cutoff and limits). Its on-screen keypad also gains a decimal point, so the attendant can enter a part-naira amount (e.g. ₦5,000.50); the design itself assumed this. The amount is handled exactly to the kobo, consistent with the recent money work.
+
+**Technical notes:**
+- `CashFixedAmountEntryScreen` rebuilt to the dispensing-family card language: in-card `StateChip` + label header row, and the ledger (Price / L · Cutoff at · Min–Max) now sits in the state-tinted rounded panel (`accent` 0.07 fill / 0.30 border, `cornerCodePanel`) the other screens use.
+- Keypad switched to decimal mode (`showConfirmKey = false, showDecimalKey = true`) — the ✓ is dropped (the bottom AUTHORISE button is the commit), decimal point sits bottom-left. Entry is now a typed `String` parsed to kobo; `onCashFixedAuthorise` takes `Long` kobo end to end (was `Int` naira), rippling through `CustomerStateHost` and `CustomerViewModel`.
+- Extracted `appendDigit` / `appendDecimal` to `ui/util/AmountInput.kt` so the pre-pay custom-amount keypad and the cash keypad share one decimal-entry implementation (removed the private copies from `ModeSelectScreen`).
+- Verified with `:app:lintDebug` → BUILD SUCCESSFUL, 0 errors. (For UI-only follow-ups a `compileDebugKotlin` is the lighter check; lint reserved for manifest/resource/dependency changes or a pre-merge gate.)
+
+**Next:**
+Phase 6 strict-design series is now complete (6a–6g). Decide whether to merge `feature/cash-fixed-6c`. Outstanding: boss review of 2-dp money display; deferred Room migrations + R8/minify.
