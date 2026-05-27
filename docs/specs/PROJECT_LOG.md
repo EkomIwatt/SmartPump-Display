@@ -923,3 +923,22 @@ The last customer screen that hadn't been brought up to the design — the one w
 
 **Next:**
 Phase 6 strict-design series is now complete (6a–6g). Decide whether to merge `feature/cash-fixed-6c`. Outstanding: boss review of 2-dp money display; deferred Room migrations + R8/minify.
+
+### Room migrations — infrastructure + committed schema baseline
+**Date:** 2026-05-28
+**Status:** done
+**Commit(s):** 0e56dcb — on branch `feature/room-migrations`, not yet merged to `main`
+
+**Summary (plain language):**
+The app's local database (which holds the station's identity + PIN, the transaction audit log, the operator price config, and power-cut recovery state) was set up to **wipe itself clean on any database change** — fine while prototyping, disastrous once a real station has live data and the app updates. This sets up proper "migrations" instead: the database's structure is now recorded in a committed file, and from here on every structural change must ship a step-by-step upgrade so existing data is preserved. As a safety net, the old wipe-on-change behaviour is kept **only in developer builds**; a real (release) build will now refuse to start with a loud error rather than quietly destroy a station's records.
+
+**Technical notes:**
+- Root cause was worse than the TODO implied: `@Database` was already at `version = 2` with `exportSchema = false` + `fallbackToDestructiveMigration(dropAllTables = true)`, so whatever took it 1→2 wiped the DB and no schema was ever recorded.
+- Turned on `exportSchema = true` and set the `room.schemaLocation` KSP arg → schema JSONs now export to `app/schemas/` and are committed. **v2 is the baseline** (`2.json`, the 4 tables incl. the kobo `transactions` columns); there is no `1.json` and no 1→2 migration since nothing shipped at v1.
+- `SmartPumpMigrations.ALL` (ordered `Array<Migration>`, empty until v2→v3) wired into the builder via `addMigrations(*…)`; the file documents the bump-the-schema workflow.
+- **Destructive fallback is now `BuildConfig.DEBUG`-only** in `DatabaseModule` — release builds carry none, so a missing migration throws instead of dropping tables.
+- Added `room-testing` (androidTest) + bundled `app/schemas` as androidTest assets so the first `MigrationTestHelper` test (v2→v3) drops in without further build-config changes.
+- Verified `:app:compileDebugKotlin` green; KSP emitted `2.json`.
+
+**Next:**
+First real migration is whenever an entity next changes: bump to `version = 3`, build to emit `3.json`, add `MIGRATION_2_3` to `SmartPumpMigrations.ALL`, and add the matching `MigrationTestHelper` test. Decide whether to merge `feature/room-migrations`. Last deferred infra item: R8/minify for release.
