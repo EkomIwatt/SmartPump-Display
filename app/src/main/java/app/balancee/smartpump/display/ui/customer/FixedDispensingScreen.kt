@@ -53,13 +53,14 @@ import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.displayMonoFamily
+import app.balancee.smartpump.display.ui.util.formatNaira
 
 @Composable
 fun FixedDispensingScreen(
     flow: TransactionFlow,
     txnId: String,
-    pricePerLitre: Int,
-    amountNaira: Int,
+    priceKoboPerLitre: Long,
+    amountKobo: Long,
     litresAuthorised: Double,
     litresSoFar: Double,
     modifier: Modifier = Modifier,
@@ -74,7 +75,7 @@ fun FixedDispensingScreen(
     val progressFraction = if (litresAuthorised > 0) {
         (litresSoFar / litresAuthorised).coerceIn(0.0, 1.0)
     } else 0.0
-    val usedNaira = (litresSoFar * pricePerLitre).toInt()
+    val usedKobo = Math.round(litresSoFar * priceKoboPerLitre)
 
     Column(
         modifier = modifier
@@ -148,14 +149,14 @@ fun FixedDispensingScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        text = "₦${formatNaira(usedNaira)} used",
+                        text = "${formatNaira(usedKobo)} used",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = displayMonoFamily(),
                         ),
                         color = TextSecondary,
                     )
                     Text(
-                        text = "₦${formatNaira(amountNaira)} ${if (isCash) "cash" else "auth"}",
+                        text = "${formatNaira(amountKobo)} ${if (isCash) "cash" else "auth"}",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = displayMonoFamily(),
                         ),
@@ -184,7 +185,7 @@ fun FixedDispensingScreen(
                             valueMonospace = false,
                         )
                     }
-                    LedgerRow(label = "Price / L", value = "₦$pricePerLitre")
+                    LedgerRow(label = "Price / L", value = formatNaira(priceKoboPerLitre))
                     if (isCash) {
                         LedgerRow(label = "Cutoff at", value = "%.2f L".format(litresAuthorised))
                     } else {
@@ -234,9 +235,6 @@ private fun ProgressBar(
     }
 }
 
-private fun formatNaira(value: Int): String =
-    java.text.NumberFormat.getNumberInstance(java.util.Locale.UK).format(value)
-
 @Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun FixedDispensingPrepayPreview() {
@@ -244,8 +242,8 @@ private fun FixedDispensingPrepayPreview() {
         FixedDispensingScreen(
             flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
             txnId = "BLC-00847",
-            pricePerLitre = 870,
-            amountNaira = 5_000,
+            priceKoboPerLitre = 87_000,
+            amountKobo = 500_000,
             litresAuthorised = 5.75,
             litresSoFar = 3.42,
             stationName = "Total Lekki Ph2",
@@ -260,8 +258,8 @@ private fun FixedDispensingCashPreview() {
         FixedDispensingScreen(
             flow = TransactionFlow.CASH_FIXED,
             txnId = "BLC-00031",
-            pricePerLitre = 870,
-            amountNaira = 5_000,
+            priceKoboPerLitre = 87_000,
+            amountKobo = 500_000,
             litresAuthorised = 5.75,
             litresSoFar = 3.18,
             stationName = "Total Lekki Ph2",
@@ -276,8 +274,8 @@ private fun FixedDispensingPortraitPreview() {
         FixedDispensingScreen(
             flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
             txnId = "BLC-00847",
-            pricePerLitre = 870,
-            amountNaira = 5_000,
+            priceKoboPerLitre = 87_000,
+            amountKobo = 500_000,
             litresAuthorised = 5.75,
             litresSoFar = 3.42,
             stationName = "Total Lekki Ph2",

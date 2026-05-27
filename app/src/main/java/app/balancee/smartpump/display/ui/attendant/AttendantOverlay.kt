@@ -226,7 +226,7 @@ private fun AttendantPanelAwaitingCashPreview() {
             state = TransactionState.FillupAwaitingCashConfirm(
                 txnId = "BLC-00342",
                 verifiedLitres = 38.1,
-                amountDueNaira = 33_147,
+                amountDueKobo = 3_314_700,
             ),
             onFillUpAuthorise = {},
             onAuthoriseCash = {},
@@ -244,7 +244,7 @@ private fun AttendantPanelFillingPreview() {
         AttendantPanel(
             state = TransactionState.FillupDispensing(
                 txnId = "BLC-00342",
-                pricePerLitre = 870,
+                priceKoboPerLitre = 87_000,
                 litresSoFar = 12.4,
             ),
             onFillUpAuthorise = {},

@@ -39,14 +39,15 @@ import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.util.formatNaira
 import app.balancee.smartpump.display.ui.util.isPortrait
 
 @Composable
 fun FillupTankFullScreen(
     txnId: String,
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     verifiedLitres: Double,
-    amountDueNaira: Int,
+    amountDueKobo: Long,
     onPayCash: () -> Unit,
     onPayDigital: () -> Unit,
     modifier: Modifier = Modifier,
@@ -99,7 +100,7 @@ fun FillupTankFullScreen(
                 ) {
                     LabelText(text = "Amount due")
                     AmountDisplay(
-                        amountNaira = amountDueNaira,
+                        amountKobo = amountDueKobo,
                         color = accent,
                         style = MaterialTheme.typography.displayMedium,
                     )
@@ -126,7 +127,7 @@ fun FillupTankFullScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     LedgerRow(label = "Litres", value = "%.2f L".format(verifiedLitres))
-                    LedgerRow(label = "Price / L", value = "₦$pricePerLitre")
+                    LedgerRow(label = "Price / L", value = formatNaira(priceKoboPerLitre))
                     LedgerRow(label = "Txn", value = txnId)
                 }
             }
@@ -185,9 +186,9 @@ private fun FillupTankFullPreview() {
     SmartPumpDisplayTheme {
         FillupTankFullScreen(
             txnId = "BLC-00921",
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_050,
             verifiedLitres = 38.10,
-            amountDueNaira = 33_147,
+            amountDueKobo = 3_316_605,
             onPayCash = {},
             onPayDigital = {},
             digitalEnabled = true,
@@ -201,9 +202,9 @@ private fun FillupTankFullPortraitPreview() {
     SmartPumpDisplayTheme {
         FillupTankFullScreen(
             txnId = "BLC-00921",
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_050,
             verifiedLitres = 38.10,
-            amountDueNaira = 33_147,
+            amountDueKobo = 3_316_605,
             onPayCash = {},
             onPayDigital = {},
             digitalEnabled = true,

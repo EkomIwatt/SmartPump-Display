@@ -84,9 +84,11 @@ import app.balancee.smartpump.display.ui.theme.Surface
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
+import app.balancee.smartpump.display.ui.util.formatNaira
 import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 private val PRESET_AMOUNTS_NAIRA: List<Int> = listOf(2_000, 5_000, 10_000, 20_000, 50_000)
 private const val CUSTOM_MIN_NAIRA = 200
@@ -122,7 +124,7 @@ fun ModeSelectScreen(
     state: TransactionState.ModeSelect,
     displayName: String,
     logoBytes: ByteArray?,
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     onModeTileTap: (TransactionMode) -> Unit,
     onAmountTileTap: (Int) -> Unit,
     onMethodTileTap: (PaymentMethod) -> Unit,
@@ -161,7 +163,7 @@ fun ModeSelectScreen(
                 if (v >= CUSTOM_MIN_NAIRA && v <= CUSTOM_MAX_NAIRA) onAmountTileTap(v.roundToInt())
             AmountEntryMode.LITRES ->
                 if (v >= CUSTOM_MIN_LITRES && v <= CUSTOM_MAX_LITRES) {
-                    onAmountTileTap((v * pricePerLitre).roundToInt())
+                    onAmountTileTap((v * priceKoboPerLitre / 100.0).roundToInt())
                 }
         }
     }
@@ -205,8 +207,8 @@ fun ModeSelectScreen(
             if (state.mode == TransactionMode.PRE_PAY) {
                 AmountSection(
                     entryMode = entryMode,
-                    pricePerLitre = pricePerLitre,
-                    selectedAmount = state.amountNaira,
+                    priceKoboPerLitre = priceKoboPerLitre,
+                    selectedAmount = state.amountKobo?.let { (it / 100).toInt() },
                     selectedLitres = selectedLitres,
                     customKeypadOpen = customKeypadOpen,
                     customTyped = customTyped,
@@ -229,7 +231,7 @@ fun ModeSelectScreen(
                         customKeypadOpen = false
                         customTyped = ""
                         selectedLitres = litres
-                        onAmountTileTap(litresToNaira(litres, pricePerLitre))
+                        onAmountTileTap(litresToNaira(litres, priceKoboPerLitre))
                     },
                     onCustomTap = {
                         customKeypadOpen = true
@@ -257,7 +259,7 @@ fun ModeSelectScreen(
                     },
                 )
 
-                if (state.amountNaira != null && customEntryOk) {
+                if (state.amountKobo != null && customEntryOk) {
                     MethodSection(
                         selectedMethod = state.method,
                         onMethodTileTap = onMethodTileTap,
@@ -440,7 +442,7 @@ private fun ModeTile(
 @Composable
 private fun AmountSection(
     entryMode: AmountEntryMode,
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     selectedAmount: Int?,
     selectedLitres: Int?,
     customKeypadOpen: Boolean,
@@ -457,7 +459,7 @@ private fun AmountSection(
     Column {
         SectionHeader(
             text = "Select amount",
-            trailingText = if (pricePerLitre > 0) "₦ $pricePerLitre/L" else null,
+            trailingText = if (priceKoboPerLitre > 0L) "${formatNaira(priceKoboPerLitre)}/L" else null,
         )
         EntryModeToggle(entryMode = entryMode, onChange = onEntryModeChange)
         Spacer(Modifier.height(12.dp))
@@ -498,7 +500,7 @@ private fun AmountSection(
         // Amount mode → "≈ X.XX L"; litres mode → "= ₦X,XXX". The ₦/L sits in the header.
         val previewText = amountPreview(
             entryMode = entryMode,
-            pricePerLitre = pricePerLitre,
+            priceKoboPerLitre = priceKoboPerLitre,
             selectedAmount = selectedAmount,
             selectedLitres = selectedLitres,
             customKeypadOpen = customKeypadOpen,
@@ -800,13 +802,13 @@ private fun BottomBar(
 ) {
     val canConfirm = when (state.mode) {
         TransactionMode.FILL_UP -> true
-        TransactionMode.PRE_PAY -> state.amountNaira != null && state.method != null && customEntryOk
+        TransactionMode.PRE_PAY -> state.amountKobo != null && state.method != null && customEntryOk
         null -> false
     }
     val confirmLabel = when {
         state.mode == TransactionMode.FILL_UP -> "Confirm FILL UP"
-        state.mode == TransactionMode.PRE_PAY && state.amountNaira != null ->
-            "Confirm ₦${formatGrouped(state.amountNaira.toString())}"
+        state.mode == TransactionMode.PRE_PAY && state.amountKobo != null ->
+            "Confirm ${formatNaira(state.amountKobo)}"
         else -> "Confirm"
     }
     Row(
@@ -829,8 +831,10 @@ private fun BottomBar(
     }
 }
 
-/** litres × ₦/L, rounded to the nearest naira. The single conversion point for litres mode. */
-private fun litresToNaira(litres: Int, pricePerLitre: Int): Int = litres * pricePerLitre
+/** litres × ₦/L, rounded to the nearest whole naira (the pre-pay amount is whole-naira).
+ *  The single conversion point for litres mode. */
+private fun litresToNaira(litres: Int, priceKoboPerLitre: Long): Int =
+    (litres * priceKoboPerLitre / 100.0).roundToInt()
 
 /**
  * The live preview string under the preset grid, or null when there's no active value yet.
@@ -839,14 +843,14 @@ private fun litresToNaira(litres: Int, pricePerLitre: Int): Int = litres * price
  */
 private fun amountPreview(
     entryMode: AmountEntryMode,
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     selectedAmount: Int?,
     selectedLitres: Int?,
     customKeypadOpen: Boolean,
     customTyped: String,
     customValid: Boolean,
 ): String? {
-    if (pricePerLitre <= 0) return null
+    if (priceKoboPerLitre <= 0L) return null
     return when (entryMode) {
         AmountEntryMode.AMOUNT -> {
             val naira = if (customKeypadOpen) {
@@ -854,7 +858,7 @@ private fun amountPreview(
             } else {
                 selectedAmount?.toDouble()
             } ?: return null
-            val litres = naira / pricePerLitre
+            val litres = naira * 100.0 / priceKoboPerLitre
             "≈ ${String.format(Locale.UK, "%.2f", litres)} L"
         }
 
@@ -864,7 +868,7 @@ private fun amountPreview(
             } else {
                 selectedLitres?.toDouble()
             } ?: return null
-            "= ₦${formatGrouped((litres * pricePerLitre).roundToInt().toString())}"
+            "= ${formatNaira((litres * priceKoboPerLitre).roundToLong())}"
         }
     }
 }
@@ -915,12 +919,12 @@ private fun ModeSelectScreenPrepayPreview() {
         ModeSelectScreen(
             state = TransactionState.ModeSelect(
                 mode = TransactionMode.PRE_PAY,
-                amountNaira = 2_000,
+                amountKobo = 200_000,
                 method = PaymentMethod.BALANCEE_APP,
             ),
             displayName = "Total Lekki Ph2",
             logoBytes = null,
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             onModeTileTap = {},
             onAmountTileTap = {},
             onMethodTileTap = {},
@@ -938,7 +942,7 @@ private fun ModeSelectScreenInitialPreview() {
             state = TransactionState.ModeSelect(),
             displayName = "Total Lekki Ph2",
             logoBytes = null,
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             onModeTileTap = {},
             onAmountTileTap = {},
             onMethodTileTap = {},

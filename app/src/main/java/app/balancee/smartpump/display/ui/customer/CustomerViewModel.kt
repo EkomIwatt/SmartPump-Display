@@ -1,6 +1,12 @@
 // Customer-side state machine. Phases 3b–3f wired the five flows; Phase 4 lifted the
 // attendant actions into the swipe-up overlay; Phase 5 adds persistence + boot resume.
 //
+// Money note: prices and amounts are carried as KOBO (Long) end-to-end so a sub-naira
+// fuel price (e.g. 87_050 = ₦870.50/L) is never truncated. Customer-typed entry stays in
+// whole naira at the screen→VM boundary (amount tiles, cash keypad) and is multiplied to
+// kobo here; everything stored on TransactionState and the audit row is kobo. Render with
+// ui/util/formatNaira(kobo).
+//
 // Persistence rules (matching docs/state-machine.md):
 //  - Every state transition writes the new state to Room via PulseRepository. Writes are
 //    funnelled through a CONFLATED channel + a single writer coroutine so rapid transitions
@@ -49,6 +55,7 @@ import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
+import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -81,7 +88,7 @@ data class CustomerUiState(
     val prepayExpiresInSeconds: Int = 0,
     val fillupDigitalExpiresInSeconds: Int = 0,
     val ussdExpiresInSeconds: Int = 0,
-    val pricePerLitre: Int = 0,
+    val priceKoboPerLitre: Long = 0L,
 )
 
 @HiltViewModel
@@ -102,7 +109,7 @@ class CustomerViewModel @Inject constructor(
     private var expiryJob: Job? = null
     private var dispenseJob: Job? = null
     private var fillupWatchdogJob: Job? = null
-    private var pricePerLitre: Int = 0
+    private var priceKoboPerLitre: Long = 0L
 
     /**
      * Cumulative pulses persisted from the prior session, applied as a baseline to
@@ -135,8 +142,8 @@ class CustomerViewModel @Inject constructor(
             relay.stopFuelFlow()
             seedDefaultConfigIfMissing()
             deviceConfigRepository.getConfig()?.let { config ->
-                pricePerLitre = (config.koboPerLitre / 100).toInt()
-                _ui.update { it.copy(pricePerLitre = pricePerLitre) }
+                priceKoboPerLitre = config.koboPerLitre
+                _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
             }
             bootResume()
         }
@@ -179,8 +186,7 @@ class CustomerViewModel @Inject constructor(
                 setState(restored)
                 startUssdExpiry()
                 startUssdSmsListener(
-                    amountNaira = restored.amountNaira,
-                    amountKobo = restored.amountNaira.toLong() * 100,
+                    amountKobo = restored.amountKobo,
                     txnId = restored.txnId,
                 )
             }
@@ -188,17 +194,17 @@ class CustomerViewModel @Inject constructor(
             is TransactionState.FillupDigitalAwaitingPayment -> {
                 setState(restored)
                 // Reconstruct the FillupTankFull source the digital handlers close over.
-                // pricePerLitre persisted via DeviceConfig is preferred — but for fidelity
-                // to the snapshot, derive from amountDueNaira / verifiedLitres which were
+                // priceKoboPerLitre persisted via DeviceConfig is preferred — but for fidelity
+                // to the snapshot, derive from amountDueKobo / verifiedLitres which were
                 // locked at TankFull time and survive any subsequent price change.
-                val derivedPrice = if (restored.verifiedLitres > 0) {
-                    (restored.amountDueNaira / restored.verifiedLitres).toInt()
-                } else pricePerLitre
+                val derivedPriceKobo = if (restored.verifiedLitres > 0) {
+                    Math.round(restored.amountDueKobo / restored.verifiedLitres)
+                } else priceKoboPerLitre
                 val source = TransactionState.FillupTankFull(
                     txnId = restored.txnId,
-                    pricePerLitre = derivedPrice,
+                    priceKoboPerLitre = derivedPriceKobo,
                     verifiedLitres = restored.verifiedLitres,
-                    amountDueNaira = restored.amountDueNaira,
+                    amountDueKobo = restored.amountDueKobo,
                 )
                 startFillupDigitalExpiry(source)
                 startFillupDigitalPayment(source)
@@ -216,7 +222,7 @@ class CustomerViewModel @Inject constructor(
                 setState(restored)
                 startCashFixedDispensing(
                     litresCutoff = restored.litresCutoff,
-                    cashAmountNaira = restored.cashAmountNaira,
+                    cashAmountKobo = restored.cashAmountKobo,
                     txnId = restored.txnId,
                 )
             }
@@ -272,7 +278,7 @@ class CustomerViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = canStartTransaction()) {
                 is CanStartTransactionUseCase.Result.Allowed -> {
-                    pricePerLitre = (result.config.koboPerLitre / 100).toInt()
+                    priceKoboPerLitre = result.config.koboPerLitre
                     setState(TransactionState.ModeSelect())
                 }
                 CanStartTransactionUseCase.Result.PriceNotSet -> {
@@ -298,16 +304,17 @@ class CustomerViewModel @Inject constructor(
             current.copy(
                 mode = mode,
                 // FILL_UP doesn't take a customer-side amount or method — clear them.
-                amountNaira = if (mode == TransactionMode.FILL_UP) null else current.amountNaira,
+                amountKobo = if (mode == TransactionMode.FILL_UP) null else current.amountKobo,
                 method = if (mode == TransactionMode.FILL_UP) null else current.method,
             )
         )
     }
 
+    /** Amount tiles are whole-naira; store as kobo. */
     fun onAmountTileTap(amountNaira: Int) {
         val current = currentState() as? TransactionState.ModeSelect ?: return
         if (current.mode != TransactionMode.PRE_PAY) return
-        setState(current.copy(amountNaira = amountNaira))
+        setState(current.copy(amountKobo = amountNaira.toLong() * 100))
     }
 
     fun onMethodTileTap(method: PaymentMethod) {
@@ -329,12 +336,12 @@ class CustomerViewModel @Inject constructor(
                 setState(TransactionState.FillupAwaitingAttendantAuth())
 
             TransactionMode.PRE_PAY -> {
-                val amount = current.amountNaira ?: return
+                val amountKobo = current.amountKobo ?: return
                 val method = current.method ?: return
                 when (method) {
                     PaymentMethod.CASH_SEE_ATTENDANT -> onCancel()
-                    PaymentMethod.USSD -> startUssdFlow(amountNaira = amount)
-                    else -> startPrepayPayment(amountNaira = amount, method = method)
+                    PaymentMethod.USSD -> startUssdFlow(amountKobo = amountKobo)
+                    else -> startPrepayPayment(amountKobo = amountKobo, method = method)
                 }
             }
 
@@ -362,15 +369,15 @@ class CustomerViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = canStartTransaction()) {
                 is CanStartTransactionUseCase.Result.Allowed -> {
-                    pricePerLitre = (result.config.koboPerLitre / 100).toInt()
-                    _ui.update { it.copy(pricePerLitre = pricePerLitre) }
+                    priceKoboPerLitre = result.config.koboPerLitre
+                    _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
                     val txnId = generateCashTxnId()
                     cancelInFlightJobs()
                     pulseBaseline = 0
                     setState(
                         TransactionState.FillupDispensing(
                             txnId = txnId,
-                            pricePerLitre = pricePerLitre,
+                            priceKoboPerLitre = priceKoboPerLitre,
                             litresSoFar = 0.0,
                         )
                     )
@@ -440,13 +447,13 @@ class CustomerViewModel @Inject constructor(
     private suspend fun fillupShutoff(current: TransactionState.FillupDispensing) {
         relay.stopFuelFlow()
         val verifiedLitres = current.litresSoFar
-        val amountDue = (verifiedLitres * current.pricePerLitre).toInt()
+        val amountDueKobo = Math.round(verifiedLitres * current.priceKoboPerLitre)
         setState(
             TransactionState.FillupTankFull(
                 txnId = current.txnId,
-                pricePerLitre = current.pricePerLitre,
+                priceKoboPerLitre = current.priceKoboPerLitre,
                 verifiedLitres = verifiedLitres,
-                amountDueNaira = amountDue,
+                amountDueKobo = amountDueKobo,
             )
         )
         dispenseJob?.cancel()
@@ -475,7 +482,7 @@ class CustomerViewModel @Inject constructor(
             TransactionState.FillupAwaitingCashConfirm(
                 txnId = current.txnId,
                 verifiedLitres = current.verifiedLitres,
-                amountDueNaira = current.amountDueNaira,
+                amountDueKobo = current.amountDueKobo,
             )
         )
     }
@@ -487,7 +494,7 @@ class CustomerViewModel @Inject constructor(
                 ?: DEFAULT_VIRTUAL_ACCOUNT
             val qrContent = buildNipTransferQr(
                 account = account,
-                amountNaira = current.amountDueNaira,
+                amountKobo = current.amountDueKobo,
                 txnId = current.txnId,
             )
             cancelInFlightJobs()
@@ -495,7 +502,7 @@ class CustomerViewModel @Inject constructor(
                 TransactionState.FillupDigitalAwaitingPayment(
                     txnId = current.txnId,
                     verifiedLitres = current.verifiedLitres,
-                    amountDueNaira = current.amountDueNaira,
+                    amountDueKobo = current.amountDueKobo,
                     qrContent = qrContent,
                 )
             )
@@ -506,7 +513,7 @@ class CustomerViewModel @Inject constructor(
 
     private fun startFillupDigitalPayment(source: TransactionState.FillupTankFull) {
         paymentJob?.cancel()
-        val amountKobo = source.amountDueNaira.toLong() * 100
+        val amountKobo = source.amountDueKobo
         paymentJob = viewModelScope.launch {
             paymentProcessor.process(PaymentMethod.BANK_QR_TRANSFER, amountKobo).collect { result ->
                 when (result) {
@@ -526,7 +533,7 @@ class CustomerViewModel @Inject constructor(
                 flow = TransactionFlow.FILLUP_DIGITAL,
                 txnId = source.txnId,
                 litres = source.verifiedLitres,
-                amountNaira = source.amountDueNaira,
+                amountKobo = source.amountDueKobo,
                 method = PaymentMethod.BANK_QR_TRANSFER,
             )
         )
@@ -540,7 +547,7 @@ class CustomerViewModel @Inject constructor(
             TransactionState.FillupAwaitingCashConfirm(
                 txnId = source.txnId,
                 verifiedLitres = source.verifiedLitres,
-                amountDueNaira = source.amountDueNaira,
+                amountDueKobo = source.amountDueKobo,
             )
         )
     }
@@ -561,15 +568,16 @@ class CustomerViewModel @Inject constructor(
                     TransactionState.FillupAwaitingCashConfirm(
                         txnId = source.txnId,
                         verifiedLitres = source.verifiedLitres,
-                        amountDueNaira = source.amountDueNaira,
+                        amountDueKobo = source.amountDueKobo,
                     )
                 )
             }
         }
     }
 
-    private fun buildNipTransferQr(account: String, amountNaira: Int, txnId: String): String =
-        "nip://transfer?account=$account&amount=$amountNaira&ref=$txnId"
+    // NIP transfer amounts are in naira (major units) with 2 dp, derived losslessly from kobo.
+    private fun buildNipTransferQr(account: String, amountKobo: Long, txnId: String): String =
+        "nip://transfer?account=$account&amount=${"%.2f".format(amountKobo / 100.0)}&ref=$txnId"
 
     fun onAttendantCashReceived() {
         val current = currentState() as? TransactionState.FillupAwaitingCashConfirm ?: return
@@ -579,7 +587,7 @@ class CustomerViewModel @Inject constructor(
                     flow = TransactionFlow.FILLUP_CASH,
                     txnId = current.txnId,
                     litres = current.verifiedLitres,
-                    amountNaira = current.amountDueNaira,
+                    amountKobo = current.amountDueKobo,
                     method = null,
                 )
             )
@@ -593,8 +601,8 @@ class CustomerViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = canStartTransaction()) {
                 is CanStartTransactionUseCase.Result.Allowed -> {
-                    pricePerLitre = (result.config.koboPerLitre / 100).toInt()
-                    _ui.update { it.copy(pricePerLitre = pricePerLitre) }
+                    priceKoboPerLitre = result.config.koboPerLitre
+                    _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
                     setState(TransactionState.CashFixedAmountEntry)
                 }
                 CanStartTransactionUseCase.Result.PriceNotSet -> {
@@ -611,7 +619,7 @@ class CustomerViewModel @Inject constructor(
 
     fun onCashFixedAuthorise(cashAmountNaira: Int) {
         if (currentState() !is TransactionState.CashFixedAmountEntry) return
-        if (pricePerLitre <= 0) {
+        if (priceKoboPerLitre <= 0L) {
             setState(
                 TransactionState.Error(
                     message = "Price not set — contact operator.",
@@ -623,11 +631,12 @@ class CustomerViewModel @Inject constructor(
         val amountKobo = cashAmountNaira.toLong() * 100
         viewModelScope.launch {
             val cutoff = deviceConfig()?.litresCutoff(amountKobo)
-                ?: (Math.floor((cashAmountNaira.toDouble() / pricePerLitre) * 100.0) / 100.0)
+                ?: (Math.floor((amountKobo.toDouble() / priceKoboPerLitre) * 100.0) / 100.0)
             if (cutoff <= 0.0) {
+                // Smallest dispensable step is 0.01 L, i.e. priceKoboPerLitre / 100 kobo.
                 setState(
                     TransactionState.Error(
-                        message = "Amount is below the minimum dispense (₦${pricePerLitre / 100}).",
+                        message = "Amount is below the minimum dispense (${formatNaira(priceKoboPerLitre / 100)}).",
                         recoverable = true,
                     )
                 )
@@ -639,19 +648,19 @@ class CustomerViewModel @Inject constructor(
             setState(
                 TransactionState.CashFixedDispensing(
                     txnId = txnId,
-                    pricePerLitre = pricePerLitre,
-                    cashAmountNaira = cashAmountNaira,
+                    priceKoboPerLitre = priceKoboPerLitre,
+                    cashAmountKobo = amountKobo,
                     litresCutoff = cutoff,
                     litresSoFar = 0.0,
                 )
             )
-            startCashFixedDispensing(cutoff, cashAmountNaira, txnId)
+            startCashFixedDispensing(cutoff, amountKobo, txnId)
         }
     }
 
     private fun startCashFixedDispensing(
         litresCutoff: Double,
-        cashAmountNaira: Int,
+        cashAmountKobo: Long,
         txnId: String,
     ) {
         dispenseJob?.cancel()
@@ -672,7 +681,7 @@ class CustomerViewModel @Inject constructor(
                                 flow = TransactionFlow.CASH_FIXED,
                                 txnId = txnId,
                                 litres = litresCutoff,
-                                amountNaira = cashAmountNaira,
+                                amountKobo = cashAmountKobo,
                                 method = null,
                             )
                         )
@@ -697,49 +706,47 @@ class CustomerViewModel @Inject constructor(
 
     // ---- USSD offline (Flow 5) ------------------------------------------------------
 
-    private fun startUssdFlow(amountNaira: Int) {
+    private fun startUssdFlow(amountKobo: Long) {
         cancelInFlightJobs()
-        val amountKobo = amountNaira.toLong() * 100
         val txnRef = generateUssdRef()
         val txnId = generateCashTxnId()
         setState(
             TransactionState.UssdAwaitingSms(
-                amountNaira = amountNaira,
+                amountKobo = amountKobo,
                 txnRef = txnRef,
                 txnId = txnId,
-                pricePerLitre = pricePerLitre,
+                priceKoboPerLitre = priceKoboPerLitre,
             )
         )
         startUssdExpiry()
-        startUssdSmsListener(amountNaira = amountNaira, amountKobo = amountKobo, txnId = txnId)
+        startUssdSmsListener(amountKobo = amountKobo, txnId = txnId)
     }
 
-    private fun startUssdSmsListener(amountNaira: Int, amountKobo: Long, txnId: String) {
+    private fun startUssdSmsListener(amountKobo: Long, txnId: String) {
         paymentJob?.cancel()
         paymentJob = viewModelScope.launch {
             paymentProcessor.process(PaymentMethod.USSD, amountKobo).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> Unit
-                    is PaymentResult.Success -> onUssdSmsConfirmed(amountNaira, txnId)
+                    is PaymentResult.Success -> onUssdSmsConfirmed(amountKobo, txnId)
                     is PaymentResult.Failed -> onUssdFailed(result.reason)
                 }
             }
         }
     }
 
-    private suspend fun onUssdSmsConfirmed(amountNaira: Int, txnId: String) {
+    private suspend fun onUssdSmsConfirmed(amountKobo: Long, txnId: String) {
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
-        val amountKobo = amountNaira.toLong() * 100
         val litresAuthorised = deviceConfig()?.litresCutoff(amountKobo)
-            ?: ((amountNaira.toDouble() / pricePerLitre).coerceAtLeast(0.0))
+            ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
         pulseBaseline = 0
         setState(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.USSD_OFFLINE,
                 txnId = txnId,
-                pricePerLitre = pricePerLitre,
-                amountNaira = amountNaira,
+                priceKoboPerLitre = priceKoboPerLitre,
+                amountKobo = amountKobo,
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
                 method = PaymentMethod.USSD,
@@ -780,14 +787,13 @@ class CustomerViewModel @Inject constructor(
     private fun generateUssdRef(): String =
         kotlin.random.Random.nextInt(100, 1000).toString()
 
-    private fun startPrepayPayment(amountNaira: Int, method: PaymentMethod) {
+    private fun startPrepayPayment(amountKobo: Long, method: PaymentMethod) {
         cancelInFlightJobs()
-        val amountKobo = amountNaira.toLong() * 100
         paymentJob = viewModelScope.launch {
             paymentProcessor.process(method, amountKobo).collect { result ->
                 when (result) {
-                    is PaymentResult.Pending -> onPaymentPending(amountNaira, method, result)
-                    is PaymentResult.Success -> onPaymentSuccess(amountNaira, method, result)
+                    is PaymentResult.Pending -> onPaymentPending(amountKobo, method, result)
+                    is PaymentResult.Success -> onPaymentSuccess(amountKobo, method, result)
                     is PaymentResult.Failed -> onPaymentFailed(result)
                 }
             }
@@ -803,12 +809,12 @@ class CustomerViewModel @Inject constructor(
      */
     private fun resumePrepayPaymentListener(restored: TransactionState.PrepayAwaitingPayment) {
         paymentJob?.cancel()
-        val amountKobo = restored.amountNaira.toLong() * 100
+        val amountKobo = restored.amountKobo
         paymentJob = viewModelScope.launch {
             paymentProcessor.process(restored.method, amountKobo).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> Unit
-                    is PaymentResult.Success -> onPaymentSuccess(restored.amountNaira, restored.method, result)
+                    is PaymentResult.Success -> onPaymentSuccess(amountKobo, restored.method, result)
                     is PaymentResult.Failed -> onPaymentFailed(result)
                 }
             }
@@ -816,38 +822,38 @@ class CustomerViewModel @Inject constructor(
     }
 
     private fun onPaymentPending(
-        amountNaira: Int,
+        amountKobo: Long,
         method: PaymentMethod,
         pending: PaymentResult.Pending,
     ) {
         setState(
             TransactionState.PrepayAwaitingPayment(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
-                amountNaira = amountNaira,
+                amountKobo = amountKobo,
                 method = method,
                 txnId = pending.transactionRef,
-                pricePerLitre = pricePerLitre,
+                priceKoboPerLitre = priceKoboPerLitre,
             )
         )
         startExpiryCountdown()
     }
 
     private suspend fun onPaymentSuccess(
-        amountNaira: Int,
+        amountKobo: Long,
         method: PaymentMethod,
         success: PaymentResult.Success,
     ) {
         expiryJob?.cancel()
         val litresAuthorised = deviceConfig()?.litresCutoff(success.amountKobo)
-            ?: ((amountNaira.toDouble() / pricePerLitre).coerceAtLeast(0.0))
+            ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
 
         pulseBaseline = 0
         setState(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
                 txnId = success.transactionRef,
-                pricePerLitre = pricePerLitre,
-                amountNaira = amountNaira,
+                priceKoboPerLitre = priceKoboPerLitre,
+                amountKobo = amountKobo,
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
                 method = method,
@@ -902,7 +908,7 @@ class CustomerViewModel @Inject constructor(
                                 flow = current.flow,
                                 txnId = current.txnId,
                                 litres = litresAuthorised,
-                                amountNaira = current.amountNaira,
+                                amountKobo = current.amountKobo,
                                 method = method,
                             )
                         )
@@ -957,20 +963,20 @@ class CustomerViewModel @Inject constructor(
     private suspend fun completeAndRecord(complete: TransactionState.Complete) {
         setState(complete)
         try {
-            transactions.saveTransaction(complete.toAuditRecord(pricePerLitre))
+            transactions.saveTransaction(complete.toAuditRecord(priceKoboPerLitre))
         } catch (t: Throwable) {
             android.util.Log.e("CustomerVM", "Failed to persist transaction ${complete.txnId}", t)
         }
     }
 
-    private fun TransactionState.Complete.toAuditRecord(pricePerLitre: Int): Transaction =
+    private fun TransactionState.Complete.toAuditRecord(priceKoboPerLitre: Long): Transaction =
         Transaction(
             id = txnId,
             flow = flow,
             paymentMethod = method,
             litresDispensed = litres,
-            amountKobo = amountNaira.toLong() * 100,
-            priceKoboPerLitre = pricePerLitre.toLong() * 100,
+            amountKobo = amountKobo,
+            priceKoboPerLitre = priceKoboPerLitre,
             transactionRef = txnId,
             attendantId = attendantId,
             attendantNote = null,

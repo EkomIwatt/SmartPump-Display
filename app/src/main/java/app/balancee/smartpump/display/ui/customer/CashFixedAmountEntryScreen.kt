@@ -40,6 +40,7 @@ import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.util.formatNaira
 import app.balancee.smartpump.display.ui.util.isPortrait
 
 private const val CASH_MIN_NAIRA = 200
@@ -47,16 +48,16 @@ private const val CASH_MAX_NAIRA = 200_000
 
 @Composable
 fun CashFixedAmountEntryScreen(
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     onAuthorise: (Int) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
 ) {
     var draft by rememberSaveable { mutableStateOf(0) }
-    val valid = draft in CASH_MIN_NAIRA..CASH_MAX_NAIRA && pricePerLitre > 0
-    val litresCutoff = if (pricePerLitre > 0) {
-        Math.floor((draft.toDouble() / pricePerLitre) * 100.0) / 100.0
+    val valid = draft in CASH_MIN_NAIRA..CASH_MAX_NAIRA && priceKoboPerLitre > 0L
+    val litresCutoff = if (priceKoboPerLitre > 0L) {
+        Math.floor((draft * 100.0 / priceKoboPerLitre) * 100.0) / 100.0
     } else 0.0
 
     Column(
@@ -98,7 +99,7 @@ fun CashFixedAmountEntryScreen(
                     LabelText(text = "Cash amount", color = ActiveCyan)
                     Box(modifier = Modifier.fillMaxWidth()) {
                         AmountDisplay(
-                            amountNaira = draft,
+                            amountKobo = draft.toLong() * 100,
                             color = BrandBlue,
                             style = MaterialTheme.typography.displayMedium,
                         )
@@ -116,7 +117,7 @@ fun CashFixedAmountEntryScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         LedgerRow(
                             label = "Price / L",
-                            value = if (pricePerLitre > 0) "₦$pricePerLitre" else "—",
+                            value = if (priceKoboPerLitre > 0L) formatNaira(priceKoboPerLitre) else "—",
                         )
                         LedgerRow(
                             label = "Min · Max",
@@ -191,7 +192,7 @@ private fun formatGrouped(value: Int): String =
 private fun CashFixedAmountEntryPreview() {
     SmartPumpDisplayTheme {
         CashFixedAmountEntryScreen(
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             onAuthorise = {},
             onCancel = {},
         )

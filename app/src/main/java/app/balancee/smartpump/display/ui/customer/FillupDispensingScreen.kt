@@ -40,11 +40,12 @@ import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.displayMonoFamily
+import app.balancee.smartpump.display.ui.util.formatNaira
 
 @Composable
 fun FillupDispensingScreen(
     txnId: String,
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     litresSoFar: Double,
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
@@ -52,7 +53,7 @@ fun FillupDispensingScreen(
 ) {
     // Fill-up dispensing is cyan everywhere (design-system: "fill mode" hero numbers + border).
     val accent = ActiveCyan
-    val runningCostNaira = (litresSoFar * pricePerLitre).toInt()
+    val runningCostKobo = Math.round(litresSoFar * priceKoboPerLitre)
 
     Column(
         modifier = modifier
@@ -116,7 +117,7 @@ fun FillupDispensingScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        text = "₦${formatNaira(runningCostNaira)} so far",
+                        text = "${formatNaira(runningCostKobo)} so far",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = displayMonoFamily(),
                         ),
@@ -150,7 +151,7 @@ fun FillupDispensingScreen(
                         value = stationName.ifBlank { "Station" },
                         valueMonospace = false,
                     )
-                    LedgerRow(label = "Price / L", value = "₦$pricePerLitre")
+                    LedgerRow(label = "Price / L", value = formatNaira(priceKoboPerLitre))
                     LedgerRow(label = "Txn", value = txnId)
                 }
             }
@@ -166,16 +167,13 @@ fun FillupDispensingScreen(
     }
 }
 
-private fun formatNaira(value: Int): String =
-    java.text.NumberFormat.getNumberInstance(java.util.Locale.UK).format(value)
-
 @Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun FillupDispensingScreenPreview() {
     SmartPumpDisplayTheme {
         FillupDispensingScreen(
             txnId = "BLC-00921",
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             litresSoFar = 18.42,
             stationName = "Total Lekki Ph2",
         )
@@ -188,7 +186,7 @@ private fun FillupDispensingScreenPortraitPreview() {
     SmartPumpDisplayTheme {
         FillupDispensingScreen(
             txnId = "BLC-00921",
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             litresSoFar = 18.42,
             stationName = "Total Lekki Ph2",
         )

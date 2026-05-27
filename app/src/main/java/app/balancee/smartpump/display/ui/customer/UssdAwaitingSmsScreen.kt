@@ -57,9 +57,8 @@ import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
+import app.balancee.smartpump.display.ui.util.formatNaira
 import app.balancee.smartpump.display.ui.util.isPortrait
-import java.text.NumberFormat
-import java.util.Locale
 
 private data class BankCode(val name: String, val prefix: String)
 
@@ -72,10 +71,10 @@ private val GTBANK = BankCode("GTBank", "*737")
 
 @Composable
 fun UssdAwaitingSmsScreen(
-    amountNaira: Int,
+    amountKobo: Long,
     txnRef: String,
     txnId: String,
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     expiresInSeconds: Int,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
@@ -105,14 +104,14 @@ fun UssdAwaitingSmsScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 DialColumn(
-                    amountNaira = amountNaira,
+                    amountKobo = amountKobo,
                     txnRef = txnRef,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
                 )
                 WaitingColumn(
-                    amountNaira = amountNaira,
+                    amountKobo = amountKobo,
                     txnRef = txnRef,
                     expiresInSeconds = expiresInSeconds,
                     modifier = Modifier
@@ -147,14 +146,14 @@ fun UssdAwaitingSmsScreen(
                 horizontalArrangement = Arrangement.spacedBy(Dimensions.threeCardGap),
             ) {
                 DialColumn(
-                    amountNaira = amountNaira,
+                    amountKobo = amountKobo,
                     txnRef = txnRef,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
                 )
                 WaitingColumn(
-                    amountNaira = amountNaira,
+                    amountKobo = amountKobo,
                     txnRef = txnRef,
                     expiresInSeconds = expiresInSeconds,
                     modifier = Modifier
@@ -174,7 +173,7 @@ fun UssdAwaitingSmsScreen(
 
 @Composable
 private fun DialColumn(
-    amountNaira: Int,
+    amountKobo: Long,
     txnRef: String,
     modifier: Modifier = Modifier,
 ) {
@@ -217,11 +216,11 @@ private fun DialColumn(
 
                 // Highlighted primary code box.
                 PrimaryCodeBox(
-                    code = formatUssd(GTBANK, amountNaira, txnRef),
+                    code = formatUssd(GTBANK, amountKobo, txnRef),
                 )
 
                 Text(
-                    text = "${GTBANK.name} · ${formatNairaAmount(amountNaira)} · Ref: $txnRef",
+                    text = "${GTBANK.name} · ${formatNairaAmount(amountKobo)} · Ref: $txnRef",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary,
                     textAlign = TextAlign.Center,
@@ -241,7 +240,7 @@ private fun DialColumn(
                     OTHER_BANKS.forEach { bank ->
                         BankCodeRow(
                             name = bank.name,
-                            code = formatUssd(bank, amountNaira, txnRef),
+                            code = formatUssd(bank, amountKobo, txnRef),
                         )
                     }
                 }
@@ -262,7 +261,7 @@ private fun DialColumn(
 
 @Composable
 private fun WaitingColumn(
-    amountNaira: Int,
+    amountKobo: Long,
     txnRef: String,
     expiresInSeconds: Int,
     modifier: Modifier = Modifier,
@@ -321,7 +320,7 @@ private fun WaitingColumn(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     LedgerLine(
                         label = "Amount",
-                        value = formatNairaAmount(amountNaira),
+                        value = formatNairaAmount(amountKobo),
                     )
                     LedgerLine(
                         label = "Ref",
@@ -423,11 +422,10 @@ private fun LedgerLine(
     }
 }
 
-private fun formatUssd(bank: BankCode, amountNaira: Int, txnRef: String): String =
-    "${bank.prefix}*$amountNaira*$txnRef#"
+private fun formatUssd(bank: BankCode, amountKobo: Long, txnRef: String): String =
+    "${bank.prefix}*${amountKobo / 100}*$txnRef#"
 
-private fun formatNairaAmount(naira: Int): String =
-    "₦" + NumberFormat.getInstance(Locale.UK).format(naira.toLong())
+private fun formatNairaAmount(amountKobo: Long): String = formatNaira(amountKobo)
 
 private fun formatCountdown(seconds: Int): String {
     val s = seconds.coerceAtLeast(0)
@@ -439,10 +437,10 @@ private fun formatCountdown(seconds: Int): String {
 private fun UssdAwaitingSmsPreview() {
     SmartPumpDisplayTheme {
         UssdAwaitingSmsScreen(
-            amountNaira = 5_000,
+            amountKobo = 500_000,
             txnRef = "847",
             txnId = "BLC-00847",
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             expiresInSeconds = 287,
             onCancel = {},
         )

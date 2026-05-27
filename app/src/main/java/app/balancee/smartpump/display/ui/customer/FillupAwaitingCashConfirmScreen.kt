@@ -38,13 +38,14 @@ import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.util.formatNaira
 
 @Composable
 fun FillupAwaitingCashConfirmScreen(
     txnId: String,
     verifiedLitres: Double,
-    amountDueNaira: Int,
-    pricePerLitre: Int,
+    amountDueKobo: Long,
+    priceKoboPerLitre: Long,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     pumpId: String = "Pump 1",
@@ -95,7 +96,7 @@ fun FillupAwaitingCashConfirmScreen(
                 ) {
                     LabelText(text = "Amount due")
                     AmountDisplay(
-                        amountNaira = amountDueNaira,
+                        amountKobo = amountDueKobo,
                         color = accent,
                         style = MaterialTheme.typography.displayMedium,
                     )
@@ -122,7 +123,7 @@ fun FillupAwaitingCashConfirmScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     LedgerRow(label = "Litres", value = "%.2f L".format(verifiedLitres))
-                    LedgerRow(label = "Price / L", value = "₦$pricePerLitre")
+                    LedgerRow(label = "Price / L", value = formatNaira(priceKoboPerLitre))
                     LedgerRow(label = "Txn", value = txnId)
                 }
             }
@@ -152,8 +153,8 @@ private fun FillupAwaitingCashConfirmPreview() {
         FillupAwaitingCashConfirmScreen(
             txnId = "BLC-00921",
             verifiedLitres = 38.10,
-            amountDueNaira = 33_147,
-            pricePerLitre = 870,
+            amountDueKobo = 3_316_605,
+            priceKoboPerLitre = 87_050,
             onCancel = {},
         )
     }
@@ -166,8 +167,8 @@ private fun FillupAwaitingCashConfirmPortraitPreview() {
         FillupAwaitingCashConfirmScreen(
             txnId = "BLC-00921",
             verifiedLitres = 38.10,
-            amountDueNaira = 33_147,
-            pricePerLitre = 870,
+            amountDueKobo = 3_316_605,
+            priceKoboPerLitre = 87_050,
             onCancel = {},
         )
     }

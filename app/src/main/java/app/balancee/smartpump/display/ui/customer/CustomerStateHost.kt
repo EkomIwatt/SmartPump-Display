@@ -3,6 +3,10 @@
 // the customer state host — they now sit in the swipe-up [AttendantOverlayHost] which
 // wraps this composable from outside. The host below is therefore customer-only:
 // no FILL UP AUTHORISE / AUTHORISE CASH / CASH RECEIVED callbacks reach down to a screen.
+//
+// Money: prices/amounts arrive as kobo (Long) on the state and the ui-state; screens render
+// them via ui/util/formatNaira. Customer-typed entry callbacks (amount tiles, cash keypad)
+// stay in whole naira (Int) — the VM converts those to kobo.
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.compose.foundation.background
@@ -63,7 +67,7 @@ fun CustomerStateHost(
             state = state,
             displayName = identity?.displayName.orEmpty(),
             logoBytes = identity?.logoBytes,
-            pricePerLitre = uiState.pricePerLitre,
+            priceKoboPerLitre = uiState.priceKoboPerLitre,
             onModeTileTap = onModeTileTap,
             onAmountTileTap = onAmountTileTap,
             onMethodTileTap = onMethodTileTap,
@@ -73,20 +77,20 @@ fun CustomerStateHost(
         )
 
         is TransactionState.PrepayAwaitingPayment -> PrepayAwaitingPaymentScreen(
-            amountNaira = state.amountNaira,
+            amountKobo = state.amountKobo,
             method = state.method,
             txnId = state.txnId,
-            pricePerLitre = state.pricePerLitre,
+            priceKoboPerLitre = state.priceKoboPerLitre,
             expiresInSeconds = uiState.prepayExpiresInSeconds,
             onCancel = onCancel,
             modifier = modifier,
         )
 
         is TransactionState.UssdAwaitingSms -> UssdAwaitingSmsScreen(
-            amountNaira = state.amountNaira,
+            amountKobo = state.amountKobo,
             txnRef = state.txnRef,
             txnId = state.txnId,
-            pricePerLitre = state.pricePerLitre,
+            priceKoboPerLitre = state.priceKoboPerLitre,
             expiresInSeconds = uiState.ussdExpiresInSeconds,
             onCancel = onCancel,
             modifier = modifier,
@@ -95,8 +99,8 @@ fun CustomerStateHost(
         is TransactionState.FixedDispensing -> FixedDispensingScreen(
             flow = state.flow,
             txnId = state.txnId,
-            pricePerLitre = state.pricePerLitre,
-            amountNaira = state.amountNaira,
+            priceKoboPerLitre = state.priceKoboPerLitre,
+            amountKobo = state.amountKobo,
             litresAuthorised = state.litresAuthorised,
             litresSoFar = state.litresSoFar,
             stationName = identity?.displayName.orEmpty(),
@@ -104,7 +108,7 @@ fun CustomerStateHost(
         )
 
         is TransactionState.CashFixedAmountEntry -> CashFixedAmountEntryScreen(
-            pricePerLitre = uiState.pricePerLitre,
+            priceKoboPerLitre = uiState.priceKoboPerLitre,
             onAuthorise = onCashFixedAuthorise,
             onCancel = onCancel,
             modifier = modifier,
@@ -113,8 +117,8 @@ fun CustomerStateHost(
         is TransactionState.CashFixedDispensing -> FixedDispensingScreen(
             flow = TransactionFlow.CASH_FIXED,
             txnId = state.txnId,
-            pricePerLitre = state.pricePerLitre,
-            amountNaira = state.cashAmountNaira,
+            priceKoboPerLitre = state.priceKoboPerLitre,
+            amountKobo = state.cashAmountKobo,
             litresAuthorised = state.litresCutoff,
             litresSoFar = state.litresSoFar,
             stationName = identity?.displayName.orEmpty(),
@@ -132,7 +136,7 @@ fun CustomerStateHost(
 
         is TransactionState.FillupDispensing -> FillupDispensingScreen(
             txnId = state.txnId,
-            pricePerLitre = state.pricePerLitre,
+            priceKoboPerLitre = state.priceKoboPerLitre,
             litresSoFar = state.litresSoFar,
             stationName = identity?.displayName.orEmpty(),
             modifier = modifier,
@@ -140,9 +144,9 @@ fun CustomerStateHost(
 
         is TransactionState.FillupTankFull -> FillupTankFullScreen(
             txnId = state.txnId,
-            pricePerLitre = state.pricePerLitre,
+            priceKoboPerLitre = state.priceKoboPerLitre,
             verifiedLitres = state.verifiedLitres,
-            amountDueNaira = state.amountDueNaira,
+            amountDueKobo = state.amountDueKobo,
             onPayCash = onFillupPayCash,
             onPayDigital = onFillupPayDigital,
             digitalEnabled = true,
@@ -152,8 +156,8 @@ fun CustomerStateHost(
         is TransactionState.FillupDigitalAwaitingPayment -> FillupDigitalAwaitingPaymentScreen(
             txnId = state.txnId,
             verifiedLitres = state.verifiedLitres,
-            amountDueNaira = state.amountDueNaira,
-            pricePerLitre = uiState.pricePerLitre,
+            amountDueKobo = state.amountDueKobo,
+            priceKoboPerLitre = uiState.priceKoboPerLitre,
             qrContent = state.qrContent,
             expiresInSeconds = uiState.fillupDigitalExpiresInSeconds,
             onCancel = onCancel,
@@ -163,8 +167,8 @@ fun CustomerStateHost(
         is TransactionState.FillupAwaitingCashConfirm -> FillupAwaitingCashConfirmScreen(
             txnId = state.txnId,
             verifiedLitres = state.verifiedLitres,
-            amountDueNaira = state.amountDueNaira,
-            pricePerLitre = uiState.pricePerLitre,
+            amountDueKobo = state.amountDueKobo,
+            priceKoboPerLitre = uiState.priceKoboPerLitre,
             onCancel = onCancel,
             modifier = modifier,
         )
@@ -173,9 +177,9 @@ fun CustomerStateHost(
             flow = state.flow,
             txnId = state.txnId,
             litres = state.litres,
-            amountNaira = state.amountNaira,
+            amountKobo = state.amountKobo,
             method = state.method,
-            pricePerLitre = pricePerLitreFromState(state),
+            priceKoboPerLitre = priceKoboPerLitreFromState(state),
             onShareReceipt = onShareReceipt,
             onDismiss = onDismissComplete,
             modifier = modifier,
@@ -189,10 +193,10 @@ fun CustomerStateHost(
     }
 }
 
-private fun pricePerLitreFromState(state: TransactionState.Complete): Int =
-    if (state.amountNaira > 0 && state.litres > 0) {
-        (state.amountNaira / state.litres).toInt()
-    } else 0
+private fun priceKoboPerLitreFromState(state: TransactionState.Complete): Long =
+    if (state.amountKobo > 0 && state.litres > 0) {
+        Math.round(state.amountKobo / state.litres)
+    } else 0L
 
 @Composable
 private fun ErrorScreen(
@@ -240,7 +244,7 @@ private fun ErrorScreen(
 private fun CustomerStateHostIdlePreview() {
     SmartPumpDisplayTheme {
         CustomerStateHost(
-            uiState = CustomerUiState(state = TransactionState.Idle, pricePerLitre = 870),
+            uiState = CustomerUiState(state = TransactionState.Idle, priceKoboPerLitre = 87_000),
             identity = null,
             onStartTransaction = {},
             onModeTileTap = {},
@@ -269,8 +273,8 @@ private fun CustomerStateHostModeSelectPreview() {
     SmartPumpDisplayTheme {
         CustomerStateHost(
             uiState = CustomerUiState(
-                state = TransactionState.ModeSelect(mode = TransactionMode.PRE_PAY, amountNaira = 5000),
-                pricePerLitre = 870,
+                state = TransactionState.ModeSelect(mode = TransactionMode.PRE_PAY, amountKobo = 500_000),
+                priceKoboPerLitre = 87_000,
             ),
             identity = null,
             onStartTransaction = {},

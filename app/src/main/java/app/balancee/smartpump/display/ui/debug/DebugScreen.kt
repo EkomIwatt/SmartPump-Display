@@ -56,6 +56,8 @@ import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.WarningRed
+import app.balancee.smartpump.display.ui.util.formatNaira
+import kotlin.math.roundToLong
 
 @Composable
 fun DebugScreen(
@@ -379,7 +381,7 @@ private fun DeviceConfigCard(
         mutableStateOf(current?.stationName ?: "SmartPump Station")
     }
     var nairaPerLitre by remember(current?.koboPerLitre) {
-        mutableStateOf(((current?.koboPerLitre ?: 87_000L) / 100).toString())
+        mutableStateOf("%.2f".format((current?.koboPerLitre ?: 87_000L) / 100.0))
     }
     var virtualAccount by remember(current?.virtualAccountNumber) {
         mutableStateOf(current?.virtualAccountNumber.orEmpty())
@@ -391,7 +393,7 @@ private fun DeviceConfigCard(
 
         current?.let {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                LedgerRow(label = "Price / L (live)", value = "₦${it.koboPerLitre / 100}")
+                LedgerRow(label = "Price / L (live)", value = formatNaira(it.koboPerLitre))
                 LedgerRow(label = "Updated at", value = it.updatedAt.toString())
             }
             Spacer(Modifier.height(12.dp))
@@ -406,9 +408,9 @@ private fun DeviceConfigCard(
         )
         Spacer(Modifier.height(8.dp))
         DebugTextField(
-            label = "Naira per litre",
+            label = "Naira per litre (e.g. 870.50)",
             value = nairaPerLitre,
-            onValueChange = { nairaPerLitre = it.filter { ch -> ch.isDigit() } },
+            onValueChange = { nairaPerLitre = it.filter { ch -> ch.isDigit() || ch == '.' } },
         )
         Spacer(Modifier.height(8.dp))
         DebugTextField(
@@ -420,11 +422,12 @@ private fun DeviceConfigCard(
         BalanceeButton(
             label = "Save config",
             onClick = {
-                val naira = nairaPerLitre.toLongOrNull() ?: return@BalanceeButton
+                val kobo = nairaPerLitre.toDoubleOrNull()?.let { (it * 100).roundToLong() }
+                    ?: return@BalanceeButton
                 onSave(
                     pumpId.trim(),
                     stationName.trim(),
-                    naira * 100,
+                    kobo,
                     virtualAccount.trim().takeIf { it.isNotEmpty() },
                 )
             },

@@ -47,6 +47,7 @@ import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.util.formatNaira
 
 private const val AUTO_RETURN_SECONDS = 60
 
@@ -55,9 +56,9 @@ fun CompleteScreen(
     flow: TransactionFlow,
     txnId: String,
     litres: Double,
-    amountNaira: Int,
+    amountKobo: Long,
     method: PaymentMethod?,
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     onShareReceipt: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
@@ -142,8 +143,8 @@ fun CompleteScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         LedgerRow(label = "Litres", value = "%.2f L".format(litres))
-                        LedgerRow(label = "Paid", value = "₦${formatNaira(amountNaira)}")
-                        LedgerRow(label = "Price / L", value = "₦$pricePerLitre")
+                        LedgerRow(label = "Paid", value = formatNaira(amountKobo))
+                        LedgerRow(label = "Price / L", value = formatNaira(priceKoboPerLitre))
                         if (method != null) {
                             LedgerRow(
                                 label = "Method",
@@ -208,9 +209,6 @@ private fun methodLabel(method: PaymentMethod): String = when (method) {
     PaymentMethod.CASH_SEE_ATTENDANT -> "Cash"
 }
 
-private fun formatNaira(value: Int): String =
-    java.text.NumberFormat.getNumberInstance(java.util.Locale.UK).format(value)
-
 @Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 1024, heightDp = 600)
 @Composable
 private fun CompleteScreenPreview() {
@@ -219,9 +217,9 @@ private fun CompleteScreenPreview() {
             flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
             txnId = "BLC-00847",
             litres = 5.75,
-            amountNaira = 5_000,
+            amountKobo = 500_000,
             method = PaymentMethod.BANK_QR_TRANSFER,
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             onShareReceipt = {},
             onDismiss = {},
         )

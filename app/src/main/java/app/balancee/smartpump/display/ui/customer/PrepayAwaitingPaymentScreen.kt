@@ -59,16 +59,15 @@ import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
+import app.balancee.smartpump.display.ui.util.formatNaira
 import app.balancee.smartpump.display.ui.util.isPortrait
-import java.text.NumberFormat
-import java.util.Locale
 
 @Composable
 fun PrepayAwaitingPaymentScreen(
-    amountNaira: Int,
+    amountKobo: Long,
     method: PaymentMethod,
     txnId: String,
-    pricePerLitre: Int,
+    priceKoboPerLitre: Long,
     expiresInSeconds: Int,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
@@ -106,7 +105,7 @@ fun PrepayAwaitingPaymentScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        text = "${formatNairaAmount(amountNaira)} · $pumpId",
+                        text = "${formatNairaAmount(amountKobo)} · $pumpId",
                         style = MaterialTheme.typography.titleMedium.copy(
                             color = TextSecondary,
                             fontWeight = FontWeight.Medium,
@@ -125,7 +124,7 @@ fun PrepayAwaitingPaymentScreen(
                     ) {
                         ArtifactPane(
                             method = method,
-                            amountNaira = amountNaira,
+                            amountKobo = amountKobo,
                             txnId = txnId,
                             accent = accent,
                             modifier = Modifier
@@ -133,7 +132,7 @@ fun PrepayAwaitingPaymentScreen(
                                 .weight(1f),
                         )
                         LedgerPane(
-                            amountNaira = amountNaira,
+                            amountKobo = amountKobo,
                             txnId = txnId,
                             expiresInSeconds = expiresInSeconds,
                             modifier = Modifier
@@ -151,7 +150,7 @@ fun PrepayAwaitingPaymentScreen(
                     ) {
                         ArtifactPane(
                             method = method,
-                            amountNaira = amountNaira,
+                            amountKobo = amountKobo,
                             txnId = txnId,
                             accent = accent,
                             modifier = Modifier
@@ -159,7 +158,7 @@ fun PrepayAwaitingPaymentScreen(
                                 .fillMaxHeight(),
                         )
                         LedgerPane(
-                            amountNaira = amountNaira,
+                            amountKobo = amountKobo,
                             txnId = txnId,
                             expiresInSeconds = expiresInSeconds,
                             modifier = Modifier
@@ -192,7 +191,7 @@ fun PrepayAwaitingPaymentScreen(
 @Composable
 private fun ArtifactPane(
     method: PaymentMethod,
-    amountNaira: Int,
+    amountKobo: Long,
     txnId: String,
     accent: Color,
     modifier: Modifier = Modifier,
@@ -205,7 +204,7 @@ private fun ArtifactPane(
         LabelText(text = artifactLabel(method), color = TextSecondary)
         PaymentArtifact(
             method = method,
-            amountNaira = amountNaira,
+            amountKobo = amountKobo,
             txnId = txnId,
             accent = accent,
         )
@@ -222,7 +221,7 @@ private fun ArtifactPane(
 /** AMOUNT / TXN / EXPIRES ledger, divider-separated. Fills the modifier it's given. */
 @Composable
 private fun LedgerPane(
-    amountNaira: Int,
+    amountKobo: Long,
     txnId: String,
     expiresInSeconds: Int,
     modifier: Modifier = Modifier,
@@ -234,7 +233,7 @@ private fun LedgerPane(
         HorizontalDivider(color = BorderSubtle)
         LedgerLine(
             label = "Amount",
-            value = formatNairaAmount(amountNaira),
+            value = formatNairaAmount(amountKobo),
             modifier = Modifier.padding(vertical = 14.dp),
         )
         HorizontalDivider(color = BorderSubtle)
@@ -263,7 +262,7 @@ private fun LedgerPane(
 @Composable
 private fun PaymentArtifact(
     method: PaymentMethod,
-    amountNaira: Int,
+    amountKobo: Long,
     txnId: String,
     accent: Color,
 ) {
@@ -285,7 +284,7 @@ private fun PaymentArtifact(
         } else {
             Box(modifier = Modifier.width(180.dp)) {
                 QrCodeView(
-                    content = qrPayload(method, amountNaira, txnId),
+                    content = qrPayload(method, amountKobo, txnId),
                     sizeDp = 180.dp,
                 )
             }
@@ -344,17 +343,21 @@ private fun accentFor(method: PaymentMethod): Color = when (method) {
     else -> PrimaryGold
 }
 
-private fun qrPayload(method: PaymentMethod, amountNaira: Int, txnId: String): String = when (method) {
-    PaymentMethod.BANK_QR_TRANSFER ->
-        "nip://balancee/$txnId?amount=$amountNaira"
-    PaymentMethod.BALANCEE_APP ->
-        "balancee://pay?txn=$txnId&amount=$amountNaira"
-    PaymentMethod.USSD ->
-        "ussd://*737*$amountNaira*${txnId.takeLast(3)}#"
-    PaymentMethod.NFC_CARD ->
-        "nfc://tap/$txnId/$amountNaira"
-    PaymentMethod.CASH_SEE_ATTENDANT ->
-        "cash://$txnId/$amountNaira"
+private fun qrPayload(method: PaymentMethod, amountKobo: Long, txnId: String): String {
+    // Pre-pay amounts are whole naira; payloads carry the naira value.
+    val naira = amountKobo / 100
+    return when (method) {
+        PaymentMethod.BANK_QR_TRANSFER ->
+            "nip://balancee/$txnId?amount=$naira"
+        PaymentMethod.BALANCEE_APP ->
+            "balancee://pay?txn=$txnId&amount=$naira"
+        PaymentMethod.USSD ->
+            "ussd://*737*$naira*${txnId.takeLast(3)}#"
+        PaymentMethod.NFC_CARD ->
+            "nfc://tap/$txnId/$naira"
+        PaymentMethod.CASH_SEE_ATTENDANT ->
+            "cash://$txnId/$naira"
+    }
 }
 
 private fun methodCaption(method: PaymentMethod): String = when (method) {
@@ -379,8 +382,7 @@ private fun belowCardHint(method: PaymentMethod): String = when (method) {
         "QR shown. Payment expected. 5-min expiry then auto-cancel."
 }
 
-private fun formatNairaAmount(naira: Int): String =
-    "₦" + NumberFormat.getInstance(Locale.UK).format(naira.toLong())
+private fun formatNairaAmount(amountKobo: Long): String = formatNaira(amountKobo)
 
 private fun formatCountdown(seconds: Int): String {
     val s = seconds.coerceAtLeast(0)
@@ -392,10 +394,10 @@ private fun formatCountdown(seconds: Int): String {
 private fun PrepayAwaitingPaymentBalanceeAppPreview() {
     SmartPumpDisplayTheme {
         PrepayAwaitingPaymentScreen(
-            amountNaira = 5_000,
+            amountKobo = 500_000,
             method = PaymentMethod.BALANCEE_APP,
             txnId = "BLC-00847",
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             expiresInSeconds = 277,
             onCancel = {},
         )
@@ -407,10 +409,10 @@ private fun PrepayAwaitingPaymentBalanceeAppPreview() {
 private fun PrepayAwaitingPaymentBankQrPreview() {
     SmartPumpDisplayTheme {
         PrepayAwaitingPaymentScreen(
-            amountNaira = 2_000,
+            amountKobo = 200_000,
             method = PaymentMethod.BANK_QR_TRANSFER,
             txnId = "BLC-00002",
-            pricePerLitre = 870,
+            priceKoboPerLitre = 87_000,
             expiresInSeconds = 299,
             onCancel = {},
         )

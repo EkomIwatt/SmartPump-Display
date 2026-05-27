@@ -1,6 +1,7 @@
-// Giant monospace Naira amount, e.g. "₦33,147". The ₦ prefix renders at ~50% of the
-// number size in text-secondary; the figure itself takes the state colour (gold/green/cyan).
-// Comma-grouping is enabled by default — disable [groupThousands] for raw layouts.
+// Giant monospace Naira amount, e.g. "₦33,166.05". Takes kobo (Long) and always renders 2 dp.
+// The ₦ prefix renders at ~50% of the number size in text-secondary; the figure itself takes
+// the state colour (gold/green/cyan). Comma-grouping is enabled by default — disable
+// [groupThousands] for raw layouts.
 package app.balancee.smartpump.display.ui.components
 
 import androidx.compose.foundation.background
@@ -31,18 +32,21 @@ import java.util.Locale
 
 @Composable
 fun AmountDisplay(
-    amountNaira: Int,
+    amountKobo: Long,
     color: Color,
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.displayLarge,
     groupThousands: Boolean = true,
 ) {
     val prefixSize = (style.fontSize.value * 0.5f).sp
-    val figure = if (groupThousands) {
-        NumberFormat.getNumberInstance(Locale.UK).format(amountNaira)
+    val naira = amountKobo / 100
+    val frac = (amountKobo % 100).toString().padStart(2, '0')
+    val nairaStr = if (groupThousands) {
+        NumberFormat.getNumberInstance(Locale.UK).format(naira)
     } else {
-        amountNaira.toString()
+        naira.toString()
     }
+    val figure = "$nairaStr.$frac"
     // Restore font padding + a Both line-height alignment so descenders (the comma in
     // "2,000") have room — without these, the comma reads as a blank gap in tight tiles.
     val figureStyle = style.copy(
@@ -84,9 +88,9 @@ private fun AmountDisplayPreview() {
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            AmountDisplay(amountNaira = 5_000, color = PrimaryGold)
-            AmountDisplay(amountNaira = 33_147, color = SuccessGreen)
-            AmountDisplay(amountNaira = 2_767, color = ActiveCyan)
+            AmountDisplay(amountKobo = 500_000, color = PrimaryGold)
+            AmountDisplay(amountKobo = 3_316_605, color = SuccessGreen)
+            AmountDisplay(amountKobo = 276_750, color = ActiveCyan)
         }
     }
 }

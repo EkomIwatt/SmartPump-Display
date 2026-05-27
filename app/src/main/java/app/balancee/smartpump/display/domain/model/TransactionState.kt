@@ -1,6 +1,13 @@
 // Single sealed hierarchy covering all five flows in docs/flows.md.
 // Persisted to Room (via PulseRepository) on every transition so the app resumes after a power cut.
 // See docs/state-machine.md for the transition tables and invariants.
+//
+// Money note: all amounts and prices are carried as KOBO (Long), never naira. A sub-naira
+// fuel price (e.g. 87_050 = ₦870.50/L) must survive the whole state machine without being
+// truncated to whole naira. Render with ui/util/formatNaira(kobo). Persisted blobs from before
+// the kobo migration (which used naira `Int` fields like `amountNaira`/`pricePerLitre`) fail to
+// deserialise into these renamed fields and fall back to Idle via PulseRepositoryImpl's
+// runCatching — acceptable for an in-flight transaction across an app upgrade.
 package app.balancee.smartpump.display.domain.model
 
 import androidx.compose.runtime.Immutable
@@ -26,13 +33,15 @@ sealed class TransactionState {
      * All three selections start null. PRE_PAY needs all three before Confirm enables;
      * FILL_UP only needs `mode`.
      *
+     * `amountKobo` is the customer-selected pre-pay amount in kobo (whole-naira tiles ×100).
+     *
      * Kotlinx defaults to null on each field, so persisted blobs from the old
      * `data object ModeSelect` still deserialise into a blank ModeSelect on boot.
      */
     @Serializable @SerialName("mode_select")
     data class ModeSelect(
         val mode: TransactionMode? = null,
-        val amountNaira: Int? = null,
+        val amountKobo: Long? = null,
         val method: PaymentMethod? = null,
     ) : TransactionState()
 
@@ -42,19 +51,19 @@ sealed class TransactionState {
     @Serializable @SerialName("prepay_awaiting_payment")
     data class PrepayAwaitingPayment(
         val flow: TransactionFlow,           // FIXED_PREPAY_DIGITAL or USSD_OFFLINE
-        val amountNaira: Int,
+        val amountKobo: Long,
         val method: PaymentMethod,
         val txnId: String,
-        val pricePerLitre: Int,
+        val priceKoboPerLitre: Long,
     ) : TransactionState()
 
     /** USSD-specific: SMS expected on the pump SIM. */
     @Serializable @SerialName("ussd_awaiting_sms")
     data class UssdAwaitingSms(
-        val amountNaira: Int,
+        val amountKobo: Long,
         val txnRef: String,                  // e.g. "847"
         val txnId: String,
-        val pricePerLitre: Int,
+        val priceKoboPerLitre: Long,
     ) : TransactionState()
 
     // ---- FILL-UP (Flow 2, Flow 3) ----
@@ -78,7 +87,7 @@ sealed class TransactionState {
     @Serializable @SerialName("fillup_dispensing")
     data class FillupDispensing(
         val txnId: String,
-        val pricePerLitre: Int,
+        val priceKoboPerLitre: Long,
         val litresSoFar: Double,
     ) : TransactionState()
 
@@ -86,9 +95,9 @@ sealed class TransactionState {
     @Serializable @SerialName("fillup_tank_full")
     data class FillupTankFull(
         val txnId: String,
-        val pricePerLitre: Int,
+        val priceKoboPerLitre: Long,
         val verifiedLitres: Double,
-        val amountDueNaira: Int,
+        val amountDueKobo: Long,
     ) : TransactionState()
 
     /** Customer chose digital after fill-up. Dynamic NIP QR shown. */
@@ -96,7 +105,7 @@ sealed class TransactionState {
     data class FillupDigitalAwaitingPayment(
         val txnId: String,
         val verifiedLitres: Double,
-        val amountDueNaira: Int,
+        val amountDueKobo: Long,
         val qrContent: String,               // NIP transfer payload
     ) : TransactionState()
 
@@ -105,7 +114,7 @@ sealed class TransactionState {
     data class FillupAwaitingCashConfirm(
         val txnId: String,
         val verifiedLitres: Double,
-        val amountDueNaira: Int,
+        val amountDueKobo: Long,
     ) : TransactionState()
 
     // ---- CASH FIXED (Flow 4) ----
@@ -122,8 +131,8 @@ sealed class TransactionState {
     @Serializable @SerialName("cash_fixed_dispensing")
     data class CashFixedDispensing(
         val txnId: String,
-        val pricePerLitre: Int,
-        val cashAmountNaira: Int,
+        val priceKoboPerLitre: Long,
+        val cashAmountKobo: Long,
         val litresCutoff: Double,            // pre-computed, floored to 0.01L
         val litresSoFar: Double,
     ) : TransactionState()
@@ -141,8 +150,8 @@ sealed class TransactionState {
     data class FixedDispensing(
         val flow: TransactionFlow,
         val txnId: String,
-        val pricePerLitre: Int,
-        val amountNaira: Int,
+        val priceKoboPerLitre: Long,
+        val amountKobo: Long,
         val litresAuthorised: Double,
         val litresSoFar: Double,
         val method: PaymentMethod? = null,
@@ -155,7 +164,7 @@ sealed class TransactionState {
         val flow: TransactionFlow,
         val txnId: String,
         val litres: Double,
-        val amountNaira: Int,
+        val amountKobo: Long,
         val method: PaymentMethod? = null,   // null for cash-only flows that have no digital method
         val attendantId: String? = null,     // null in V1 (no roles)
     ) : TransactionState()

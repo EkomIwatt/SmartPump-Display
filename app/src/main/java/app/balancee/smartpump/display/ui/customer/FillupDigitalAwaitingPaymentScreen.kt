@@ -46,14 +46,15 @@ import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.util.formatNaira
 import app.balancee.smartpump.display.ui.util.isPortrait
 
 @Composable
 fun FillupDigitalAwaitingPaymentScreen(
     txnId: String,
     verifiedLitres: Double,
-    amountDueNaira: Int,
-    pricePerLitre: Int,
+    amountDueKobo: Long,
+    priceKoboPerLitre: Long,
     qrContent: String,
     expiresInSeconds: Int,
     onCancel: () -> Unit,
@@ -114,8 +115,8 @@ fun FillupDigitalAwaitingPaymentScreen(
                         InfoPane(
                             txnId = txnId,
                             verifiedLitres = verifiedLitres,
-                            amountDueNaira = amountDueNaira,
-                            pricePerLitre = pricePerLitre,
+                            amountDueKobo = amountDueKobo,
+                            priceKoboPerLitre = priceKoboPerLitre,
                             expiresInSeconds = expiresInSeconds,
                             accent = accent,
                             modifier = Modifier
@@ -140,8 +141,8 @@ fun FillupDigitalAwaitingPaymentScreen(
                         InfoPane(
                             txnId = txnId,
                             verifiedLitres = verifiedLitres,
-                            amountDueNaira = amountDueNaira,
-                            pricePerLitre = pricePerLitre,
+                            amountDueKobo = amountDueKobo,
+                            priceKoboPerLitre = priceKoboPerLitre,
                             expiresInSeconds = expiresInSeconds,
                             accent = accent,
                             modifier = Modifier
@@ -222,8 +223,8 @@ private fun QrPane(
 private fun InfoPane(
     txnId: String,
     verifiedLitres: Double,
-    amountDueNaira: Int,
-    pricePerLitre: Int,
+    amountDueKobo: Long,
+    priceKoboPerLitre: Long,
     expiresInSeconds: Int,
     accent: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
@@ -235,7 +236,7 @@ private fun InfoPane(
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             LabelText(text = "Exact amount due")
             AmountDisplay(
-                amountNaira = amountDueNaira,
+                amountKobo = amountDueKobo,
                 color = accent,
                 style = MaterialTheme.typography.displayMedium,
             )
@@ -263,7 +264,7 @@ private fun InfoPane(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             LedgerRow(label = "Method", value = "Bank QR · NIP", valueMonospace = false)
-            LedgerRow(label = "Price / L", value = "₦$pricePerLitre")
+            LedgerRow(label = "Price / L", value = formatNaira(priceKoboPerLitre))
             LedgerRow(label = "Txn", value = txnId)
             LedgerRow(label = "Expires in", value = formatExpiry(expiresInSeconds))
         }
@@ -282,9 +283,9 @@ private fun FillupDigitalAwaitingPaymentPreview() {
         FillupDigitalAwaitingPaymentScreen(
             txnId = "BLC-00921",
             verifiedLitres = 38.10,
-            amountDueNaira = 33_147,
-            pricePerLitre = 870,
-            qrContent = "nip://transfer?account=0123456789&amount=33147&ref=BLC-00921",
+            amountDueKobo = 3_316_605,
+            priceKoboPerLitre = 87_050,
+            qrContent = "nip://transfer?account=0123456789&amount=33166.05&ref=BLC-00921",
             expiresInSeconds = 287,
             onCancel = {},
         )
@@ -298,9 +299,9 @@ private fun FillupDigitalAwaitingPaymentPortraitPreview() {
         FillupDigitalAwaitingPaymentScreen(
             txnId = "BLC-00921",
             verifiedLitres = 38.10,
-            amountDueNaira = 33_147,
-            pricePerLitre = 870,
-            qrContent = "nip://transfer?account=0123456789&amount=33147&ref=BLC-00921",
+            amountDueKobo = 3_316_605,
+            priceKoboPerLitre = 87_050,
+            qrContent = "nip://transfer?account=0123456789&amount=33166.05&ref=BLC-00921",
             expiresInSeconds = 287,
             onCancel = {},
         )
