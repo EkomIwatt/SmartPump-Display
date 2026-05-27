@@ -36,6 +36,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.ui.attendant.AttendantOverlayHost
 import app.balancee.smartpump.display.ui.customer.CustomerStateHost
 import app.balancee.smartpump.display.ui.customer.CustomerViewModel
@@ -142,14 +143,16 @@ private fun SmartPumpRoot(
             }
         }
 
-        // Engineering long-press hotspot — top-left 40dp square. Not visible to attendants
-        // or customers; testers reach the debug screen from here. Sits on top of every
-        // gate state including onboarding, so a tester can reset the device without
-        // having to finish a half-broken install.
-        DebugLongPressHotspot(
-            onOpenDebug = { debugVisible = true },
-            modifier = Modifier.align(Alignment.TopStart),
-        )
+        // Engineering long-press hotspot — top-left 40dp square. DEBUG builds only: the
+        // debug screen exposes payment force-resolve and live device-config editing (price,
+        // virtual account), so it must never be reachable in a release/production build.
+        // Not visible to attendants or customers; testers reach the debug screen from here.
+        if (BuildConfig.DEBUG) {
+            DebugLongPressHotspot(
+                onOpenDebug = { debugVisible = true },
+                modifier = Modifier.align(Alignment.TopStart),
+            )
+        }
     }
 }
 
