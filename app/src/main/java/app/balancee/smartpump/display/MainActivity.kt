@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
@@ -36,6 +35,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.ui.attendant.AttendantOverlayHost
 import app.balancee.smartpump.display.ui.customer.CustomerStateHost
@@ -86,9 +86,9 @@ private fun SmartPumpRoot(
     customerVm: CustomerViewModel = hiltViewModel(),
     gateVm: IdentityGateViewModel = hiltViewModel(),
 ) {
-    val uiState by customerVm.ui.collectAsState()
-    val gateState by gateVm.state.collectAsState()
-    val pinBypass by gateVm.pinBypassEnabled.collectAsState()
+    val uiState by customerVm.ui.collectAsStateWithLifecycle()
+    val gateState by gateVm.state.collectAsStateWithLifecycle()
+    val pinBypass by gateVm.pinBypassEnabled.collectAsStateWithLifecycle()
     var debugVisible by rememberSaveable { mutableStateOf(false) }
 
     if (debugVisible) {
