@@ -25,6 +25,16 @@ android {
         debug {
             buildConfigField("Boolean", "MOCK_HARDWARE", "true")
         }
+        // Real-hardware demo/bench build: debuggable (inherits debug signing + debug screen),
+        // but talks to the real Arduino over USB. Distinct applicationId suffix so it installs
+        // side-by-side with the mock `debug` app — the live-demo fallback (open the mock app if
+        // the rig misbehaves, no uninstall needed).
+        create("debugRealHw") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".realhw"
+            versionNameSuffix = "-realhw"
+            buildConfigField("Boolean", "MOCK_HARDWARE", "false")
+        }
         release {
             isMinifyEnabled = false
             buildConfigField("Boolean", "MOCK_HARDWARE", "false")

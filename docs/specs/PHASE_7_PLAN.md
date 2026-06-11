@@ -32,6 +32,43 @@ stage (per the house rules — do not roll several into one).
 - **Done when:** a bench rig dispenses and the litre count tracks real pulses at the agreed
   pulses/L.
 
+#### Build plan (agreed 2026-06-11 — demo driver)
+
+Context: boss wants a live demo tomorrow showing **real Arduino dispensing**. Hardware arrives
+tomorrow morning for a bench test; we build tonight on a branch so `main` stays the known-good
+mock demo. Brief: "build something that actually works for now, change later if need be."
+
+- **Branch:** `feature/phase-7a-hardware` off `main`. Build the `debugRealHw` APK from the branch
+  for the bench test. Pass → merge; hardware fights us → `main` is pristine and we demo mock.
+- **Swap is a true drop-in** — verified against the code: `PulseSource.observe(): Flow<PulseMessage>`
+  and `RelayController` (`isDispensing` / `startFuelFlow` / `stopFuelFlow`) are clean interfaces;
+  `PulseMessage` already has `Pulse(count)` (cumulative), `Heartbeat`, `ParseError(raw)`,
+  `Disconnected`. No model / ViewModel / screen changes.
+- **Build types:** add `debugRealHw` (`initWith debug`, `applicationIdSuffix ".realhw"`,
+  `versionNameSuffix "-realhw"`, `MOCK_HARDWARE=false`). Two co-installable apps ("SmartPump" mock
+  + "SmartPump realhw") = the side-by-side demo fallback. `debug` stays `MOCK_HARDWARE=true`.
+- **Serial framing** (proposed to Olonade; sketch + parser kept self-consistent):
+  - device→app (adopted from boss proposal): `PULSE:<cum>*<cs>\n`, `HB:<cum>*<cs>\n`,
+    `BOOT:<cum>*<cs>\n` (resets baseline), `ERR:<code>*<cs>\n`.
+  - app→device (added — relay control): `RLY:1*<cs>\n` (fuel on) / `RLY:0*<cs>\n` (fuel off).
+  - checksum = **XOR-8 of the ASCII bytes before `*`**, two-hex. (Boss's `7C` example is
+    illustrative — real XOR of `PULSE:0042817` is `0x5D`; sketch and parser agree on the algorithm.)
+  - cumulative counter is the robustness win: parser tracks last count, emits the **delta**, so a
+    dropped line self-heals on the next pulse. Parser handles BOOT-reset and counter rollover.
+- **Files (all in `main` source set; chosen by DI):**
+  1. `SerialFrameParser` — pure Kotlin, no Android deps → **unit-tested** (checksum valid/invalid,
+     delta, BOOT reset, rollover, malformed). The must-be-right core.
+  2. `UsbSerialPulseSource : PulseSource` + `UsbSerialRelayController : RelayController`, sharing one
+     `@Singleton` USB connection (one port: source reads, relay writes). Emits `Disconnected` on
+     detach/IO error.
+  3. `HardwareModule` → `@Provides` branching on `BuildConfig.MOCK_HARDWARE`.
+  4. Manifest USB-host feature + `res/xml/usb_device_filter.xml` (Arduino Uno VID `0x2341`).
+  5. **Arduino sketch** under `hardware/` speaking the framing — HB every 2s, PULSE from a
+     button/interrupt pin (or auto-rate to demo without a real meter), BOOT on reset, drives a
+     relay/LED pin from `RLY` commands. Flash tomorrow AM and the Uno talks immediately.
+- **Deferred (change-later):** wiring the debug-screen sliders to the real source; reconnect/backoff
+  hardening; relay ACK (optimistic `isDispensing` for now).
+
 ### 7b — Operator config push
 - **Swaps:** the seeded default `DeviceConfig` → live config pushed from the operator app.
 - **Seam:** `DeviceConfigRepository`.
