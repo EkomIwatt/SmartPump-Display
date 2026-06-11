@@ -10,6 +10,8 @@ Decisions still owed before V1 ships. Resolved questions are removed (not crosse
 2. **Nozzle shutoff timeout.** Spec recommends 3s. Confirm 3s as production default. Should it be operator-pushable per-station, or device-local?
 3. **Relay open-on-boot.** Spec invariant says relay must default OPEN. Confirm the Android side actively asserts this on app start (vs. relying on hardware default).
 4. **USB serial protocol.** Existing mock assumes `PULSE:NNNN` strings. Confirm production framing (line-delimited? checksum? heartbeat?).
+   - *Phase 7a proposal (built + bench-verified 2026-06-11, pending vendor/Olonade ratification):* line-delimited `TYPE:<cum>*<cs>`, `<cs>` = XOR-8 of the bytes before `*`. Device→app `PULSE`/`HB`/`BOOT`/`ERR`; app→device `RLY:1`/`RLY:0`. Cumulative counter (app takes deltas → dropped lines self-heal). The illustrative `PULSE:0042817*7C` in the framing note is wrong — real XOR-8 is `5D`.
+21. **Mid-dispense USB link-loss handling (NEW, Phase 7a — bench finding 2026-06-11).** A cable yank during a **fixed** dispense (pre-pay / cash-fixed / USSD) freezes `FixedDispensing` — those flows have no flow-gap watchdog, unlike fill-up. Reconnect resumes but stutters (Uno reboots to relay-OFF while the app still believes `isDispensing`, no `RLY:1` re-assert; the `USB_DEVICE_ATTACHED` filter may relaunch the activity; `PulseMessage.Disconnected` is ignored in the fixed collector). What's the required behaviour on mid-dispense link loss — pause-and-resume, an explicit "pump disconnected" state, or treat as shutoff? Needs a hardening pass (logcat-driven). Relates to #3 (relay-on-boot) and #7 (relay closing late).
 
 ## Payment integration
 
