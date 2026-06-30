@@ -37,5 +37,9 @@ fun TransactionState.borderColor(): Color = when (this) {
         else -> SuccessGreen
     }
 
+    // Mid-dispense link loss — an attention/fault state (paused, auto-resuming). Red signals
+    // "something's wrong, look here" even though it self-heals on reconnect.
+    is TransactionState.PumpDisconnected -> WarningRed
+
     is TransactionState.Error -> WarningRed
 }

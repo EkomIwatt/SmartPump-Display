@@ -157,6 +157,29 @@ sealed class TransactionState {
         val method: PaymentMethod? = null,
     ) : TransactionState()
 
+    // ---- INTERRUPTED ----
+
+    /**
+     * Mid-dispense USB link loss during a FIXED flow (pre-pay / USSD / cash-fixed). The customer
+     * has prepaid for [litresTarget] litres, so we pause — never bill for the partial [litresSoFar]
+     * — and auto-resume toward the target when the cable returns (the §2 relay keepalive re-energises
+     * the board the moment the port reopens). Carries the full snapshot needed to rebuild the
+     * underlying dispensing state on reconnect or after a power-cut resume. [flow] == CASH_FIXED maps
+     * back to CashFixedDispensing; every other flow maps back to FixedDispensing. Fill-up never enters
+     * this state — its 3 s flow-gap watchdog locks the verified litres as the billable amount instead.
+     * (7a-hardening; resolves OPEN_QUESTIONS #21.)
+     */
+    @Serializable @SerialName("pump_disconnected")
+    data class PumpDisconnected(
+        val flow: TransactionFlow,
+        val txnId: String,
+        val priceKoboPerLitre: Long,
+        val amountKobo: Long,                // prepaid amount; cash amount for CASH_FIXED
+        val litresTarget: Double,            // litresAuthorised / litresCutoff
+        val litresSoFar: Double,
+        val method: PaymentMethod? = null,
+    ) : TransactionState()
+
     // ---- TERMINAL ----
 
     @Serializable @SerialName("complete")
