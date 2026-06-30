@@ -14,15 +14,28 @@ uppercase hex digits.
 | device → app | `PULSE:<cum>*<cs>` | a fuel pulse; `<cum>` is the adapter's free-running count |
 | device → app | `HB:<cum>*<cs>` | keep-alive, ~2 s when idle |
 | device → app | `BOOT:<cum>*<cs>` | sent once at power-up (count starts at 0) |
-| device → app | `ERR:<code>*<cs>` | a rejected/garbled inbound command |
-| app → device | `RLY:1*<cs>` | energise relay (fuel on) |
+| device → app | `ERR:<code>*<cs>` | a rejected/garbled inbound command, or `ERR:WDOG` when the relay dead-man watchdog auto-closes the relay |
+| app → device | `RLY:1*<cs>` | energise relay (fuel on); **re-asserted ~every 700 ms while dispensing** (keepalive) |
 | app → device | `RLY:0*<cs>` | de-energise relay (fuel off) |
+
+### Relay dead-man watchdog (7a-hardening)
+
+The relay is **fail-closed**. Once energised it stays on only while the app keeps re-asserting
+`RLY:1`; if no valid `RLY` command arrives within `RELAY_DEADMAN_MS` (2 s) the adapter closes the
+relay itself and emits a best-effort `ERR:WDOG`. This is the safety backstop for a mid-dispense
+cable yank or a frozen controller — **fuel can never keep flowing once the app goes silent.** The
+app side sends the keepalive automatically from `UsbSerialRelayController` while `isDispensing`; on
+reconnect the same keepalive re-energises the relay, so a brief unplug self-heals.
+
+`RELAY_DEADMAN_MS` (2 s) is deliberately under the 3 s fill-up shutoff window and ≈3× the keepalive
+period, so normal USB latency never false-trips it but uncontrolled flow is tightly bounded.
 
 Worked checksums (sanity-check your serial monitor against these):
 
 ```
 PULSE:1        -> 54      HB:0   -> 00      BOOT:0 -> 1C
 PULSE:0042817  -> 5D      RLY:1  -> 4C      RLY:0  -> 4D
+ERR:WDOG       -> 64
 ```
 
 > Note: the framing doc's illustrative `PULSE:0042817*7C` is **wrong** — the real XOR-8 is `5D`.
@@ -88,3 +101,12 @@ Open Serial Monitor at **115200 baud** to watch the frames (`BOOT:0*1C`, then `H
 - [ ] End/complete the dispense → LED off (relay `RLY:0` received).
 - [ ] Unplug mid-idle → app shows a disconnect; replug → reconnects (attach filter).
 - [ ] Mock `debug` app still on the tablet as the safety-net demo.
+
+### Dead-man watchdog (7a-hardening)
+
+- [ ] Authorise a dispense, then **unplug mid-flow** → `D13` LED goes out within ~2 s on its own
+      (the watchdog closed the relay; the app is no longer talking to the board).
+- [ ] Replug → app reconnects, re-sends `RLY:1` keepalive, LED relights, litres resume from where
+      they paused (fixed flows) — not from zero.
+- [ ] Force-freeze test (optional, cable still attached): pause the app in the debugger mid-dispense
+      so keepalives stop → LED goes out within ~2 s and Serial Monitor shows `ERR:WDOG*64`.
