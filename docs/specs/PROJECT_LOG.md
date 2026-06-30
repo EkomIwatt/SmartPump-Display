@@ -990,3 +990,23 @@ We closed the rough edge found during the Phase 7a bench test: yanking the USB c
 
 **Next:**
 Bench re-run of the watchdog+keepalive loop on the Uno, then merge `feature/phase-7a-hardening` → `main`. Phase 8 (VM tests) picks up the disconnect path first. Then the unblocked Phase 7 sub-phases (7b operator config / 7e backend sync).
+
+---
+
+### Phase 7a-hardening (addendum) — watchdog re-keyed on a dedicated PING heartbeat
+**Date:** 2026-06-30
+**Status:** done (code + protocol; build green. Same bench re-run still pending before merge)
+**Commit(s):** 07d7ccb — on branch `feature/phase-7a-hardening`
+
+**Summary (plain language):**
+After the boss reconciled this against the project docs, we firmed up *how* the pump knows the tablet is still there. The earlier version treated the "keep dispensing" command itself as the heartbeat. The agreed production design separates the two: the tablet now sends a tiny, dedicated "still alive" ping about once a second, and the pump-side board watches **that**. If the ping goes quiet mid-sale — cable knocked out, app frozen — the board shuts the pump off on its own, without needing to know how many litres were bought. It's the cleanest statement of the rule: *lose contact, stop dispensing.* This works in the field because the production board runs off the station UPS, not off the tablet's USB, so it stays powered and in control even if the data cable drops. Behaviour the customer sees is unchanged — a brief drop still auto-resumes their prepaid litres once the link is back.
+
+**Technical notes:**
+- **Protocol:** new app→device `PING*<cs>` (XOR-8 `10`), distinct from the device→app `HB`. `RLY:1`/`RLY:0` revert to one-shot edge commands. `ERR:WDOG` retained as the trip notice.
+- **Firmware:** watchdog now keys on `lastHeartbeatMs` (fed by `PING`) vs `HEARTBEAT_TIMEOUT_MS = 3000`; `RLY:1` seeds the heartbeat clock to avoid a start-of-dispense race. Renamed from the `RELAY_DEADMAN_MS`/`lastRelayCmdMs` form.
+- **App:** `UsbSerialConnection` owns the heartbeat — a framed `PING` every `HEARTBEAT_PERIOD_MS = 1000` on an app-lifetime IO scope while the port is open; `writeLine` is now `synchronized(writeLock)` so heartbeat and relay writes can't interleave on the one port. `UsbSerialRelayController` drops the RLY keepalive and instead **re-asserts `RLY:1` on the `connection.connected` down→up edge** when `isDispensing` (the watchdog is fail-safe and never re-energises itself). `§3` `PumpDisconnected` pause/resume UI is unchanged.
+- **Residual gap (documented, not fixed):** the heartbeat covers USB-drop / crash / process-death. A pure *main-thread* ANR where background (IO) threads keep running would keep the heartbeat alive while litre-counting (Main-confined) is stalled — the adapter wouldn't trip. The app's own litre-cutoff remains the primary control; the watchdog is the backstop. Gating the heartbeat on main-thread liveness is a possible future hardening if that failure mode matters.
+- **Verification:** `:app:compileDebugKotlin` + `:app:compileDebugRealHwKotlin` + `:app:testDebugUnitTest` green. Firmware not re-flashed — folds into the one pending bench re-run (now: confirm `PING*10` ~1/s; unplug mid-dispense → relay off within ~3 s; replug → `RLY:1` re-assert → resume).
+
+**Next:**
+Unchanged from the parent entry — bench re-run, then merge. (The bench step now also checks the `PING` cadence + 3 s trip.)
