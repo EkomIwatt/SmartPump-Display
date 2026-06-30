@@ -14,28 +14,33 @@ uppercase hex digits.
 | device → app | `PULSE:<cum>*<cs>` | a fuel pulse; `<cum>` is the adapter's free-running count |
 | device → app | `HB:<cum>*<cs>` | keep-alive, ~2 s when idle |
 | device → app | `BOOT:<cum>*<cs>` | sent once at power-up (count starts at 0) |
-| device → app | `ERR:<code>*<cs>` | a rejected/garbled inbound command, or `ERR:WDOG` when the relay dead-man watchdog auto-closes the relay |
-| app → device | `RLY:1*<cs>` | energise relay (fuel on); **re-asserted ~every 700 ms while dispensing** (keepalive) |
-| app → device | `RLY:0*<cs>` | de-energise relay (fuel off) |
+| device → app | `ERR:<code>*<cs>` | a rejected/garbled inbound command, or `ERR:WDOG` when the comms-loss watchdog auto-closes the relay |
+| app → device | `PING*<cs>` | liveness heartbeat, sent ~every 1 s while the link is up |
+| app → device | `RLY:1*<cs>` | energise relay (fuel on) — one-shot edge command |
+| app → device | `RLY:0*<cs>` | de-energise relay (fuel off) — one-shot edge command |
 
-### Relay dead-man watchdog (7a-hardening)
+### Comms-loss heartbeat watchdog (7a-hardening)
 
-The relay is **fail-closed**. Once energised it stays on only while the app keeps re-asserting
-`RLY:1`; if no valid `RLY` command arrives within `RELAY_DEADMAN_MS` (2 s) the adapter closes the
-relay itself and emits a best-effort `ERR:WDOG`. This is the safety backstop for a mid-dispense
-cable yank or a frozen controller — **fuel can never keep flowing once the app goes silent.** The
-app side sends the keepalive automatically from `UsbSerialRelayController` while `isDispensing`; on
-reconnect the same keepalive re-energises the relay, so a brief unplug self-heals.
+The relay is **fail-closed**, and the adapter — **not** the app — is its safety authority. While
+dispensing, the adapter must keep hearing the app's `PING` heartbeat; if none arrives within
+`HEARTBEAT_TIMEOUT_MS` (3 s) it presumes the comms are dead (USB data drop, frozen/crashed
+controller) and closes the relay on its own GPIO. **Lose comms = stop dispensing** — and the adapter
+does *not* need to know `litres_authorised` to do it.
 
-`RELAY_DEADMAN_MS` (2 s) is deliberately under the 3 s fill-up shutoff window and ≈3× the keepalive
-period, so normal USB latency never false-trips it but uncontrolled flow is tightly bounded.
+It never re-energises on its own: once tripped, only an explicit `RLY:1` resumes fuel. The app sends
+the heartbeat from `UsbSerialConnection` while the port is open; on reconnect `UsbSerialRelayController`
+re-asserts `RLY:1` (if still mid-dispense) so a brief USB drop self-heals and the prepaid fill resumes.
+
+In **production** the adapter + relay board are powered from the **UPS**, not the tablet's USB, so the
+adapter stays alive to enforce this even when the data link drops. `HEARTBEAT_TIMEOUT_MS` (3 s) is
+≈3× the heartbeat period — normal USB latency never false-trips it, uncontrolled flow stays bounded.
 
 Worked checksums (sanity-check your serial monitor against these):
 
 ```
 PULSE:1        -> 54      HB:0   -> 00      BOOT:0 -> 1C
 PULSE:0042817  -> 5D      RLY:1  -> 4C      RLY:0  -> 4D
-ERR:WDOG       -> 64
+ERR:WDOG       -> 64      PING   -> 10
 ```
 
 > Note: the framing doc's illustrative `PULSE:0042817*7C` is **wrong** — the real XOR-8 is `5D`.
@@ -102,11 +107,12 @@ Open Serial Monitor at **115200 baud** to watch the frames (`BOOT:0*1C`, then `H
 - [ ] Unplug mid-idle → app shows a disconnect; replug → reconnects (attach filter).
 - [ ] Mock `debug` app still on the tablet as the safety-net demo.
 
-### Dead-man watchdog (7a-hardening)
+### Comms-loss heartbeat watchdog (7a-hardening)
 
-- [ ] Authorise a dispense, then **unplug mid-flow** → `D13` LED goes out within ~2 s on its own
-      (the watchdog closed the relay; the app is no longer talking to the board).
-- [ ] Replug → app reconnects, re-sends `RLY:1` keepalive, LED relights, litres resume from where
-      they paused (fixed flows) — not from zero.
+- [ ] Serial Monitor shows `PING*10` arriving ~every 1 s once the app is connected.
+- [ ] Authorise a dispense, then **unplug mid-flow** → `D13` LED goes out within ~3 s on its own
+      (the heartbeat stopped, so the watchdog closed the relay).
+- [ ] Replug → app reconnects, re-asserts `RLY:1`, LED relights, litres resume from where they
+      paused (fixed flows) — not from zero.
 - [ ] Force-freeze test (optional, cable still attached): pause the app in the debugger mid-dispense
-      so keepalives stop → LED goes out within ~2 s and Serial Monitor shows `ERR:WDOG*64`.
+      so the heartbeat stops → LED goes out within ~3 s and Serial Monitor shows `ERR:WDOG*64`.

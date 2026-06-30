@@ -11,15 +11,18 @@
  *                    HB:<cum>*<cs>        keep-alive, ~2s when idle
  *                    BOOT:<cum>*<cs>      sent once at power-up (count starts at 0)
  *                    ERR:<code>*<cs>      rejected/garbled inbound command, or ERR:WDOG when the
- *                                         relay dead-man watchdog auto-closes the relay (see below)
- *   app -> device :  RLY:1*<cs>           energise relay (fuel on); MUST be re-asserted ~every 700ms
- *                                         while dispensing or the watchdog closes the relay
- *                    RLY:0*<cs>           de-energise relay (fuel off)
+ *                                         comms-loss watchdog auto-closes the relay (see below)
+ *   app -> device :  PING*<cs>            liveness heartbeat, sent ~every 1s while the link is up
+ *                    RLY:1*<cs>           energise relay (fuel on)  — one-shot edge command
+ *                    RLY:0*<cs>           de-energise relay (fuel off) — one-shot edge command
  *
- * Relay dead-man watchdog: the relay is a fail-closed output. Once energised it stays on only while
- * the app keeps re-asserting RLY:1; if no valid RLY command arrives within RELAY_DEADMAN_MS the
- * adapter closes the relay itself. This is the safety backstop for a mid-dispense cable yank or a
- * frozen controller — fuel can never keep flowing once the app goes silent.
+ * Comms-loss heartbeat watchdog: the relay is a fail-closed output. While dispensing, the adapter
+ * must keep hearing the app's PING heartbeat; if none arrives within HEARTBEAT_TIMEOUT_MS the comms
+ * are presumed dead (USB data drop, frozen/crashed controller) and the adapter closes the relay on
+ * its own GPIO — "comms dead, fail safe", and it does NOT need to know litres_authorised. It never
+ * re-energises on its own: once tripped, only an explicit RLY:1 from the app resumes fuel. In
+ * production the adapter is powered from the UPS (not the tablet's USB), so it stays alive to enforce
+ * this even when the data link drops. (The app->device PING is distinct from the device->app HB.)
  *   <cs> = XOR-8 of every ASCII byte BEFORE the '*', printed as two UPPERCASE hex digits.
  *          e.g. PULSE:1 -> 54, HB:0 -> 00, BOOT:0 -> 1C, RLY:1 -> 4C, RLY:0 -> 4D
  *          (the boss's illustrative "PULSE:0042817*7C" is wrong; the real XOR is 5D.)
@@ -48,12 +51,11 @@ const unsigned int  AUTO_PPS      = 50;    // synthetic pulse rate (~30 L/min @ 
 const unsigned long HB_INTERVAL_MS   = 2000; // keep-alive cadence when idle
 const unsigned long PULSE_TX_MIN_MS  = 30;   // min gap between PULSE frames (throttle the stream)
 
-// Dead-man watchdog: while the relay is energised the app must keep re-asserting RLY:1 (it sends
-// one ~every 700ms). If no valid RLY command arrives for this long, the link is presumed dead (cable
-// yanked / app frozen) and we close the relay ourselves — fuel must never keep flowing once the
-// controller has gone silent. Generous enough not to false-trip on USB latency, tight enough to bound
-// uncontrolled flow well under the 3s fill-up shutoff window.
-const unsigned long RELAY_DEADMAN_MS = 2000;
+// Comms-loss heartbeat watchdog: while the relay is energised the app must keep sending its PING
+// heartbeat (~every 1s). If none arrives for this long the comms are presumed dead and we fail the
+// relay closed. Generous enough not to false-trip on USB latency, tight enough to bound uncontrolled
+// flow. NOTE the app->device PING is distinct from the device->app HB above.
+const unsigned long HEARTBEAT_TIMEOUT_MS = 3000;
 
 // ---- State ------------------------------------------------------------------------------
 volatile unsigned long pulseCount = 0;   // free-running, shared with the ISR
@@ -63,7 +65,7 @@ unsigned long lastFrameMs   = 0;  // last frame of ANY type sent (gates HB)
 unsigned long lastPulseTxMs = 0;  // last PULSE frame sent (throttle)
 unsigned long lastAutoMs    = 0;  // last synthetic-pulse tick
 unsigned long lastSentCount = 0;  // cumulative at the last PULSE frame
-unsigned long lastRelayCmdMs = 0; // last valid RLY command received (feeds the dead-man watchdog)
+unsigned long lastHeartbeatMs = 0; // last PING heartbeat received from the app (feeds the watchdog)
 
 char rxBuf[40];
 uint8_t rxLen = 0;
@@ -127,8 +129,11 @@ void processLine(char* line) {
   uint8_t want = (uint8_t) strtol(star + 1, NULL, 16);
   if (xor8(line) != want) { sendError("CSUM"); return; }
 
-  if      (strcmp(line, "RLY:1") == 0) { lastRelayCmdMs = millis(); setRelay(true); }
-  else if (strcmp(line, "RLY:0") == 0) { lastRelayCmdMs = millis(); setRelay(false); }
+  if      (strcmp(line, "PING")  == 0) lastHeartbeatMs = millis();
+  // RLY:1 also seeds the heartbeat clock so the watchdog can't trip in the instant between
+  // energising the relay and the first PING of the dispense.
+  else if (strcmp(line, "RLY:1") == 0) { lastHeartbeatMs = millis(); setRelay(true); }
+  else if (strcmp(line, "RLY:0") == 0) setRelay(false);
   else                                 sendError("CMD");
 }
 
@@ -161,13 +166,13 @@ void generatePulses() {
   }
 }
 
-// ---- Relay dead-man watchdog ------------------------------------------------------------
-// Close the relay if the app has gone silent while fuel is flowing. The app re-asserts RLY:1
-// roughly every 700ms during a dispense; missing ~3 in a row trips this. Best-effort ERR:WDOG
-// notice for the app-frozen-but-cable-attached case — on a real cable yank the link is already
-// down so nothing reads it, but the relay still closes locally, which is the point.
+// ---- Comms-loss heartbeat watchdog ------------------------------------------------------
+// Close the relay if the app's PING heartbeat has gone silent while fuel is flowing. The app
+// sends PING ~every 1s; missing ~3 in a row trips this. Best-effort ERR:WDOG notice for the
+// frozen-but-attached case — on a USB data drop the link is already down so nothing reads it,
+// but the relay still closes locally on the adapter's own GPIO, which is the whole point.
 void serviceRelayWatchdog() {
-  if (dispensing && (millis() - lastRelayCmdMs) >= RELAY_DEADMAN_MS) {
+  if (dispensing && (millis() - lastHeartbeatMs) >= HEARTBEAT_TIMEOUT_MS) {
     setRelay(false);
     sendError("WDOG");
   }
@@ -205,6 +210,7 @@ void setup() {
   lastFrameMs = t;
   lastPulseTxMs = t;
   lastAutoMs = t;
+  lastHeartbeatMs = t;  // dispensing == false at boot, so the watchdog stays idle until a dispense
 }
 
 void loop() {
