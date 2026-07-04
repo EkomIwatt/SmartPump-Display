@@ -38,11 +38,12 @@ _Last updated: 2026-07-04_
   KeyStore can't run in local JVM. androidTest: save→current round-trip, persistence across a fresh
   instance, `clear()` wipe, corrupt-blob/invalidated-key → null fallback. Needs emulator/device
   (same "needs hardware" class as #2). Follow-up to #4.
-- [ ] **6. Chase the 7 boss confirmations** (from `phase7_blocker_resolution.md`): (1) reference is
+- [~] **6. Chase the 7 boss confirmations** (from `phase7_blocker_resolution.md`): (1) reference is
   canonical — gates everything; (2) tablet has Google Play Services? → FCM vs WebSocket; (3) GET
-  `/transactions/{id}` exists; (4) GET `/config` exists + final payload/units; (5) confirm offline-USSD
-  7d deferral (not the Paystack-USSD conflation); (6) late-payment policy; (7) hosted staging URL +
-  test activation code. _Claude can draft this as a message to send._
+  `/transactions/{id}` exists; (4) GET `/config` exists + final payload/units (incl. money unit on
+  `amount` — naira vs kobo); (5) confirm offline-USSD 7d deferral; (6) late-payment policy; (7) hosted
+  staging URL + test activation code. **Draft ready → `BOSS_CONFIRMATIONS_DRAFT.md`.** Awaiting send +
+  answers; on reply → reconcile into `OPEN_QUESTIONS.md` + unblock #8.
 
 ## Gated / later
 

@@ -24,11 +24,11 @@ android {
     buildTypes {
         debug {
             buildConfigField("Boolean", "MOCK_HARDWARE", "true")
-            // Emulator → host loopback. The Pump API Reference only documents localhost:8080;
-            // point this at hosted staging once it exists (OQ / blocker doc item 7). Cleartext
-            // http to 10.0.2.2 needs a debug network-security-config before a live call — added
-            // when we first hit the wire, not required for the layer to compile/unit-test.
-            buildConfigField("String", "PUMP_API_BASE_URL", "\"http://10.0.2.2:8080/\"")
+            // Hosted dev backend (per boss, 2026-07-04). debugRealHw inherits this via initWith.
+            // To run against a LOCAL backend instead, point this at "http://10.0.2.2:8080/"
+            // (emulator → host loopback) — the debug network-security-config already permits
+            // cleartext to 10.0.2.2/localhost.
+            buildConfigField("String", "PUMP_API_BASE_URL", "\"https://api.dev.balancee.app/\"")
         }
         // Real-hardware demo/bench build: debuggable (inherits debug signing + debug screen),
         // but talks to the real Arduino over USB. Distinct applicationId suffix so it installs
@@ -43,9 +43,8 @@ android {
         release {
             isMinifyEnabled = false
             buildConfigField("Boolean", "MOCK_HARDWARE", "false")
-            // TODO(blocker item 7): replace with the real hosted staging/production base URL once
-            // provisioned. Placeholder so release compiles; do not ship a live build against this.
-            buildConfigField("String", "PUMP_API_BASE_URL", "\"https://pump-api.balancee.app/\"")
+            // Production backend (per boss, 2026-07-04).
+            buildConfigField("String", "PUMP_API_BASE_URL", "\"https://api.balancee.app/\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -151,7 +151,10 @@ blocking priority:
 5. **USSD/SMS sub-phase 7d drop confirmation** — currently planned work that should be cut.
 6. **Late-payment policy** — backend-side, doesn't block pump code, but needs deciding
    before field test.
-7. **Hosted staging + test activation code** — only `localhost:8080` is documented.
+7. **Hosted staging + test activation code** — ~~only `localhost:8080` is documented~~. **URLs received
+   2026-07-04:** prod `https://api.balancee.app/`, dev `https://api.dev.balancee.app/` (wired into
+   `BuildConfig.PUMP_API_BASE_URL` — release→prod, debug/debugRealHw→dev). **Still need** a test
+   activation code to redeem against dev.
 
 ---
 
