@@ -121,3 +121,40 @@ After the boss reconciled this against the project docs, we firmed up *how* the 
 
 **Next:**
 Unchanged from the parent entry — bench re-run, then merge. (The bench step now also checks the `PING` cadence + 3 s trip.)
+
+---
+
+### Docs reconciliation — Pump API Reference / blocker-resolution ingest
+**Date:** 2026-07-03
+**Status:** done (docs only, no code)
+**Commit(s):** uncommitted
+
+**Summary (plain language):**
+A new doc (`docs/phase7_blocker_resolution.md`) arrived that answers most of the payment/onboarding
+blockers — and changes the shape of the whole payment side. The old design had the bank's backend
+calling *into* the pump (a "webhook"); the new one has the **pump doing the calling** — it asks the
+backend to start a sale, gets a Paystack QR back, the customer pays Paystack, and the pump finds out
+it was paid by a mix of a push message and a quick repeated check. We went through the project's
+authority docs and brought them in line with this, marked which old open questions are now answered,
+and — importantly — corrected one mistake in the new doc: it claimed the offline USSD flow was dead,
+but that flow (for stations with no internet) is only **deferred to a future update**, not cut.
+
+**Technical notes:**
+- **`OPEN_QUESTIONS.md`:** #5 (webhook signing → now *outbound* HMAC-SHA256, 4 signed headers), #6
+  (station virtual account → obsolete, Paystack owns payments), #14 (receipt sharing → system share
+  sheet) moved to **Resolved** (all "pending boss ratification that the API Reference is canonical").
+  #7 (late-payment) and #8 (price-push channel: FCM-vs-WebSocket pending a Play-Services answer) and
+  #13 (DeviceConfig → `/activate` + `/config`) annotated in place. USSD/SMS block (#9–#12) re-headed
+  **DEFERRED to a future update** with the two-USSD-paths correction. Numbers kept stable (gaps left).
+- **`phase7_blocker_resolution.md`:** struck-and-corrected two claims against reality — (a) USSD is
+  *not* obsolete (offline mode ≠ Paystack USSD; deferred, not dropped); (b) the "7a stays mocked"
+  line is stale — 7a real hardware is built/bench-verified/merged; this doc has no firmware impact.
+- **`flows.md` / `state-machine.md`:** added payment-inversion banners (webhook→pump-initiated
+  Paystack QR + push/10s-poll on `GET /api/pump/transactions/{id}`; Flow 3 NIP-QR replaced by a
+  Paystack `authorizationUrl`; states unchanged, only the confirmation *trigger* changes). Flow 5
+  marked deferred in both. Flow bodies left intact pending ratification — banners hold authority.
+
+**Next:**
+Build the network client layer (Retrofit/OkHttp + the outbound HMAC signing interceptor) as the
+Phase 7c/7e foundation — the one piece safe to build before the boss ratifies the reference, since
+the signing scheme is fully specified and unit-testable offline.

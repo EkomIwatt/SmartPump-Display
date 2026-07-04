@@ -5,10 +5,11 @@
 Before responding to the user's first request, read these in order to ground yourself in the current project state:
 
 1. `docs/journal/PROJECT_LOG.md` — completed-phase log; the "Current status" header at the top is the fastest way to see where things stand. (Older entries live in `PROJECT_LOG_ARCHIVE.md` — history only, no need to read at session start.)
-2. `docs/flows.md` — the five transaction flows: customer screen sequence, state list, payload examples.
-3. `docs/state-machine.md` — sealed-class hierarchy + transition table per flow.
-4. `docs/design-system.md` — visual language (colors, typography, components, layout rules).
-5. `docs/journal/OPEN_QUESTIONS.md` — open decisions.
+2. `docs/journal/TODO.md` — the live work board: what's outstanding, what's next, what's blocked/deferred. The log says what's *done*; this says what's *left*.
+3. `docs/flows.md` — the five transaction flows: customer screen sequence, state list, payload examples.
+4. `docs/state-machine.md` — sealed-class hierarchy + transition table per flow.
+5. `docs/design-system.md` — visual language (colors, typography, components, layout rules).
+6. `docs/journal/OPEN_QUESTIONS.md` — open decisions.
 
 Skim the screenshots in `docs/Strict design screens/` when the work touches a specific flow.
 

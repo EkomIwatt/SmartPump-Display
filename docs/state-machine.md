@@ -4,6 +4,15 @@ The state machine is one sealed hierarchy that covers all five flows. Persisted 
 
 For the screen-by-screen description see `docs/flows.md`. For visuals see `docs/Strict design screens/`.
 
+> **⚠️ 2026-07-03 — impact of the payment-model inversion (pending ratification).**
+> Per `docs/phase7_blocker_resolution.md`, digital payment is now pump-initiated (Paystack QR) with
+> **push + 10s poll** confirmation, not an inbound webhook. In the transition tables below, every
+> **"webhook received"** event (Flows 1 and 3) becomes **"PAID confirmed (push or poll)"**. The
+> states themselves don't need to change — `PrepayAwaitingPayment` / `FillupDigitalAwaitingPayment`
+> still model the wait; only the *trigger* changes. `FillupDigitalAwaitingPayment.qrContent` now holds
+> a Paystack `authorizationUrl`, not an NIP payload. **Flow 5 (`UssdAwaitingSms`, `USSD_OFFLINE`) is
+> deferred to a future update — kept, not removed.** Cash flows (2, 4) are unaffected.
+
 ---
 
 ## Sealed hierarchy (Kotlin)
@@ -184,7 +193,7 @@ Note: `CashFixedDispensing` could be folded into `FixedDispensing` with a `flow 
 | `CashFixedAmountEntry`            | attendant confirms ₦ amount          | `CashFixedDispensing`               |
 | `CashFixedDispensing`             | pulses ≥ litresCutoff                | `Complete`                          |
 
-### Flow 5 — USSD Offline
+### Flow 5 — USSD Offline  *(DEFERRED to a future update — kept, not removed. See flows.md / OQ #9–#12.)*
 
 | From                              | Event                                | To                                  |
 |-----------------------------------|--------------------------------------|-------------------------------------|
