@@ -11,14 +11,15 @@ _Last updated: 2026-07-04_
 
 ## Now — unblocked, high value
 
-- [ ] **1. Commit network-layer foundation + doc reconciliation.** Green, self-contained. Contains
-  (a) the docs reconciliation to the Pump API Reference and (b) the network layer (deps, signer,
-  interceptor, service, DTOs, credentials seam + in-memory placeholder, `NetworkModule`, tests).
-  Decide: one commit, or split docs vs code. On `feature/phase-7a-hardening`.
-- [ ] **3. Build `PumpApiClient` / repository wrapper.** Ratification-independent. Wraps
-  `PumpApiService`; maps DTOs ↔ domain (incl. money-unit conversion — app is kobo `Long`), typed
-  error handling (network / HTTP / deserialization), offline-retry policy for the idempotent upload.
-  This is the seam ViewModels/WorkManager consume. MockWebServer-testable.
+- [x] **1. Commit network-layer foundation + doc reconciliation.** Done 2026-07-04 as two commits
+  on `feature/phase-7a-hardening`: `29fe12b` (docs reconciliation + TODO board) and `4af9514`
+  (network layer). _(move to PROJECT_LOG at next phase log.)_
+- [x] **3. Build `PumpApiClient` / transport client.** Done 2026-07-04 (uncommitted): `ApiResult`/
+  `ApiError` typed-error funnel (`safeApiCall`), `retryingApiCall` backoff primitive, `PumpApiClient`
+  over all 5 endpoints with retry on the idempotent upload; interceptor now throws typed
+  `PumpNotActivatedException`. Tests green (MockWebServer). **DTO↔domain mapping deferred to #8** —
+  kept the client transport-only so the still-provisional bits (money unit, `/config` shape) don't
+  ripple down. _(move to PROJECT_LOG at next phase log.)_
 - [ ] **4. Replace in-memory credentials store with an encrypted-at-rest impl.** `InMemoryPumpCredentialsStore`
   is a placeholder (not persisted, secret unencrypted). Swap for a KeyStore-backed / EncryptedSharedPreferences
   impl of `PumpCredentialsStore` — only the Hilt binding in `NetworkModule` changes. Ties into 7f.

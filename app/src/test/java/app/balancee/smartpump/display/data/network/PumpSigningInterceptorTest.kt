@@ -20,7 +20,6 @@ import org.junit.Before
 import org.junit.Test
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
-import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -123,8 +122,8 @@ class PumpSigningInterceptorTest {
 
         try {
             runBlocking { service.config() }
-            fail("expected IOException when signing without credentials")
-        } catch (e: IOException) {
+            fail("expected PumpNotActivatedException when signing without credentials")
+        } catch (e: PumpNotActivatedException) {
             assertTrue(e.message!!.contains("not activated"))
         }
         // Nothing must have reached the server.

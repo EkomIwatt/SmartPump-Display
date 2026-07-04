@@ -16,6 +16,14 @@ import retrofit2.Invocation
 import java.io.IOException
 import java.time.Clock
 
+/**
+ * Thrown by the signing interceptor when a signed request is attempted without credentials.
+ * Extends IOException so OkHttp/Retrofit propagate it like any other I/O failure; PumpApiClient
+ * catches it specifically and maps it to [ApiError.NotActivated].
+ */
+class PumpNotActivatedException :
+    IOException("Pump API request requires signing but the device is not activated")
+
 class PumpSigningInterceptor(
     private val credentialsStore: PumpCredentialsStore,
     private val clock: Clock,
@@ -31,7 +39,7 @@ class PumpSigningInterceptor(
         if (unsigned) return chain.proceed(request)
 
         val credentials = credentialsStore.current()
-            ?: throw IOException("Pump API request requires signing but the device is not activated")
+            ?: throw PumpNotActivatedException()
 
         val timestamp = PumpRequestSigner.timestamp(clock.instant())
         val bodyString = request.body?.let { body ->
