@@ -20,10 +20,12 @@ _Last updated: 2026-07-04_
   `PumpNotActivatedException`. Tests green (MockWebServer). **DTO↔domain mapping deferred to #8** —
   kept the client transport-only so the still-provisional bits (money unit, `/config` shape) don't
   ripple down. _(move to PROJECT_LOG at next phase log.)_
-- [ ] **4. Replace in-memory credentials store with an encrypted-at-rest impl.** `InMemoryPumpCredentialsStore`
-  is a placeholder (not persisted, secret unencrypted). Swap for a KeyStore-backed / EncryptedSharedPreferences
-  impl of `PumpCredentialsStore` — only the Hilt binding in `NetworkModule` changes. Ties into 7f.
-  Note: `androidx.security:security-crypto` is in maintenance — weigh KeyStore-direct first.
+- [x] **4. Encrypted-at-rest credentials store.** Done 2026-07-04 (uncommitted): `KeystorePumpCredentialsStore`
+  — AES-256-GCM key in the Android KeyStore + ciphertext in private SharedPreferences, decrypted creds
+  cached for the sync `current()` hot path. Chose **KeyStore-direct** over the deprecated
+  `security-crypto` lib. `NetworkModule` binding swapped; `InMemoryPumpCredentialsStore` deleted.
+  Compiles + wired + unit tests green. ⚠️ **Runtime crypto unverified** (KeyStore needs a device) →
+  tracked as **#10**. _(move to PROJECT_LOG at next phase log.)_
 
 ## Waiting on external input
 
@@ -32,6 +34,10 @@ _Last updated: 2026-07-04_
   → relay off within ~3 s; replug → `RLY:1` re-assert → resume from where it paused, not zero). A
   classic ESP32 (WROOM/CP2102 or CH340) can substitute with a ported sketch (remap off GPIO6–11,
   `IRAM_ATTR` ISR, `LED_BUILTIN`=GPIO2, 3.3 V). Merging closes the last gate on OQ #21.
+- [ ] **10. Verify `KeystorePumpCredentialsStore` crypto on a device** (instrumented test). AES-GCM
+  KeyStore can't run in local JVM. androidTest: save→current round-trip, persistence across a fresh
+  instance, `clear()` wipe, corrupt-blob/invalidated-key → null fallback. Needs emulator/device
+  (same "needs hardware" class as #2). Follow-up to #4.
 - [ ] **6. Chase the 7 boss confirmations** (from `phase7_blocker_resolution.md`): (1) reference is
   canonical — gates everything; (2) tablet has Google Play Services? → FCM vs WebSocket; (3) GET
   `/transactions/{id}` exists; (4) GET `/config` exists + final payload/units; (5) confirm offline-USSD

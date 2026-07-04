@@ -4,7 +4,7 @@
 package app.balancee.smartpump.display.di
 
 import app.balancee.smartpump.display.BuildConfig
-import app.balancee.smartpump.display.data.network.InMemoryPumpCredentialsStore
+import app.balancee.smartpump.display.data.network.KeystorePumpCredentialsStore
 import app.balancee.smartpump.display.data.network.PumpApiService
 import app.balancee.smartpump.display.data.network.PumpSigningInterceptor
 import app.balancee.smartpump.display.domain.network.PumpCredentialsStore
@@ -26,10 +26,10 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    // In-memory placeholder until the activation flow (7f) provides an encrypted-at-rest store.
+    // AES-256-GCM encrypted-at-rest store (Android KeyStore key + private SharedPreferences).
     @Provides
     @Singleton
-    fun provideCredentialsStore(impl: InMemoryPumpCredentialsStore): PumpCredentialsStore = impl
+    fun provideCredentialsStore(impl: KeystorePumpCredentialsStore): PumpCredentialsStore = impl
 
     @Provides
     @Singleton
