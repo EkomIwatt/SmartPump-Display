@@ -24,6 +24,11 @@ android {
     buildTypes {
         debug {
             buildConfigField("Boolean", "MOCK_HARDWARE", "true")
+            // Emulator → host loopback. The Pump API Reference only documents localhost:8080;
+            // point this at hosted staging once it exists (OQ / blocker doc item 7). Cleartext
+            // http to 10.0.2.2 needs a debug network-security-config before a live call — added
+            // when we first hit the wire, not required for the layer to compile/unit-test.
+            buildConfigField("String", "PUMP_API_BASE_URL", "\"http://10.0.2.2:8080/\"")
         }
         // Real-hardware demo/bench build: debuggable (inherits debug signing + debug screen),
         // but talks to the real Arduino over USB. Distinct applicationId suffix so it installs
@@ -38,6 +43,9 @@ android {
         release {
             isMinifyEnabled = false
             buildConfigField("Boolean", "MOCK_HARDWARE", "false")
+            // TODO(blocker item 7): replace with the real hosted staging/production base URL once
+            // provisioned. Placeholder so release compiles; do not ship a live build against this.
+            buildConfigField("String", "PUMP_API_BASE_URL", "\"https://pump-api.balancee.app/\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -103,11 +111,19 @@ dependencies {
     // Payments / QR
     implementation(libs.zxing)
 
-    // Serialization (state persistence to Room)
+    // Serialization (state persistence to Room + network DTOs)
     implementation(libs.kotlinx.serialization.json)
+
+    // Network (Balancee Pump API — Retrofit/OkHttp + outbound HMAC signing)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.kotlinx.serialization)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging.interceptor)
 
     // Test
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
