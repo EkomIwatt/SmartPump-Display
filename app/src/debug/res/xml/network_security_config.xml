@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY network security config. Permits cleartext HTTP to the local dev backend so debuggable
+  builds can reach http://10.0.2.2:8080 (emulator → host loopback) and localhost. Applied via the
+  debug manifest overlay only; the release build keeps Android's default cleartext-denied policy, so
+  a release build can never talk plain HTTP to these hosts.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

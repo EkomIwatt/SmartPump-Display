@@ -66,6 +66,14 @@ android {
     // Room's exported schema JSONs (app/schemas) are bundled as androidTest assets so
     // MigrationTestHelper can load them when migration tests are added.
     sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+
+    // debugRealHw is a debuggable build derived from debug (initWith) that may also hit a local
+    // backend, so it reuses the debug network-security-config + manifest overlay. initWith copies
+    // build-type *properties* only, not source sets — so wire debug's manifest/res in explicitly.
+    sourceSets.getByName("debugRealHw") {
+        manifest.srcFile("src/debug/AndroidManifest.xml")
+        res.srcDir("src/debug/res")
+    }
 }
 
 kotlin {

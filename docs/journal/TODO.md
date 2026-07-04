@@ -46,9 +46,10 @@ _Last updated: 2026-07-04_
 
 ## Gated / later
 
-- [ ] **5. Debug `network-security-config` for cleartext localhost.** Runtime prereq before any live
-  call to `http://10.0.2.2:8080` (cleartext blocked by default on API 9+). Debug-only, via a debug
-  manifest. Not needed to compile or unit-test.
+- [x] **5. Debug `network-security-config` for cleartext localhost.** Done 2026-07-04 (uncommitted):
+  `src/debug/res/xml/network_security_config.xml` (cleartext to 10.0.2.2/localhost/127.0.0.1) applied
+  via `src/debug/AndroidManifest.xml` overlay; `debugRealHw` source set wired to reuse it. Verified in
+  both merged manifests; release stays cleartext-denied. _(move to PROJECT_LOG at next phase log.)_
 - [ ] **7. Phase 8 — `CustomerViewModel` unit tests (disconnect path first).** Awaiting go. Stand up
   fakes+Turbine; cover 7a-hardening pause/resume/boot-resume first. Open decisions: Log flag vs Logger
   interface; DAO tests in/out. This is where the app-side watchdog safety claim gets real coverage.
