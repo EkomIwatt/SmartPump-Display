@@ -11,14 +11,14 @@ _Last updated: 2026-07-08_
 
 ## ⛔ Merge gates for `feature/phase-7a-hardening` → `main`
 
-Only two items block the merge. Everything else on this board is **post-merge** (future phase or
-boss-gated) and must NOT hold up landing the branch.
+**One item now blocks the merge** (#10 closed 2026-07-08). Everything else on this board is
+**post-merge** (future phase or boss-gated) and must NOT hold up landing the branch.
 
 - **#2** — Uno/ESP32 bench: **watchdog fires on app-death** (the still-relevant case). **Truly
   blocked** on the physical board. See #2 for the reframed method — the old "unplug the cable" step
   is now secondary (fixed-cable assumption designs it away, and it's confounded on a bus-powered Uno).
-- **#10** — `KeystorePumpCredentialsStore` crypto verify. **Actionable now** — needs an Android
-  *emulator/device*, NOT the Arduino. The instrumented test can be written today and run on any emulator.
+- ~~**#10** — `KeystorePumpCredentialsStore` crypto verify.~~ ✅ **DONE 2026-07-08** — all 5
+  instrumented tests pass on a physical device; runtime AES-GCM crypto confirmed.
 
 Build is green on both variants; the branch also carries the network-layer foundation (#1/#3/#4/#5,
 all done, pending a PROJECT_LOG entry).
@@ -27,14 +27,13 @@ all done, pending a PROJECT_LOG entry).
 
 ## Now — unblocked, high value
 
-- [~] **10. Verify `KeystorePumpCredentialsStore` crypto** (instrumented test) — **merge gate**.
-  AES-GCM KeyStore can't run in local JVM, so this needs an emulator/device (but NOT the Arduino —
-  reclassified 2026-07-08). **Test AUTHORED 2026-07-08:** `app/src/androidTest/.../data/network/
-  KeystorePumpCredentialsStoreTest.kt` (first androidTest in the project) — covers not-activated,
-  save→current round-trip, isActivated toggle, persistence across a fresh instance, `clear()` wipe,
-  and corrupt-blob → null-fallback + ciphertext purge. Compiles (`compileDebugAndroidTestKotlin`
-  green). **Left to do: run it** — `./gradlew :app:connectedDebugAndroidTest` on any booted emulator.
-  Green run closes the gate.
+- [x] **10. Verify `KeystorePumpCredentialsStore` crypto** (instrumented test) — **merge gate CLOSED
+  2026-07-08.** `app/src/androidTest/.../data/network/KeystorePumpCredentialsStoreTest.kt` (first
+  androidTest in the project; commit `91fa772`) — covers not-activated, save→current round-trip,
+  isActivated toggle, persistence across a fresh instance, `clear()` wipe, and corrupt-blob →
+  null-fallback + ciphertext purge. **All 5 pass on a physical device** (`connectedDebugAndroidTest`,
+  BUILD SUCCESSFUL) → runtime AES-GCM-at-rest confirmed; the #4 "runtime crypto unverified" caveat is
+  cleared. _(move to PROJECT_LOG at next phase log.)_
 - [x] **1. Commit network-layer foundation + doc reconciliation.** Done 2026-07-04 as two commits
   on `feature/phase-7a-hardening`: `29fe12b` (docs reconciliation + TODO board) and `4af9514`
   (network layer). _(move to PROJECT_LOG at next phase log.)_
