@@ -5,12 +5,36 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-07-04_
+_Last updated: 2026-07-08_
+
+---
+
+## ⛔ Merge gates for `feature/phase-7a-hardening` → `main`
+
+Only two items block the merge. Everything else on this board is **post-merge** (future phase or
+boss-gated) and must NOT hold up landing the branch.
+
+- **#2** — Uno/ESP32 bench: **watchdog fires on app-death** (the still-relevant case). **Truly
+  blocked** on the physical board. See #2 for the reframed method — the old "unplug the cable" step
+  is now secondary (fixed-cable assumption designs it away, and it's confounded on a bus-powered Uno).
+- **#10** — `KeystorePumpCredentialsStore` crypto verify. **Actionable now** — needs an Android
+  *emulator/device*, NOT the Arduino. The instrumented test can be written today and run on any emulator.
+
+Build is green on both variants; the branch also carries the network-layer foundation (#1/#3/#4/#5,
+all done, pending a PROJECT_LOG entry).
 
 ---
 
 ## Now — unblocked, high value
 
+- [~] **10. Verify `KeystorePumpCredentialsStore` crypto** (instrumented test) — **merge gate**.
+  AES-GCM KeyStore can't run in local JVM, so this needs an emulator/device (but NOT the Arduino —
+  reclassified 2026-07-08). **Test AUTHORED 2026-07-08:** `app/src/androidTest/.../data/network/
+  KeystorePumpCredentialsStoreTest.kt` (first androidTest in the project) — covers not-activated,
+  save→current round-trip, isActivated toggle, persistence across a fresh instance, `clear()` wipe,
+  and corrupt-blob → null-fallback + ciphertext purge. Compiles (`compileDebugAndroidTestKotlin`
+  green). **Left to do: run it** — `./gradlew :app:connectedDebugAndroidTest` on any booted emulator.
+  Green run closes the gate.
 - [x] **1. Commit network-layer foundation + doc reconciliation.** Done 2026-07-04 as two commits
   on `feature/phase-7a-hardening`: `29fe12b` (docs reconciliation + TODO board) and `4af9514`
   (network layer). _(move to PROJECT_LOG at next phase log.)_
@@ -34,14 +58,16 @@ _Last updated: 2026-07-04_
   → relay off within ~3 s; replug → `RLY:1` re-assert → counting resumes toward target, not zero). A
   classic ESP32 (WROOM/CP2102 or CH340) can substitute with a ported sketch (remap off GPIO6–11,
   `IRAM_ATTR` ISR, `LED_BUILTIN`=GPIO2, 3.3 V). Merging closes the last gate on OQ #21.
-  **Note (2026-07-08):** the app-side `PumpDisconnected` pause/resume UX was **removed** (fixed-cable
-  assumption; see OQ #21 revision). This bench run now only exercises the *firmware watchdog* +
-  *reconnect re-assert* — there is no longer a "disconnected" screen; the dispensing screen just
-  continues after the replug. Build stays green (both `debug` + `debugRealHw` compile).
-- [ ] **10. Verify `KeystorePumpCredentialsStore` crypto on a device** (instrumented test). AES-GCM
-  KeyStore can't run in local JVM. androidTest: save→current round-trip, persistence across a fresh
-  instance, `clear()` wipe, corrupt-blob/invalidated-key → null fallback. Needs emulator/device
-  (same "needs hardware" class as #2). Follow-up to #4.
+  **Reframed (2026-07-08):** with the fixed-cable assumption, the safety case this gate must prove is
+  no longer "cable pulled" (mode A — designed away) but **"app freezes/crashes while fuel flows,
+  cable still connected" (mode B)** — which the assumption and the UPS do *not* cover. The old
+  "unplug mid-flow" step is now secondary and is anyway confounded on a bus-powered bench Uno
+  (unplug kills board *power*, so you'd be watching a power-loss fail-open, not the watchdog).
+  **Primary required check:** leave everything plugged, then mid-dispense
+  `adb shell am force-stop app.balancee.smartpump.display` (USB VBUS keeps the Uno powered, the host
+  supplies 5 V regardless of app) → `D13` off within ~3 s + `ERR:WDOG*64` on Serial Monitor. The
+  "replug → resume" step is now low-priority (no routine replug; app-side resume UI removed — only
+  the relay-layer `RLY:1` re-assert remains for a rare transient). Build green (both variants).
 - [~] **6. Chase the 7 boss confirmations** (from `phase7_blocker_resolution.md`): (1) reference is
   canonical — gates everything; (2) tablet has Google Play Services? → FCM vs WebSocket; (3) GET
   `/transactions/{id}` exists; (4) GET `/config` exists + final payload/units (incl. money unit on
@@ -55,9 +81,11 @@ _Last updated: 2026-07-04_
   `src/debug/res/xml/network_security_config.xml` (cleartext to 10.0.2.2/localhost/127.0.0.1) applied
   via `src/debug/AndroidManifest.xml` overlay; `debugRealHw` source set wired to reuse it. Verified in
   both merged manifests; release stays cleartext-denied. _(move to PROJECT_LOG at next phase log.)_
-- [ ] **7. Phase 8 — `CustomerViewModel` unit tests (disconnect path first).** Awaiting go. Stand up
-  fakes+Turbine; cover 7a-hardening pause/resume/boot-resume first. Open decisions: Log flag vs Logger
-  interface; DAO tests in/out. This is where the app-side watchdog safety claim gets real coverage.
+- [ ] **7. Phase 8 — `CustomerViewModel` unit tests.** Awaiting go. Stand up fakes+Turbine. **Scope
+  narrowed 2026-07-08:** the disconnect pause/resume path was removed (see #2 note / OQ #21), so the
+  first targets are now **boot-resume of the dispensing states** + the litre-cutoff/completion paths
+  (pre-pay, USSD, cash-fixed, fill-up shutoff). Open decisions: Log flag vs Logger interface; DAO
+  tests in/out.
 - [ ] **8. Payment feature flows** — activate → persist creds; authorise → Paystack QR; PAID via
   push + 10 s poll; price config fetcher; WorkManager upload job (re-add `workmanager`).
   **Blocked by #3, #4, #6.** Sandbox-testable; live money gated behind the 14-day parallel run.

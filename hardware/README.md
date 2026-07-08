@@ -110,9 +110,16 @@ Open Serial Monitor at **115200 baud** to watch the frames (`BOOT:0*1C`, then `H
 ### Comms-loss heartbeat watchdog (7a-hardening)
 
 - [ ] Serial Monitor shows `PING*10` arriving ~every 1 s once the app is connected.
-- [ ] Authorise a dispense, then **unplug mid-flow** → `D13` LED goes out within ~3 s on its own
-      (the heartbeat stopped, so the watchdog closed the relay).
-- [ ] Replug → app reconnects, re-asserts `RLY:1`, LED relights, litres resume from where they
-      paused (fixed flows) — not from zero.
-- [ ] Force-freeze test (optional, cable still attached): pause the app in the debugger mid-dispense
-      so the heartbeat stops → LED goes out within ~3 s and Serial Monitor shows `ERR:WDOG*64`.
+- [ ] **PRIMARY — app-death watchdog (cable stays attached):** authorise a dispense, then mid-flow
+      `adb shell am force-stop app.balancee.smartpump.display` (or pause the app in the debugger).
+      USB VBUS keeps the Uno powered — the host supplies 5 V regardless of which app runs — so the
+      board stays alive and the heartbeat stops. → `D13` LED off within ~3 s + Serial Monitor shows
+      `ERR:WDOG*64`. **This is the safety case the deployment relies on** (fixed USB cable in the
+      kiosk means the real hazard is a frozen/crashed app while fuel flows, not a pulled cable).
+- [ ] Secondary/sanity — **unplug mid-flow** → `D13` off. NOTE: on this bus-powered bench Uno,
+      unplugging cuts the board's *power* too, so this mostly proves the relay fails open on power
+      loss, not that the watchdog fired. In production the adapter is UPS-powered and the app-death
+      test above is what exercises the watchdog proper.
+- [ ] Low-priority — replug → app reconnects, `UsbSerialRelayController` re-asserts `RLY:1`, LED
+      relights, litres continue (not from zero). The app-side pause/resume *screen* was removed
+      2026-07-08 (fixed-cable assumption); only the relay-layer re-assert remains for a rare transient.
