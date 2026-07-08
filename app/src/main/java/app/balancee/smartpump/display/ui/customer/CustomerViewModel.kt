@@ -232,25 +232,6 @@ class CustomerViewModel @Inject constructor(
                 setState(restored)
                 startFillupDispensing(restored.txnId)
             }
-
-            is TransactionState.PumpDisconnected -> {
-                // Power cut while paused mid-dispense. Resume the underlying fixed flow toward its
-                // prepaid target; if the cable is still out, the collector re-pauses on the next
-                // Disconnected. pulseBaseline restores litresSoFar within the persist throttle.
-                pulseBaseline = restoredPulses
-                if (restored.flow == TransactionFlow.CASH_FIXED) {
-                    val resumed = restored.toCashFixedDispensing()
-                    setState(resumed)
-                    startCashFixedDispensing(resumed.litresCutoff, resumed.cashAmountKobo, resumed.txnId)
-                } else {
-                    val resumed = restored.toFixedDispensing()
-                    setState(resumed)
-                    startDispensing(
-                        resumed.litresAuthorised,
-                        resumed.method ?: deriveMethodForFlow(resumed.flow),
-                    )
-                }
-            }
         }
     }
 
@@ -286,7 +267,6 @@ class CustomerViewModel @Inject constructor(
         is TransactionState.FillupTankFull -> state.txnId
         is TransactionState.FillupDigitalAwaitingPayment -> state.txnId
         is TransactionState.FillupAwaitingCashConfirm -> state.txnId
-        is TransactionState.PumpDisconnected -> state.txnId
         is TransactionState.Complete -> state.txnId
         else -> null
     }
@@ -689,22 +669,7 @@ class CustomerViewModel @Inject constructor(
             try {
                 pulseSource.observe().collect { msg ->
                     when (msg) {
-                        // 7a-hardening: mid-dispense cable yank during a cash-fixed sale. Same
-                        // pause/auto-resume contract as the pre-pay/USSD collector above.
-                        is PulseMessage.Disconnected ->
-                            (currentState() as? TransactionState.CashFixedDispensing)?.let {
-                                setState(it.toDisconnected())
-                            }
-
-                        is PulseMessage.Heartbeat ->
-                            (currentState() as? TransactionState.PumpDisconnected)?.let {
-                                setState(it.toCashFixedDispensing())
-                            }
-
                         is PulseMessage.Pulse -> {
-                            (currentState() as? TransactionState.PumpDisconnected)?.let {
-                                setState(it.toCashFixedDispensing())
-                            }
                             val current = currentState() as? TransactionState.CashFixedDispensing
                                 ?: return@collect
                             val cumulativePulses = pulseBaseline + msg.count
@@ -731,6 +696,12 @@ class CustomerViewModel @Inject constructor(
                             }
                         }
 
+                        // The USB cable is fixed in the kiosk, so the app no longer models a
+                        // disconnect/pause state. Comms-loss safety still holds on the adapter's own
+                        // dead-man watchdog (relay fails closed when the PING heartbeat stops); on a
+                        // genuine transient the relay controller re-asserts RLY:1 and counting resumes.
+                        is PulseMessage.Heartbeat,
+                        is PulseMessage.Disconnected,
                         is PulseMessage.ParseError -> Unit
                     }
                 }
@@ -936,25 +907,7 @@ class CustomerViewModel @Inject constructor(
             try {
                 pulseSource.observe().collect { msg ->
                     when (msg) {
-                        // 7a-hardening: mid-dispense cable yank. Pause — keep the collector alive
-                        // and the relay intent on so the §2 keepalive re-energises the board on
-                        // reconnect; the customer prepaid, so never bill the partial litresSoFar.
-                        is PulseMessage.Disconnected ->
-                            (currentState() as? TransactionState.FixedDispensing)?.let {
-                                setState(it.toDisconnected())
-                            }
-
-                        // Link alive again (heartbeat before fuel resumes) → flip UI back to
-                        // dispensing; counting continues on the next pulse.
-                        is PulseMessage.Heartbeat ->
-                            (currentState() as? TransactionState.PumpDisconnected)?.let {
-                                setState(it.toFixedDispensing())
-                            }
-
                         is PulseMessage.Pulse -> {
-                            (currentState() as? TransactionState.PumpDisconnected)?.let {
-                                setState(it.toFixedDispensing())
-                            }
                             val current = currentState() as? TransactionState.FixedDispensing
                                 ?: return@collect
                             val cumulativePulses = pulseBaseline + msg.count
@@ -981,6 +934,12 @@ class CustomerViewModel @Inject constructor(
                             }
                         }
 
+                        // The USB cable is fixed in the kiosk, so the app no longer models a
+                        // disconnect/pause state. Comms-loss safety still holds on the adapter's own
+                        // dead-man watchdog (relay fails closed when the PING heartbeat stops); on a
+                        // genuine transient the relay controller re-asserts RLY:1 and counting resumes.
+                        is PulseMessage.Heartbeat,
+                        is PulseMessage.Disconnected,
                         is PulseMessage.ParseError -> Unit
                     }
                 }
@@ -1042,54 +1001,6 @@ class CustomerViewModel @Inject constructor(
             transactionRef = txnId,
             attendantId = attendantId,
             attendantNote = null,
-        )
-
-    // ---- 7a-hardening: FIXED-flow disconnect snapshots ----------------------------
-    // PumpDisconnected carries everything needed to rebuild the dispensing state so a reconnect
-    // (or power-cut resume) continues toward the prepaid target instead of freezing. The live
-    // collector keeps its session pulse count across a reconnect, so resume needs no baseline
-    // surgery — just flip the state back.
-
-    private fun TransactionState.FixedDispensing.toDisconnected() =
-        TransactionState.PumpDisconnected(
-            flow = flow,
-            txnId = txnId,
-            priceKoboPerLitre = priceKoboPerLitre,
-            amountKobo = amountKobo,
-            litresTarget = litresAuthorised,
-            litresSoFar = litresSoFar,
-            method = method,
-        )
-
-    private fun TransactionState.CashFixedDispensing.toDisconnected() =
-        TransactionState.PumpDisconnected(
-            flow = TransactionFlow.CASH_FIXED,
-            txnId = txnId,
-            priceKoboPerLitre = priceKoboPerLitre,
-            amountKobo = cashAmountKobo,
-            litresTarget = litresCutoff,
-            litresSoFar = litresSoFar,
-            method = null,
-        )
-
-    private fun TransactionState.PumpDisconnected.toFixedDispensing() =
-        TransactionState.FixedDispensing(
-            flow = flow,
-            txnId = txnId,
-            priceKoboPerLitre = priceKoboPerLitre,
-            amountKobo = amountKobo,
-            litresAuthorised = litresTarget,
-            litresSoFar = litresSoFar,
-            method = method,
-        )
-
-    private fun TransactionState.PumpDisconnected.toCashFixedDispensing() =
-        TransactionState.CashFixedDispensing(
-            txnId = txnId,
-            priceKoboPerLitre = priceKoboPerLitre,
-            cashAmountKobo = amountKobo,
-            litresCutoff = litresTarget,
-            litresSoFar = litresSoFar,
         )
 
     private fun cancelInFlightJobs() {

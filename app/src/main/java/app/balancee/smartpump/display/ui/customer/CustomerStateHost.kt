@@ -173,15 +173,6 @@ fun CustomerStateHost(
             modifier = modifier,
         )
 
-        is TransactionState.PumpDisconnected -> PumpDisconnectedScreen(
-            litresSoFar = state.litresSoFar,
-            litresTarget = state.litresTarget,
-            priceKoboPerLitre = state.priceKoboPerLitre,
-            txnId = state.txnId,
-            onCancel = onCancel,
-            modifier = modifier,
-        )
-
         is TransactionState.Complete -> CompleteScreen(
             flow = state.flow,
             txnId = state.txnId,

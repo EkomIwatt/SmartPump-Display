@@ -31,9 +31,13 @@ _Last updated: 2026-07-04_
 
 - [ ] **2. Uno bench re-run of 7a-hardening, then merge → `main`.** Waiting on the Arduino. Run the
   `hardware/README.md` "Comms-loss heartbeat watchdog" checklist (PING ~1/s; unplug mid-fixed-dispense
-  → relay off within ~3 s; replug → `RLY:1` re-assert → resume from where it paused, not zero). A
+  → relay off within ~3 s; replug → `RLY:1` re-assert → counting resumes toward target, not zero). A
   classic ESP32 (WROOM/CP2102 or CH340) can substitute with a ported sketch (remap off GPIO6–11,
   `IRAM_ATTR` ISR, `LED_BUILTIN`=GPIO2, 3.3 V). Merging closes the last gate on OQ #21.
+  **Note (2026-07-08):** the app-side `PumpDisconnected` pause/resume UX was **removed** (fixed-cable
+  assumption; see OQ #21 revision). This bench run now only exercises the *firmware watchdog* +
+  *reconnect re-assert* — there is no longer a "disconnected" screen; the dispensing screen just
+  continues after the replug. Build stays green (both `debug` + `debugRealHw` compile).
 - [ ] **10. Verify `KeystorePumpCredentialsStore` crypto on a device** (instrumented test). AES-GCM
   KeyStore can't run in local JVM. androidTest: save→current round-trip, persistence across a fresh
   instance, `clear()` wipe, corrupt-blob/invalidated-key → null fallback. Needs emulator/device

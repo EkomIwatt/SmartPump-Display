@@ -158,3 +158,40 @@ but that flow (for stations with no internet) is only **deferred to a future upd
 Build the network client layer (Retrofit/OkHttp + the outbound HMAC signing interceptor) as the
 Phase 7c/7e foundation — the one piece safe to build before the boss ratifies the reference, since
 the signing scheme is fully specified and unit-testable offline.
+
+---
+
+### 7a-hardening follow-up — remove app-side disconnect pause/resume (keep firmware watchdog)
+**Date:** 2026-07-08
+**Status:** done
+**Commit(s):** uncommitted (this entry committed alongside the change)
+
+**Summary (plain language):**
+The "pump disconnected" pause-and-resume screen — added in the 7a-hardening work so a mid-fill USB
+cable-yank would hold the sale and resume where it left off — was causing recurring bugs. We're now
+building on the assumption that **the USB cable is fixed in the kiosk** (it can't be yanked) and the
+only real failure is a power cut, which the UPS covers. So that whole app-side "disconnected" state
+and its screen were removed to simplify things. Crucially, the **safety cut-off stays**: the Arduino
+still stops the pump on its own if it stops hearing from the tablet (e.g. the app freezes while fuel
+is flowing) — a fixed cable does nothing to prevent that, so the backstop had to remain. A genuine
+brief USB glitch also still self-heals and keeps counting; the customer just sees the normal
+dispensing screen pause a moment instead of a dedicated "disconnected" screen.
+
+**Technical notes:**
+- Removed `TransactionState.PumpDisconnected`, `PumpDisconnectedScreen.kt` (deleted), and its
+  branches in `CustomerStateHost`, `StateColors.borderColor()`, and `CustomerViewModel`
+  (boot-resume, `txnRefFor`, both dispensing collectors, the four `to*/toDisconnected` mappers).
+  The pre-pay/USSD/cash-fixed collectors now no-op `PulseMessage.Disconnected`/`Heartbeat`
+  (the `PulseMessage` types are retained — they still map real wire events).
+- **Kept untouched:** `UsbSerialConnection`'s outbound `PING` heartbeat (feeds the firmware
+  dead-man watchdog), `UsbSerialRelayController`'s down→up reconnect `RLY:1` re-assert, and the
+  Arduino sketch. Comms-loss *safety* is therefore unchanged; only the disconnect *screen/pause* is gone.
+- Backward-compat: a device persisted mid-`pump_disconnected` across this upgrade fails to
+  deserialise and falls back to `Idle` on boot (same graceful path as the kobo migration).
+- Verified green: `:app:compileDebugKotlin` and `:app:compileDebugRealHwKotlin` both BUILD SUCCESSFUL.
+- Docs reconciled: `OPEN_QUESTIONS.md` #21 got a dated revision (parts 1–2 kept, part 3 removed);
+  `TODO.md` #2 bench checklist updated (watchdog + reconnect only, no pause/resume).
+
+**Next:**
+Unchanged — Uno bench re-run of the firmware watchdog + reconnect re-assert, then merge
+`feature/phase-7a-hardening` → `main`. Then Phase 8 (CustomerViewModel unit tests).
