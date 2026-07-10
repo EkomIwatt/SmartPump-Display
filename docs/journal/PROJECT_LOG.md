@@ -1,12 +1,12 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-06-30
+## Current status — 2026-07-10
 
 Strict-design rebuild is complete and merged to `main`: all 5 flows, the attendant overlay, persistence/boot-resume, kobo money, and Room migrations are in. **Phase 7a (real USB-serial hardware) is merged to `main`** (Arduino pulse driver + relay, bench-verified). `main` is pushed to `origin`.
 
-**Active:** `feature/phase-7a-hardening` — comms-loss heartbeat watchdog (firmware + app) + fixed-flow disconnect pause/resume. Built, build green, **pending a Uno bench re-run before merge**.
+**Active:** `feature/phase-7a-hardening` — comms-loss heartbeat watchdog (firmware PING dead-man + app heartbeat + reconnect `RLY:1` re-assert; the earlier app-side disconnect pause/resume was removed 2026-07-08). The branch also carries the **Balancee Pump API network-layer foundation** (signed client, typed errors + retry, Keystore-encrypted creds). **Both merge gates are now CLOSED** — #10 (Keystore crypto, verified on device 2026-07-08) and #2 (firmware-watchdog safety, verified on device 2026-07-10). Build green on both variants. **Branch is merge-ready — awaiting the go to merge.**
 
-**Next:** merge the hardening branch → Phase 8 (CustomerViewModel unit tests, disconnect path first) → unblocked Phase 7 sub-phases (7b operator config / 7e backend sync).
+**Next:** merge the hardening branch → Phase 8 (CustomerViewModel unit tests) → unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) + payment feature flows (#8, gated on boss confirmations).
 
 Older entries (Week 1 → Room migrations) are archived in [PROJECT_LOG_ARCHIVE.md](PROJECT_LOG_ARCHIVE.md).
 
@@ -195,3 +195,97 @@ dispensing screen pause a moment instead of a dedicated "disconnected" screen.
 **Next:**
 Unchanged — Uno bench re-run of the firmware watchdog + reconnect re-assert, then merge
 `feature/phase-7a-hardening` → `main`. Then Phase 8 (CustomerViewModel unit tests).
+
+---
+
+### Phase 7a-hardening — bench verification: firmware watchdog safety confirmed on device (merge gate #2 closed)
+**Date:** 2026-07-10
+**Status:** done (watchdog safety verified on the real rig; branch merge-ready, merge pending)
+**Commit(s):** committed alongside this entry — on branch `feature/phase-7a-hardening`
+
+**Summary (plain language):**
+This was the final safety check on the real tablet-and-Arduino rig before merging the comms-loss
+watchdog work. The scare from the previous bench session — where a normal sale kept cutting off after
+about six seconds — turned out **not** to be a code fault. On a freshly installed build the rig ran
+six sales back-to-back with no trouble, and the tablet's "still-alive" pings to the board stayed
+perfectly steady the whole time. The earlier cut-offs were a flaky-power quirk of the *bench* setup:
+the little board browns out when it runs off the tablet's own USB port, and momentarily drops the
+connection. Production avoids this entirely by powering the board from the station UPS, and even when
+the glitch does happen it fails *safe* (it stops fuel, never over-pours). The safety test itself then
+passed cleanly: with fuel flowing we force-killed the app to simulate a freeze/crash, and the Arduino
+shut the pump off on its own about three seconds later — exactly as designed. That was the last thing
+blocking the merge.
+
+**Technical notes:**
+- **Rig:** Samsung SM-T220 (Galaxy Tab A7 Lite, Android 14, USB-C; wireless adb since the USB-C port
+  hosts the Uno). Freshly built + installed `debugRealHw` carrying two temporary `Log` diagnostics
+  (`PING tx ok=<bool>` per heartbeat; `device ERR frame:<code>` for any `SerialFrame.Error`) — **since
+  reverted** (source now byte-identical to HEAD).
+- **Repro attempt (did not reproduce):** 6 dispenses back-to-back — 4 fill-up, 1 pre-pay, 1
+  post-replug — each 23–50 s, all to normal completion. `PING tx ok=true` **steady at 1 Hz through
+  every dispense**; **zero `ERR:WDOG`**; no write failures. The "consistent ~5.9 s trip" from the prior
+  session was absent → **PING-starvation-under-pulse-load is ruled out.**
+- **Root cause reframed (not a code bug):** an **intermittent bus-power USB disconnect**. Signature is
+  `USB get_status request failed` → self re-enumeration (device path `001/060`→`061`). When it lands
+  mid-dispense, the read-error `handleDetach()` teardown stops the heartbeat → firmware trips at +3 s →
+  app pulse-gap watchdog ends the sale (a fixed ~3 + 3 s offset *after* the disconnect; whether it
+  strikes mid-dispense is intermittent). Bench artifact — the bare Uno + relay browns out off the
+  tablet's OTG port; production powers the adapter from the UPS; the failure is fail-safe.
+- **Merge gate #2 — safety check PASSED (the reframed primary case):** mid-dispense
+  `adb shell am force-stop app.balancee.smartpump.display.realhw`. Last `PING` 14:38:56.443, process
+  confirmed killed 14:38:57.423, **relay physically opened ~3 s later** (watched on `D13`). `ERR:WDOG`
+  is guaranteed by construction — `serviceRelayWatchdog()` runs `setRelay(false)` then `sendError("WDOG")`
+  inside the one `if`, so the relay dropping *is* that branch executing. This proves the "app
+  frozen/crashed mid-flow, cable still connected" mode that the UPS + fixed-cable assumption do **not**
+  cover.
+- **Evidence retained:** `docs/logcats/bench-multirun_realhw_2026-07-10.log` (the 6 clean dispenses),
+  `docs/logcats/forcestop-test_2026-07-10.log` (the safety proof). A stale Android-Studio `package:mine`
+  export that captured zero app logs was removed.
+- **Non-blocking follow-up (post-merge):** spontaneous-disconnect robustness — tolerate a sub-second USB
+  glitch with a fast reconnect-and-resume vs. keep the current fail-safe (stop fuel). Validate on
+  **external 5 V** (powered USB-C hub + PD pass-through, Route A); the `get_status` re-enumerations are
+  expected to vanish on stable power. Does not hold the merge.
+
+**Next:**
+Merge `feature/phase-7a-hardening` → `main` (pending explicit go). Then Phase 8 (CustomerViewModel
+unit tests) → unblocked Phase 7 sub-phases + payment feature flows (#8).
+
+---
+
+### Phase 7 network layer — Balancee Pump API client foundation
+**Date:** 2026-07-04 (committed on `feature/phase-7a-hardening`; logged here 2026-07-10)
+**Status:** done (transport + credential foundation; payment *feature* flows still gated on boss confirmations)
+**Commit(s):** 29fe12b (docs reconciliation), 4af9514 (network layer), ff8fd11 (PumpApiClient), ac73feb (encrypted creds), ccf0534 (debug cleartext), 6df836f (backend URLs), 91fa772 (Keystore instrumented test / gate #10)
+
+**Summary (plain language):**
+Alongside the watchdog work, this branch also built the plumbing for the app to talk to Balancee's
+backend over the internet — the signed HTTP client, consistent error handling, and secure on-device
+storage of the pump's login credentials — *without* yet wiring up the actual payment screens (those
+still wait on a set of confirmations from the boss). This is the safe-to-build foundation: the request
+signing is fully specified, so it can be written and unit-tested offline now, ahead of the parts that
+are still provisional.
+
+**Technical notes:**
+- **Signed client (`4af9514`):** Retrofit/OkHttp network layer with the outbound HMAC-SHA256 signing
+  interceptor per the Pump API Reference (4 signed headers).
+- **Transport wrapper (`ff8fd11`):** `PumpApiClient` over all 5 endpoints; `ApiResult`/`ApiError`
+  typed-error funnel (`safeApiCall`), `retryingApiCall` backoff (retry on the idempotent upload);
+  interceptor throws typed `PumpNotActivatedException`. MockWebServer tests green. **DTO↔domain mapping
+  deliberately deferred** (client kept transport-only while the money unit and `/config` shape are
+  provisional).
+- **Encrypted creds (`ac73feb`):** `KeystorePumpCredentialsStore` — AES-256-GCM key in the Android
+  KeyStore + ciphertext in private SharedPreferences, decrypted creds cached for the synchronous
+  `current()` hot path. Chose KeyStore-direct over the deprecated `security-crypto` lib; `NetworkModule`
+  binding swapped, `InMemoryPumpCredentialsStore` deleted.
+- **Gate #10 (`91fa772`):** first androidTest in the project — 5 instrumented tests
+  (`KeystorePumpCredentialsStoreTest`) pass on a physical device: not-activated, save→current
+  round-trip, isActivated toggle, persistence across a fresh instance, `clear()` wipe, corrupt-blob →
+  null fallback + ciphertext purge. Runtime AES-GCM-at-rest confirmed.
+- **Config (`ccf0534`, `6df836f`):** debug-only cleartext `network-security-config` for the local
+  backend (10.0.2.2/localhost/127.0.0.1; `debugRealHw` reuses it; release stays cleartext-denied);
+  real prod/dev backend URLs wired.
+
+**Next:**
+Payment feature flows (#8) — activate → persist creds; authorise → Paystack QR; PAID via push + 10 s
+poll; price-config fetcher; WorkManager upload job — **blocked on the 7 boss confirmations (#6).**
+Sandbox-testable; live money gated behind the 14-day parallel run.

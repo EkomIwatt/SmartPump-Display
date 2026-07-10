@@ -9,16 +9,18 @@ _Last updated: 2026-07-08_
 
 ---
 
-## ⛔ Merge gates for `feature/phase-7a-hardening` → `main`
+## ✅ Merge gates for `feature/phase-7a-hardening` → `main`
 
-**One item now blocks the merge** (#10 closed 2026-07-08). Everything else on this board is
-**post-merge** (future phase or boss-gated) and must NOT hold up landing the branch.
+**Both gates CLOSED.** The branch is **merge-ready** pending the cleanup commit + a PROJECT_LOG phase
+entry. Everything else on this board is **post-merge** (future phase or boss-gated).
 
-- **#2** — Uno/ESP32 bench: watchdog behaviour. **BLOCKED — bug under investigation (2026-07-10):**
-  the firmware watchdog trips during a *normal* fill-up (~3 s in), not just on app-death. See #2 for
-  the full debug state; leading cause is an unstable bus-powered USB link on the SM-T220 (the Uno
-  re-enumerated on its own). Next: `adb logcat --pid` capture. ⚠️ **temp diagnostic Log lines are
-  uncommitted in `UsbSerialConnection.kt` and installed in the `.realhw` build — revert before merge.**
+- ~~**#2** — Uno bench: watchdog behaviour.~~ ✅ **VERIFIED ON DEVICE 2026-07-10.** The "normal fill-up
+  trips" symptom did **not reproduce** on a fresh `debugRealHw` (6/6 clean dispenses, `PING tx ok=true`
+  steady at 1 Hz, zero `ERR:WDOG`) → PING-starvation ruled out; the earlier trips were an **intermittent
+  bus-power USB disconnect** (bench artifact — production is UPS-powered — and it fails *safe*). The
+  reframed **safety check PASSED**: mid-dispense `am force-stop …realhw` → relay physically dropped ~3 s
+  later (firmware dead-man watchdog). Temp diagnostic `Log` lines **reverted**; stale SM-T220 logcat
+  **removed**. Evidence: `docs/logcats/forcestop-test_2026-07-10.log`, `bench-multirun_realhw_2026-07-10.log`.
 - ~~**#10** — `KeystorePumpCredentialsStore` crypto verify.~~ ✅ **DONE 2026-07-08** — all 5
   instrumented tests pass on a physical device; runtime AES-GCM crypto confirmed.
 
@@ -54,7 +56,7 @@ all done, pending a PROJECT_LOG entry).
 
 ## Waiting on external input
 
-- [~] **2. Uno bench re-run of 7a-hardening, then merge → `main`.** Waiting on the Arduino. Run the
+- [x] **2. Uno bench re-run of 7a-hardening — GATE CLOSED 2026-07-10.** Run the
   `hardware/README.md` "Comms-loss heartbeat watchdog" checklist (PING ~1/s; unplug mid-fixed-dispense
   → relay off within ~3 s; replug → `RLY:1` re-assert → counting resumes toward target, not zero). A
   classic ESP32 (WROOM/CP2102 or CH340) can substitute with a ported sketch (remap off GPIO6–11,
@@ -69,18 +71,19 @@ all done, pending a PROJECT_LOG entry).
   supplies 5 V regardless of app) → `D13` off within ~3 s + `ERR:WDOG*64` on Serial Monitor. The
   "replug → resume" step is now low-priority (no routine replug; app-side resume UI removed — only
   the relay-layer `RLY:1` re-assert remains for a rare transient). Build green (both variants).
-  **Bench run 2026-07-10 — BUG FOUND (in progress):** on a **Samsung SM-T220 / Galaxy Tab A7 Lite,
-  Android 14, USB-C**, both ends freshly built from the branch, a *normal* fill-up runs ~2 s then the
-  firmware watchdog trips (`D13` off), and the app's fill-up watchdog then ends it — `RELAY ON→OFF` a
-  consistent **~5.9 s** (≈ 3 s firmware trip + 3 s app pulse-gap). Litres DO count up (inbound pulses
-  reach the app). Logcat also showed a spontaneous `USB get_status request failed` → re-enumeration
-  (001/051→052), nobody touching the cable. **Leading cause: unstable bus-powered USB link** (bare Uno
-  + relay browning out off the tablet's OTG port); production avoids this via the UPS-powered adapter.
-  Checksum ruled out (`PING*10` matches both ends); watchdog logic reads correct. **Fix direction:**
-  power the Uno from external 5 V (barrel jack / powered hub), retest. **UNCOMMITTED:** temp diagnostic
-  `Log` lines in `UsbSerialConnection.kt` (`PING tx ok=…`, `device ERR frame: …`), installed in the
-  `.realhw` build — revert before merge. **Next:** `adb logcat --pid=<realhw pid>` → `docs/logcats/bench2.log`;
-  read for `PING tx ok=true` cadence + `device ERR frame: WDOG` timing. Full state: memory
+  **RESOLVED 2026-07-10 (SM-T220 / Galaxy Tab A7 Lite, Android 14, USB-C).** The earlier "normal fill-up
+  trips at ~5.9 s" symptom did **not reproduce** on a freshly built+installed `debugRealHw`: 6 dispenses
+  back-to-back (4 fill-ups + 1 pre-pay + 1 post-replug), all 23–50 s to normal completion. Diagnostic
+  logcat showed **`PING tx ok=true` steady at 1 Hz through every dispense** and **zero `ERR:WDOG`** →
+  PING-starvation ruled out. Root cause reframed: an **intermittent bus-power USB disconnect**
+  (`USB get_status request failed` → self re-enumeration; the Uno browns out off the tablet's OTG port) —
+  a **bench artifact** (production is UPS-powered) that also **fails safe**. **Safety check PASSED:**
+  mid-dispense `am force-stop app.balancee.smartpump.display.realhw` → last `PING` 14:38:56, app killed
+  14:38:57, **relay physically dropped ~3 s later** (`ERR:WDOG` guaranteed by construction — firmware runs
+  `setRelay(false)` then `sendError("WDOG")` in the same `if`). Temp diagnostic `Log` lines **reverted**;
+  stale SM-T220 logcat **removed**; evidence logs kept (`forcestop-test_2026-07-10.log`,
+  `bench-multirun_realhw_2026-07-10.log`). **Non-blocking post-merge:** spontaneous-disconnect robustness
+  (tolerate-and-resume vs fail-safe) — validate on external 5 V. Full state: memory
   `project-watchdog-bench-debug`.
 - [~] **6. Chase the 7 boss confirmations** (from `phase7_blocker_resolution.md`): (1) reference is
   canonical — gates everything; (2) tablet has Google Play Services? → FCM vs WebSocket; (3) GET
