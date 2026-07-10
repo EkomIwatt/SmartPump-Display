@@ -668,30 +668,41 @@ class CustomerViewModel @Inject constructor(
             relay.startFuelFlow()
             try {
                 pulseSource.observe().collect { msg ->
-                    if (msg !is PulseMessage.Pulse) return@collect
-                    val current = currentState() as? TransactionState.CashFixedDispensing
-                        ?: return@collect
-                    val cumulativePulses = pulseBaseline + msg.count
-                    val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
-                    if (litres >= litresCutoff) {
-                        relay.stopFuelFlow()
-                        completeAndRecord(
-                            TransactionState.Complete(
-                                flow = TransactionFlow.CASH_FIXED,
-                                txnId = txnId,
-                                litres = litresCutoff,
-                                amountKobo = cashAmountKobo,
-                                method = null,
-                            )
-                        )
-                        return@collect
-                    }
-                    setState(current.copy(litresSoFar = litres))
-                    if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
-                        lastPersistAtPulses = cumulativePulses
-                        runCatching {
-                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                    when (msg) {
+                        is PulseMessage.Pulse -> {
+                            val current = currentState() as? TransactionState.CashFixedDispensing
+                                ?: return@collect
+                            val cumulativePulses = pulseBaseline + msg.count
+                            val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
+                            if (litres >= litresCutoff) {
+                                relay.stopFuelFlow()
+                                completeAndRecord(
+                                    TransactionState.Complete(
+                                        flow = TransactionFlow.CASH_FIXED,
+                                        txnId = txnId,
+                                        litres = litresCutoff,
+                                        amountKobo = cashAmountKobo,
+                                        method = null,
+                                    )
+                                )
+                                return@collect
+                            }
+                            setState(current.copy(litresSoFar = litres))
+                            if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
+                                lastPersistAtPulses = cumulativePulses
+                                runCatching {
+                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                                }
+                            }
                         }
+
+                        // The USB cable is fixed in the kiosk, so the app no longer models a
+                        // disconnect/pause state. Comms-loss safety still holds on the adapter's own
+                        // dead-man watchdog (relay fails closed when the PING heartbeat stops); on a
+                        // genuine transient the relay controller re-asserts RLY:1 and counting resumes.
+                        is PulseMessage.Heartbeat,
+                        is PulseMessage.Disconnected,
+                        is PulseMessage.ParseError -> Unit
                     }
                 }
             } finally {
@@ -895,30 +906,41 @@ class CustomerViewModel @Inject constructor(
             relay.startFuelFlow()
             try {
                 pulseSource.observe().collect { msg ->
-                    if (msg !is PulseMessage.Pulse) return@collect
-                    val current = currentState() as? TransactionState.FixedDispensing
-                        ?: return@collect
-                    val cumulativePulses = pulseBaseline + msg.count
-                    val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
-                    if (litres >= litresAuthorised) {
-                        relay.stopFuelFlow()
-                        completeAndRecord(
-                            TransactionState.Complete(
-                                flow = current.flow,
-                                txnId = current.txnId,
-                                litres = litresAuthorised,
-                                amountKobo = current.amountKobo,
-                                method = method,
-                            )
-                        )
-                        return@collect
-                    }
-                    setState(current.copy(litresSoFar = litres))
-                    if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
-                        lastPersistAtPulses = cumulativePulses
-                        runCatching {
-                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                    when (msg) {
+                        is PulseMessage.Pulse -> {
+                            val current = currentState() as? TransactionState.FixedDispensing
+                                ?: return@collect
+                            val cumulativePulses = pulseBaseline + msg.count
+                            val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
+                            if (litres >= litresAuthorised) {
+                                relay.stopFuelFlow()
+                                completeAndRecord(
+                                    TransactionState.Complete(
+                                        flow = current.flow,
+                                        txnId = current.txnId,
+                                        litres = litresAuthorised,
+                                        amountKobo = current.amountKobo,
+                                        method = method,
+                                    )
+                                )
+                                return@collect
+                            }
+                            setState(current.copy(litresSoFar = litres))
+                            if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
+                                lastPersistAtPulses = cumulativePulses
+                                runCatching {
+                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                                }
+                            }
                         }
+
+                        // The USB cable is fixed in the kiosk, so the app no longer models a
+                        // disconnect/pause state. Comms-loss safety still holds on the adapter's own
+                        // dead-man watchdog (relay fails closed when the PING heartbeat stops); on a
+                        // genuine transient the relay controller re-asserts RLY:1 and counting resumes.
+                        is PulseMessage.Heartbeat,
+                        is PulseMessage.Disconnected,
+                        is PulseMessage.ParseError -> Unit
                     }
                 }
             } finally {

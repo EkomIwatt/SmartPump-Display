@@ -1,44 +1,8 @@
-# SmartPump Display — Project Log
+# SmartPump Display — Project Log (ARCHIVE)
 
-## Prompt for Claude
-
-> **After completing any project phase (or any meaningful unit of work the user labels a "phase", "stage", "run", or "milestone"), append a new entry to this file before ending the turn.**
->
-> Each entry must follow the template under "Entry template" below. Keep the tone plain and non-technical in the **Summary** section so a non-engineer can follow along; put technical specifics in **Technical notes**.
->
-> Rules:
-> - Add new entries at the **bottom** of the log, under the "Entries" section. Never rewrite or delete previous entries — the log is append-only history.
-> - Use the real date from the environment context (do not guess).
-> - Reference commit hashes when the phase was committed; write "uncommitted" if it was not.
-> - If a phase was abandoned or rolled back, still log it and say so — do not silently drop it.
-> - Do not log routine tweaks, single-file fixes, or in-progress work. Only completed phases/milestones.
-> - If the user explicitly says "don't log this," skip the entry for that turn.
+Older completed entries, relocated verbatim from `PROJECT_LOG.md` during the 2026-06-30 docs cleanup — **Week 1 through Room migrations** (everything before Phase 7a). This honours the append-only rule: nothing was rewritten or deleted, only moved out of the active log. The live log (Phase 7a onward) is `PROJECT_LOG.md`.
 
 ---
-
-## Entry template
-
-```
-### Phase N — <short title>
-**Date:** YYYY-MM-DD
-**Status:** done | partial | rolled back
-**Commit(s):** <hash> or "uncommitted"
-
-**Summary (plain language):**
-<2–4 sentences a non-engineer can follow. What can the app now do that it couldn't before?>
-
-**Technical notes:**
-- <key change 1>
-- <key change 2>
-- <gotchas, dependencies added, decisions made>
-
-**Next:**
-<what the next phase is expected to cover, if known>
-```
-
----
-
-## Entries
 
 ### Week 1 — Phases 1–5: App shell end-to-end on mock stack
 **Date:** 2026-05-08
@@ -942,27 +906,3 @@ The app's local database (which holds the station's identity + PIN, the transact
 
 **Next:**
 First real migration is whenever an entity next changes: bump to `version = 3`, build to emit `3.json`, add `MIGRATION_2_3` to `SmartPumpMigrations.ALL`, and add the matching `MigrationTestHelper` test. Decide whether to merge `feature/room-migrations`. Last deferred infra item: R8/minify for release.
-
-### Phase 7a — Hardware: real USB-serial pulse driver + relay (bench-verified)
-**Date:** 2026-06-11
-**Status:** done (happy path bench-verified; one disconnect-robustness gap logged for follow-up)
-**Commit(s):** 97f310d (plan), 122e1b0 (parser + tests), 32acf20 (driver + build type), a7b8fef (Arduino sketch); merged to `main` from `feature/phase-7a-hardware`
-
-**Summary (plain language):**
-The app can now run a real fuel dispense off actual hardware, not just the simulator. We wrote the firmware for an Arduino (the little board that will sit between the pump's pulse sensor and the tablet), and the Android side that talks to it over the USB cable. On the bench with an Arduino Uno: starting a transaction opens the pump (the board's light comes on), the litres count up as real electrical pulses arrive, and finishing the sale closes the pump (light goes off). Both directions were confirmed. The whole thing is built as a separate "real-hardware" version of the app that installs alongside the normal simulator version, so the boss demo has a rock-solid fallback — if the rig ever misbehaves, you just open the other app. The boss demo can show genuine hardware dispensing.
-
-One rough edge found during testing and deliberately deferred (see Known limitation): if you yank the USB cable in the *middle* of a pre-pay dispense, the screen freezes instead of recovering cleanly. The fill-up flow handles this fine; the fixed-amount flows don't yet. Not a demo issue (you don't unplug mid-sale on purpose), but it's the next thing to harden.
-
-**Technical notes:**
-- **Pure core (`122e1b0`):** `data/hardware/serial/SerialFrameParser` (stateless line → typed `SerialFrame`; validates the `TYPE:<cum>*<cs>` framing + XOR-8 checksum, never throws) and `PulseAccumulator` (stateful cumulative→delta: dropped lines self-heal off the running count, BOOT re-baselines, backward jumps re-sync to 0 so no negative delta reaches the litre maths). 19 unit tests; checksums hand-computed as golden vectors (the framing doc's illustrative `PULSE:0042817*7C` is wrong — real XOR-8 is `5D`).
-- **Driver (`32acf20`):** `UsbSerialConnection` (@Singleton owner of the one physical port via mik3y `usb-serial-for-android` 3.8.0 — single read loop, line-buffers to `\n`, parses, republishes typed frames on a hot `SharedFlow`; `writeLine()` for relay; `connected` StateFlow; USB permission via runtime `requestPermission` + persistent grant through the manifest attach filter; non-zero read timeout so writes aren't starved). `UsbSerialPulseSource` is a cold `observe()` per dispense that resets the session count on each relay-open and runs `PulseAccumulator` — so the VM's `pulseBaseline + msg.count` maths is unchanged (true drop-in for the mock). `UsbSerialRelayController` writes `RLY:1`/`RLY:0` (XOR-8 framed), optimistic `isDispensing` always cleared on stop so a failed write can't strand the app believing fuel still flows.
-- **Wiring/build (`32acf20`):** `HardwareModule` switched from `@Binds` mocks to `@Provides` + `Provider`, branching on `BuildConfig.MOCK_HARDWARE` so only the selected impl is instantiated. New `debugRealHw` build type (`initWith` debug, `applicationIdSuffix .realhw`, `MOCK_HARDWARE=false`) installs alongside the mock `debug` app. Manifest gained the `USB_DEVICE_ATTACHED` intent-filter + `res/xml/usb_device_filter.xml` (Arduino/CH340/FTDI/CP210x vendors) for auto-launch + persistent permission.
-- **Firmware (`a7b8fef`):** `hardware/smartpump_pulse_adapter/*.ino` — emits `BOOT` at power-up (relay asserted OFF first → upholds relay-open-on-boot), `HB` ~2s when idle, throttled `PULSE` carrying the free-running cumulative; reads checksum-validated `RLY:1`/`RLY:0` to drive the relay pin and mirrors state on the onboard `D13` LED (so a bare Uno demos with no extra parts). Meter-free demo synthesises pulses while dispensing (`AUTO_PPS=50` ≈ 30 L/min); optional button + real-meter-on-INT0 paths included. `hardware/README.md` has protocol, worked checksums, wiring, flashing, and the bench checklist.
-- **Bench result (2026-06-11):** Uno flashed; `BOOT`/`HB` seen on serial. `debugRealHw` installed; USB permission granted. Fill-up before plug-in → no count (correct); after plug-in → litres count (correct). Relay confirmed both directions via the onboard `D13` LED: `RLY:1` lit it on authorise, normal completion sent `RLY:0` and cleared it. Fill-up unplug-mid-dispense → flow-gap watchdog moved to amount-due (correct).
-- Both variants compile; lint clean; serial unit tests green. `main`'s mock demo path is unchanged.
-
-**Known limitation (deferred to a 7a-hardening pass):**
-- A mid-dispense USB disconnect is **not handled gracefully in the fixed-dispensing flows** (pre-pay, cash-fixed, USSD). Fill-up has a 3s flow-gap watchdog and recovers; the fixed flows have none, so a yank freezes `FixedDispensing` (litres stop, screen holds) instead of moving to a safe state. Reconnect resumes but stutters — leading suspects: the Uno reboots to relay-OFF on replug while the app still believes `isDispensing` (no `RLY:1` re-assert), the `USB_DEVICE_ATTACHED` filter may relaunch the activity, and `PulseMessage.Disconnected` is ignored in the fixed collector. Needs logcat to pin the exact sequence. Tracked in `OPEN_QUESTIONS` (mid-dispense link loss); relates to OQ #3 (relay-on-boot) and #7 (relay closing late). **Not a demo blocker** — only triggers on a deliberate cable-pull mid-sale.
-
-**Next:**
-After the demo: 7a-hardening — add disconnect handling to the fixed-dispensing flows (a watchdog and/or an explicit "pump disconnected — reconnect" state) and a reconnect-mid-dispense relay/session re-assert policy; capture logcat from a repro first. Then resume the Phase 7 sub-phases by external-blocker availability (7b operator config / 7e backend sync are the unblocked first movers).

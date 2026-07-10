@@ -4,6 +4,22 @@ Five flows, all share the same hardware. The Android app drives the difference.
 
 Authoritative visuals: `docs/Strict design screens/*.png`.
 
+> **⚠️ 2026-07-03 — digital-payment model inverted (pending boss ratification).**
+> The Pump API Reference (`docs/phase7_blocker_resolution.md`) replaces the **webhook-receiver**
+> model used in Flows 1 and 3 below. The pump no longer *receives* `POST /pump/authorise`; it is now
+> the **initiator** — it calls `POST /api/pump/authorise` outbound, gets a **Paystack** `authorizationUrl`
+> back, renders that as the QR, and learns of payment via **push + 10s poll** on
+> `GET /api/pump/transactions/{id}` (not a webhook). Consequences for the text below:
+> - "Relay closes on webhook" / "webhook received" (Flows 1, 3) → becomes "on PAID confirmation
+>   (push or poll)".
+> - The Flow 3 "dynamic NIP transfer QR to the station virtual account" is **gone** — the QR is a
+>   Paystack checkout URL; no virtual account (OQ #6).
+> - "NFC / Tap card" and the whole "Webhook contract summary" section are superseded.
+>
+> These flow bodies are **left as-is** until the reference is confirmed canonical (their item 1);
+> treat the banner as the authority where they disagree. Flow 2 (cash) and Flow 4 (cash-fixed) are
+> unaffected. Flow 5 is **deferred** — see its section.
+
 ---
 
 ## Idle + Mode Select (entry point for customer-initiated flows)
@@ -137,6 +153,11 @@ Round **down** — never dispense more than the customer paid for.
 ---
 
 ## Flow 5 — USSD Offline
+
+> **⚠️ DEFERRED to a future update (2026-07-03) — not dropped.** This is the genuinely *offline*
+> path (no internet at the pump; pay via bank USSD; confirmation via parsed SMS). It is **not**
+> replaced by Paystack USSD, which needs connectivity. Per the boss it ships in a future update, so
+> the flow and its states stay documented but are out of the V1 build cycle. See OQ #9–#12.
 
 > No data. No bank app. Just a 2G phone.
 

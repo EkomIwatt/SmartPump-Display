@@ -14,15 +14,33 @@ uppercase hex digits.
 | device → app | `PULSE:<cum>*<cs>` | a fuel pulse; `<cum>` is the adapter's free-running count |
 | device → app | `HB:<cum>*<cs>` | keep-alive, ~2 s when idle |
 | device → app | `BOOT:<cum>*<cs>` | sent once at power-up (count starts at 0) |
-| device → app | `ERR:<code>*<cs>` | a rejected/garbled inbound command |
-| app → device | `RLY:1*<cs>` | energise relay (fuel on) |
-| app → device | `RLY:0*<cs>` | de-energise relay (fuel off) |
+| device → app | `ERR:<code>*<cs>` | a rejected/garbled inbound command, or `ERR:WDOG` when the comms-loss watchdog auto-closes the relay |
+| app → device | `PING*<cs>` | liveness heartbeat, sent ~every 1 s while the link is up |
+| app → device | `RLY:1*<cs>` | energise relay (fuel on) — one-shot edge command |
+| app → device | `RLY:0*<cs>` | de-energise relay (fuel off) — one-shot edge command |
+
+### Comms-loss heartbeat watchdog (7a-hardening)
+
+The relay is **fail-closed**, and the adapter — **not** the app — is its safety authority. While
+dispensing, the adapter must keep hearing the app's `PING` heartbeat; if none arrives within
+`HEARTBEAT_TIMEOUT_MS` (3 s) it presumes the comms are dead (USB data drop, frozen/crashed
+controller) and closes the relay on its own GPIO. **Lose comms = stop dispensing** — and the adapter
+does *not* need to know `litres_authorised` to do it.
+
+It never re-energises on its own: once tripped, only an explicit `RLY:1` resumes fuel. The app sends
+the heartbeat from `UsbSerialConnection` while the port is open; on reconnect `UsbSerialRelayController`
+re-asserts `RLY:1` (if still mid-dispense) so a brief USB drop self-heals and the prepaid fill resumes.
+
+In **production** the adapter + relay board are powered from the **UPS**, not the tablet's USB, so the
+adapter stays alive to enforce this even when the data link drops. `HEARTBEAT_TIMEOUT_MS` (3 s) is
+≈3× the heartbeat period — normal USB latency never false-trips it, uncontrolled flow stays bounded.
 
 Worked checksums (sanity-check your serial monitor against these):
 
 ```
 PULSE:1        -> 54      HB:0   -> 00      BOOT:0 -> 1C
 PULSE:0042817  -> 5D      RLY:1  -> 4C      RLY:0  -> 4D
+ERR:WDOG       -> 64      PING   -> 10
 ```
 
 > Note: the framing doc's illustrative `PULSE:0042817*7C` is **wrong** — the real XOR-8 is `5D`.
@@ -88,3 +106,20 @@ Open Serial Monitor at **115200 baud** to watch the frames (`BOOT:0*1C`, then `H
 - [ ] End/complete the dispense → LED off (relay `RLY:0` received).
 - [ ] Unplug mid-idle → app shows a disconnect; replug → reconnects (attach filter).
 - [ ] Mock `debug` app still on the tablet as the safety-net demo.
+
+### Comms-loss heartbeat watchdog (7a-hardening)
+
+- [ ] Serial Monitor shows `PING*10` arriving ~every 1 s once the app is connected.
+- [ ] **PRIMARY — app-death watchdog (cable stays attached):** authorise a dispense, then mid-flow
+      `adb shell am force-stop app.balancee.smartpump.display` (or pause the app in the debugger).
+      USB VBUS keeps the Uno powered — the host supplies 5 V regardless of which app runs — so the
+      board stays alive and the heartbeat stops. → `D13` LED off within ~3 s + Serial Monitor shows
+      `ERR:WDOG*64`. **This is the safety case the deployment relies on** (fixed USB cable in the
+      kiosk means the real hazard is a frozen/crashed app while fuel flows, not a pulled cable).
+- [ ] Secondary/sanity — **unplug mid-flow** → `D13` off. NOTE: on this bus-powered bench Uno,
+      unplugging cuts the board's *power* too, so this mostly proves the relay fails open on power
+      loss, not that the watchdog fired. In production the adapter is UPS-powered and the app-death
+      test above is what exercises the watchdog proper.
+- [ ] Low-priority — replug → app reconnects, `UsbSerialRelayController` re-asserts `RLY:1`, LED
+      relights, litres continue (not from zero). The app-side pause/resume *screen* was removed
+      2026-07-08 (fixed-cable assumption); only the relay-layer re-assert remains for a rare transient.

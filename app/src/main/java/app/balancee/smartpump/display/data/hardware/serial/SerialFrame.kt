@@ -1,6 +1,6 @@
 // Typed result of parsing one line of the Arduino pulse-adapter serial protocol.
 //
-// Wire framing (Phase 7a — proposed to Olonade, see docs/specs/PHASE_7_PLAN.md):
+// Wire framing (Phase 7a — proposed to Olonade, see docs/journal/PHASE_7_PLAN.md):
 //   device → app:  PULSE:<cum>*<cs>\n   a fuel pulse; <cum> is the adapter's free-running count
 //                  HB:<cum>*<cs>\n      ~2s keep-alive when idle
 //                  BOOT:<cum>*<cs>\n    sent once on adapter power-up (counter (re)starts)

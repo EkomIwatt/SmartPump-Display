@@ -6,6 +6,12 @@
 // commands are written through writeLine(). Connection liveness is exposed as a StateFlow so
 // the pulse source can surface PulseMessage.Disconnected.
 //
+// 7a-hardening — outbound PING heartbeat: while the port is open this layer sends a framed PING
+// ~every second (app→device liveness). The Arduino runs a comms-loss watchdog that fails the relay
+// closed if the heartbeat stops mid-dispense, so "lose comms = stop dispensing" is enforced on the
+// adapter's own GPIO — it never depends on the relay command being re-sent. On reconnect the relay
+// controller re-asserts RLY:1 to resume (the watchdog never re-energises on its own).
+//
 // Permission: a kiosk normally grants access persistently via the USB_DEVICE_ATTACHED
 // intent-filter (see AndroidManifest + res/xml/usb_device_filter.xml). requestPermission() is
 // the runtime fallback when the device is already attached without a standing grant.
@@ -27,6 +33,13 @@ import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -55,6 +68,13 @@ class UsbSerialConnection @Inject constructor(
     @Volatile private var ioManager: SerialInputOutputManager? = null
     @Volatile private var running = false
     private var receiversRegistered = false
+
+    // App-lifetime scope owning the outbound PING heartbeat (app→device liveness).
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var heartbeatJob: Job? = null
+
+    // Serialises every writeLine() — the heartbeat and the relay commands share one physical port.
+    private val writeLock = Any()
 
     // Read-thread-confined line buffer (only touched in onNewData).
     private val lineBuffer = StringBuilder()
@@ -98,6 +118,7 @@ class UsbSerialConnection @Inject constructor(
             ioManager = manager
             running = true
             _connected.value = true
+            startHeartbeat()
             Log.i(TAG, "USB serial open @ $BAUD 8N1 (${driver.device.deviceName})")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open USB serial port", e)
@@ -105,10 +126,13 @@ class UsbSerialConnection @Inject constructor(
         }
     }
 
-    /** Write one line (a trailing '\n' is appended). Returns false if the link is down. */
-    fun writeLine(line: String): Boolean {
+    /**
+     * Write one line (a trailing '\n' is appended). Returns false if the link is down. Serialised
+     * via [writeLock] so the heartbeat coroutine and relay commands never interleave on the port.
+     */
+    fun writeLine(line: String): Boolean = synchronized(writeLock) {
         val p = port ?: return false
-        return try {
+        try {
             p.write("$line\n".toByteArray(Charsets.US_ASCII), WRITE_TIMEOUT_MS)
             true
         } catch (e: Exception) {
@@ -126,12 +150,29 @@ class UsbSerialConnection @Inject constructor(
         }
         running = false
         _connected.value = false
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         runCatching { ioManager?.stop() }
         runCatching { port?.close() }
         ioManager = null
         port = null
         lineBuffer.setLength(0)
         Log.i(TAG, "USB serial closed")
+    }
+
+    /**
+     * Outbound liveness heartbeat. While the port is open we send a framed PING ~every
+     * [HEARTBEAT_PERIOD_MS]; the Arduino's watchdog fails the relay closed if these stop arriving
+     * mid-dispense (USB data drop / frozen controller). Distinct from the device→app HB frame.
+     */
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                writeLine(HEARTBEAT_FRAME)
+                delay(HEARTBEAT_PERIOD_MS)
+            }
+        }
     }
 
     private val listener = object : SerialInputOutputManager.Listener {
@@ -202,6 +243,11 @@ class UsbSerialConnection @Inject constructor(
         const val READ_TIMEOUT_MS = 200
         const val WRITE_TIMEOUT_MS = 200
         const val MAX_LINE = 512
+
+        // app→device liveness heartbeat (the Arduino watchdog fails the relay closed without it).
+        const val HEARTBEAT_PERIOD_MS = 1_000L
+        val HEARTBEAT_FRAME: String = "PING*%02X".format(SerialFrameParser.xor8("PING"))
+
         val ACTION_USB_PERMISSION: String = "app.balancee.smartpump.display.USB_PERMISSION"
     }
 }
