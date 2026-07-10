@@ -1,0 +1,26 @@
+--------- beginning of main
+07-10 15:10:24.019 I/UsbSerialConn(22696): USB serial open @ 115200 8N1 (/dev/bus/usb/001/064)
+07-10 15:10:24.474 I/UsbSerialRelay(22696): RELAY ON — fuel flowing
+07-10 15:10:28.887 I/UsbSerialRelay(22696): RELAY OFF — fuel stopped
+07-10 15:10:42.103 I/UsbSerialRelay(22696): RELAY ON — fuel flowing
+07-10 15:11:10.124 I/UsbSerialRelay(22696): RELAY OFF — fuel stopped
+07-10 15:11:23.493 I/UsbSerialRelay(22696): RELAY ON — fuel flowing
+07-10 15:11:55.417 I/UsbSerialRelay(22696): RELAY OFF — fuel stopped
+07-10 15:12:07.993 I/UsbSerialRelay(22696): RELAY ON — fuel flowing
+07-10 15:12:23.596 I/UsbSerialRelay(22696): RELAY OFF — fuel stopped
+07-10 15:12:33.855 I/UsbSerialRelay(22696): RELAY ON — fuel flowing
+07-10 15:13:00.517 I/UsbSerialRelay(22696): RELAY OFF — fuel stopped
+07-10 15:13:07.472 W/UsbSerialConn(22696): Serial read error (cable unplugged?)
+07-10 15:13:07.472 W/UsbSerialConn(22696): java.io.IOException: USB get_status request failed
+07-10 15:13:07.472 W/UsbSerialConn(22696): 	at com.hoho.android.usbserial.driver.CommonUsbSerialPort.testConnection(CommonUsbSerialPort.java:180)
+07-10 15:13:07.472 W/UsbSerialConn(22696): 	at com.hoho.android.usbserial.driver.CommonUsbSerialPort.testConnection(CommonUsbSerialPort.java:167)
+07-10 15:13:07.472 W/UsbSerialConn(22696): 	at com.hoho.android.usbserial.driver.CommonUsbSerialPort.read(CommonUsbSerialPort.java:216)
+07-10 15:13:07.472 W/UsbSerialConn(22696): 	at com.hoho.android.usbserial.driver.CommonUsbSerialPort.read(CommonUsbSerialPort.java:192)
+07-10 15:13:07.472 W/UsbSerialConn(22696): 	at com.hoho.android.usbserial.driver.CommonUsbSerialPort.read(CommonUsbSerialPort.java:188)
+07-10 15:13:07.472 W/UsbSerialConn(22696): 	at com.hoho.android.usbserial.util.SerialInputOutputManager.step(SerialInputOutputManager.java:230)
+07-10 15:13:07.472 W/UsbSerialConn(22696): 	at com.hoho.android.usbserial.util.SerialInputOutputManager.run(SerialInputOutputManager.java:204)
+07-10 15:13:07.472 W/UsbSerialConn(22696): 	at java.lang.Thread.run(Thread.java:1564)
+07-10 15:13:07.474 I/UsbSerialConn(22696): USB serial closed
+07-10 15:13:21.509 I/UsbSerialConn(22696): USB serial open @ 115200 8N1 (/dev/bus/usb/001/065)
+07-10 15:13:33.046 I/UsbSerialRelay(22696): RELAY ON — fuel flowing
+07-10 15:13:44.595 I/UsbSerialRelay(22696): RELAY OFF — fuel stopped
