@@ -4,9 +4,9 @@
 
 Strict-design rebuild is complete and merged to `main`: all 5 flows, the attendant overlay, persistence/boot-resume, kobo money, and Room migrations are in. **Phase 7a (real USB-serial hardware) is merged to `main`** (Arduino pulse driver + relay, bench-verified). `main` is pushed to `origin`.
 
-**Active:** `feature/phase-7a-hardening` — comms-loss heartbeat watchdog (firmware PING dead-man + app heartbeat + reconnect `RLY:1` re-assert; the earlier app-side disconnect pause/resume was removed 2026-07-08). The branch also carries the **Balancee Pump API network-layer foundation** (signed client, typed errors + retry, Keystore-encrypted creds). **Both merge gates are now CLOSED** — #10 (Keystore crypto, verified on device 2026-07-08) and #2 (firmware-watchdog safety, verified on device 2026-07-10). Build green on both variants. **Branch is merge-ready — awaiting the go to merge.**
+**`feature/phase-7a-hardening` is MERGED to `main`** (merge commit `9b76f42`; branch deleted) — comms-loss heartbeat watchdog (firmware PING dead-man + app heartbeat + reconnect `RLY:1` re-assert; the earlier app-side disconnect pause/resume was removed 2026-07-08) **plus** the **Balancee Pump API network-layer foundation** (signed client, typed errors + retry, Keystore-encrypted creds). Both merge gates closed before merge — #10 (Keystore crypto, device-verified 2026-07-08) and #2 (firmware-watchdog safety, device-verified 2026-07-10). The boss-facing watchdog safety summary + report shipped on top (`ceef973`, `8b72775`). `main` = `8b72775` = `origin/main` — build green on both variants, nothing outstanding on this line of work.
 
-**Next:** merge the hardening branch → Phase 8 (CustomerViewModel unit tests) → unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) + payment feature flows (#8, gated on boss confirmations).
+**Next:** Phase 8 (CustomerViewModel unit tests) → unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) + payment feature flows (#8, gated on boss confirmations).
 
 Older entries (Week 1 → Room migrations) are archived in [PROJECT_LOG_ARCHIVE.md](PROJECT_LOG_ARCHIVE.md).
 
@@ -249,6 +249,37 @@ blocking the merge.
 **Next:**
 Merge `feature/phase-7a-hardening` → `main` (pending explicit go). Then Phase 8 (CustomerViewModel
 unit tests) → unblocked Phase 7 sub-phases + payment feature flows (#8).
+
+---
+
+### Phase 7a-hardening — merged to `main` + boss watchdog safety deliverable
+**Date:** 2026-07-10
+**Status:** done
+**Commit(s):** `9b76f42` (merge), `ceef973` (safety summary + OQ #22), `8b72775` (report to `/reports`)
+
+**Summary (plain language):**
+With both merge gates closed, the hardening branch was merged into `main` and the branch deleted.
+That folds the comms-loss safety watchdog and the Balancee payment network-layer foundation into the
+mainline. On top of the merge, we produced the boss-facing deliverable that explains the watchdog
+safety story in plain terms — a one-page feature summary and a formatted report (HTML + PDF) now
+living under `/reports`. `main` is pushed; there is nothing left outstanding on the hardware/hardening
+line of work — the next scheduled work is the Phase 8 test harness.
+
+**Technical notes:**
+- **Merge (`9b76f42`):** `feature/phase-7a-hardening` → `main`, no-fast-forward merge commit; source
+  branch deleted (confirmed absent from `git branch -a`). Brings in the full lineage `1f2a3ea …
+  4a10824` (firmware watchdog, PING heartbeat re-key, app-side pause/resume removal, network layer,
+  KeyStore crypto, both gate closures). Build green on `debug` + `debugRealHw`.
+- **Boss deliverable (`ceef973`, `8b72775`):** watchdog safety feature summary written for a
+  non-engineer audience; report moved into `/reports` as an HTML + PDF pair. New open question logged
+  as OQ #22.
+- **State after:** `main` = `origin/main` = `8b72775`. Both merge gates (#2 firmware-watchdog safety,
+  #10 Keystore crypto) verified on device before merge.
+
+**Next:**
+Phase 8 (CustomerViewModel unit tests — disconnect/boot-resume + litre-cutoff paths first), then the
+unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) and the boss-gated payment feature
+flows (#8).
 
 ---
 

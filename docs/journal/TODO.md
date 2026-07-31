@@ -5,14 +5,16 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-07-08_
+_Last updated: 2026-07-10_
 
 ---
 
-## ✅ Merge gates for `feature/phase-7a-hardening` → `main`
+## ✅ `feature/phase-7a-hardening` — MERGED to `main`
 
-**Both gates CLOSED.** The branch is **merge-ready** pending the cleanup commit + a PROJECT_LOG phase
-entry. Everything else on this board is **post-merge** (future phase or boss-gated).
+**Done.** Both gates closed and the branch was **merged** (merge commit `9b76f42`; branch deleted).
+The boss watchdog safety summary + report shipped on top (`ceef973`, `8b72775`). `main` = `origin/main`
+= `8b72775`, build green on both variants. All PROJECT_LOG entries filed. Everything below is
+**post-merge** (future phase or boss-gated).
 
 - ~~**#2** — Uno bench: watchdog behaviour.~~ ✅ **VERIFIED ON DEVICE 2026-07-10.** The "normal fill-up
   trips" symptom did **not reproduce** on a fresh `debugRealHw` (6/6 clean dispenses, `PING tx ok=true`
@@ -24,8 +26,8 @@ entry. Everything else on this board is **post-merge** (future phase or boss-gat
 - ~~**#10** — `KeystorePumpCredentialsStore` crypto verify.~~ ✅ **DONE 2026-07-08** — all 5
   instrumented tests pass on a physical device; runtime AES-GCM crypto confirmed.
 
-Build is green on both variants; the branch also carries the network-layer foundation (#1/#3/#4/#5,
-all done, pending a PROJECT_LOG entry).
+Network-layer foundation (#1/#3/#4/#5) also landed in the merge. **Non-blocking post-merge follow-up:**
+spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validate on external 5 V.
 
 ---
 
