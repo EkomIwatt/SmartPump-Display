@@ -6,7 +6,9 @@ Strict-design rebuild is complete and merged to `main`: all 5 flows, the attenda
 
 **`feature/phase-7a-hardening` is MERGED to `main`** (merge commit `9b76f42`; branch deleted) — comms-loss heartbeat watchdog (firmware PING dead-man + app heartbeat + reconnect `RLY:1` re-assert; the earlier app-side disconnect pause/resume was removed 2026-07-08) **plus** the **Balancee Pump API network-layer foundation** (signed client, typed errors + retry, Keystore-encrypted creds). Both merge gates closed before merge — #10 (Keystore crypto, device-verified 2026-07-08) and #2 (firmware-watchdog safety, device-verified 2026-07-10). The boss-facing watchdog safety summary + report shipped on top (`ceef973`, `8b72775`). `main` = `8b72775` = `origin/main` — build green on both variants, nothing outstanding on this line of work.
 
-**Next:** Phase 8 (CustomerViewModel unit tests) → unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) + payment feature flows (#8, gated on boss confirmations).
+**Phase 8 (CustomerViewModel unit tests) is DONE** on branch `feature/phase-8-vm-tests` (commits `88be743`/`98fa167`/`a128457`) — 23 new pure-JVM tests (money/cutoff, dispensing completion, boot-resume, lifecycle) via hand-written fakes + an `UnconfinedTestDispatcher` rule; test-only bar one build flag. Full suite green at **81 tests**. **Branch awaiting merge to `main`.**
+
+**Next:** merge Phase 8 → unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) + payment feature flows (#8, gated on boss confirmations).
 
 Older entries (Week 1 → Room migrations) are archived in [PROJECT_LOG_ARCHIVE.md](PROJECT_LOG_ARCHIVE.md).
 
@@ -280,6 +282,53 @@ line of work — the next scheduled work is the Phase 8 test harness.
 Phase 8 (CustomerViewModel unit tests — disconnect/boot-resume + litre-cutoff paths first), then the
 unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) and the boss-gated payment feature
 flows (#8).
+
+---
+
+### Phase 8 — CustomerViewModel unit tests (harness + money/dispensing/boot-resume/lifecycle)
+**Date:** 2026-07-31
+**Status:** done
+**Commit(s):** `88be743` (A: infra), `98fa167` (B: harness + money + completion), `a128457` (C: boot-resume + lifecycle) — on branch `feature/phase-8-vm-tests`
+
+**Summary (plain language):**
+The app's highest-risk piece — the ~1,000-line "brain" that runs the money maths, opens and closes
+the pump, and resumes a half-finished sale after a power cut — had no automated tests. It now has 23,
+all passing. They pin down the behaviour that matters: fuel stops exactly at the litres the customer
+paid for (and never over-pours, even on a big pulse jump), amounts too small to buy any fuel are
+refused, the pump is forced closed on start-up, cancelling a sale shuts fuel and wipes the running
+count, and a sale interrupted by a power cut picks up from where it left off rather than restarting or
+double-charging. This is test-only work — no behaviour of the shipping app changed. The full project
+test suite is green at 81 tests.
+
+**Technical notes:**
+- **Purely additive (per the two settled decisions):** the only `src/main` touch is a build flag.
+  `testOptions { unitTests.isReturnDefaultValues = true }` lets the VM's direct `android.util.Log`
+  calls return defaults instead of throwing "not mocked" — chosen over introducing a production
+  `Logger` interface. DAO/Room tests deliberately **deferred** to keep Phase 8 pure-JVM (no
+  Robolectric, no androidTest).
+- **Harness (`CustomerViewModelTestSupport.kt`):** hand-written fakes (no mocking library) for
+  `PulseSource`/`RelayController`/`PaymentProcessor`/`DeviceConfigRepository`/`PulseRepository`/
+  `TransactionRepository`, wired to the **real** `CanStartTransactionUseCase`. A `MainDispatcherRule`
+  pins `Dispatchers.Main` to one `UnconfinedTestDispatcher` (shared `TestCoroutineScheduler`), so
+  `viewModelScope` runs eagerly and assertions read `ui.value` synchronously — **Turbine proved
+  unnecessary** and was not added. Because `init` runs `bootResume()` eagerly, the fakes are seeded
+  **before** `VmHarness.build()`. Test price fixed at `TEST_KOBO_PER_LITRE = 100_000` (₦1000/L) so
+  litres = pulses/100 give round numbers.
+- **Coverage (23 tests):** money/cutoff (cutoff = amount÷price, the floor-to-0.01L
+  never-over-dispense guard, below-minimum → recoverable Error, price-not-set guard, audit-record
+  accuracy); completion (fixed/pre-pay/cash-fixed stop at target, no overrun on a pulse jump, relay
+  closed, correct `Transaction` saved, method recorded); fill-up (open-ended count + nozzle-shutoff →
+  `FillupTankFull` with locked litres/amount); boot-resume (every `bootResume` branch, restarting from
+  the persisted pulse baseline); lifecycle (relay-open-on-boot invariant, cancel teardown, dismiss,
+  prepay expiry auto-cancel via `advanceTimeBy`).
+- **No production bug surfaced** — the tests pin current behaviour and all passed as written. (Had one
+  failed, fixing it would have been a separate flagged change, not folded into a test commit.)
+- **Verification:** `:app:testDebugUnitTest` → **BUILD SUCCESSFUL, 81 tests, 0 failures, 0 errors**
+  (23 new + 58 existing). JBR (Java 21) via `JAVA_HOME`.
+
+**Next:**
+Merge `feature/phase-8-vm-tests` → `main`. Then the unblocked Phase 7 sub-phases (7b operator config /
+7e backend sync) and the boss-gated payment feature flows (#8, pending the 7 boss confirmations).
 
 ---
 

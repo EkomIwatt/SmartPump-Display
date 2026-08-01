@@ -100,11 +100,15 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
   `src/debug/res/xml/network_security_config.xml` (cleartext to 10.0.2.2/localhost/127.0.0.1) applied
   via `src/debug/AndroidManifest.xml` overlay; `debugRealHw` source set wired to reuse it. Verified in
   both merged manifests; release stays cleartext-denied. _(move to PROJECT_LOG at next phase log.)_
-- [ ] **7. Phase 8 — `CustomerViewModel` unit tests.** Awaiting go. Stand up fakes+Turbine. **Scope
-  narrowed 2026-07-08:** the disconnect pause/resume path was removed (see #2 note / OQ #21), so the
-  first targets are now **boot-resume of the dispensing states** + the litre-cutoff/completion paths
-  (pre-pay, USSD, cash-fixed, fill-up shutoff). Open decisions: Log flag vs Logger interface; DAO
-  tests in/out.
+- [x] **7. Phase 8 — `CustomerViewModel` unit tests.** **DONE 2026-07-31** on branch
+  `feature/phase-8-vm-tests` (`88be743`/`98fa167`/`a128457`). 23 pure-JVM tests via hand-written fakes
+  + an `UnconfinedTestDispatcher` rule (Turbine unneeded — `ui.value` read synchronously). Covers
+  money/cutoff (+never-over-dispense floor, below-min, price guard, audit record), dispensing
+  completion (fixed/pre-pay/cash-fixed target + no-overrun + fill-up shutoff), every boot-resume
+  branch, and lifecycle (relay-open invariant, cancel teardown, prepay expiry). **Both open decisions
+  settled:** Log flag (`isReturnDefaultValues=true`, test-only) over a Logger interface; DAO tests
+  **deferred** to stay pure-JVM. Full suite green at **81 tests**. _(Branch awaiting merge; move to
+  PROJECT_LOG done — entry filed.)_
 - [ ] **8. Payment feature flows** — activate → persist creds; authorise → Paystack QR; PAID via
   push + 10 s poll; price config fetcher; WorkManager upload job (re-add `workmanager`).
   **Blocked by #3, #4, #6.** Sandbox-testable; live money gated behind the 14-day parallel run.
