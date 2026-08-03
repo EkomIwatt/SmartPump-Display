@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-07-10_
+_Last updated: 2026-08-04_
 
 ---
 
@@ -107,8 +107,9 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
   completion (fixed/pre-pay/cash-fixed target + no-overrun + fill-up shutoff), every boot-resume
   branch, and lifecycle (relay-open invariant, cancel teardown, prepay expiry). **Both open decisions
   settled:** Log flag (`isReturnDefaultValues=true`, test-only) over a Logger interface; DAO tests
-  **deferred** to stay pure-JVM. Full suite green at **81 tests**. _(Branch awaiting merge; move to
-  PROJECT_LOG done — entry filed.)_
+  **deferred** to stay pure-JVM. Full suite green at **81 tests**. **MERGED to `main` 2026-08-04**
+  (merge commit `d2c4283`); post-merge verify on `main` green — 81 tests / 0 failures +
+  `compileDebugRealHwKotlin` clean. _(PROJECT_LOG entry filed.)_
 - [ ] **8. Payment feature flows** — activate → persist creds; authorise → Paystack QR; PAID via
   push + 10 s poll; price config fetcher; WorkManager upload job (re-add `workmanager`).
   **Blocked by #3, #4, #6.** Sandbox-testable; live money gated behind the 14-day parallel run.

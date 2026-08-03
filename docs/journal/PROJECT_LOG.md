@@ -1,14 +1,14 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-07-10
+## Current status — 2026-08-04
 
 Strict-design rebuild is complete and merged to `main`: all 5 flows, the attendant overlay, persistence/boot-resume, kobo money, and Room migrations are in. **Phase 7a (real USB-serial hardware) is merged to `main`** (Arduino pulse driver + relay, bench-verified). `main` is pushed to `origin`.
 
 **`feature/phase-7a-hardening` is MERGED to `main`** (merge commit `9b76f42`; branch deleted) — comms-loss heartbeat watchdog (firmware PING dead-man + app heartbeat + reconnect `RLY:1` re-assert; the earlier app-side disconnect pause/resume was removed 2026-07-08) **plus** the **Balancee Pump API network-layer foundation** (signed client, typed errors + retry, Keystore-encrypted creds). Both merge gates closed before merge — #10 (Keystore crypto, device-verified 2026-07-08) and #2 (firmware-watchdog safety, device-verified 2026-07-10). The boss-facing watchdog safety summary + report shipped on top (`ceef973`, `8b72775`). `main` = `8b72775` = `origin/main` — build green on both variants, nothing outstanding on this line of work.
 
-**Phase 8 (CustomerViewModel unit tests) is DONE** on branch `feature/phase-8-vm-tests` (commits `88be743`/`98fa167`/`a128457`) — 23 new pure-JVM tests (money/cutoff, dispensing completion, boot-resume, lifecycle) via hand-written fakes + an `UnconfinedTestDispatcher` rule; test-only bar one build flag. Full suite green at **81 tests**. **Branch awaiting merge to `main`.**
+**Phase 8 (CustomerViewModel unit tests) is DONE and MERGED to `main`** (merge commit `d2c4283`, 2026-08-04; branch commits `88be743`/`98fa167`/`a128457`/`0bd45f3`) — 23 new pure-JVM tests (money/cutoff, dispensing completion, boot-resume, lifecycle) via hand-written fakes + an `UnconfinedTestDispatcher` rule; test-only bar one build flag. Post-merge verification on `main`: full suite green at **81 tests** (12 classes, 0 failures/errors/skips) and `compileDebugRealHwKotlin` clean. **`main` is 5 commits ahead of `origin/main` — not yet pushed.**
 
-**Next:** merge Phase 8 → unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) + payment feature flows (#8, gated on boss confirmations).
+**Next:** unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) + payment feature flows (#8, gated on the boss confirmations in TODO #6).
 
 Older entries (Week 1 → Room migrations) are archived in [PROJECT_LOG_ARCHIVE.md](PROJECT_LOG_ARCHIVE.md).
 
