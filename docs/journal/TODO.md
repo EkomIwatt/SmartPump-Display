@@ -88,7 +88,10 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
   (tolerate-and-resume vs fail-safe) — validate on external 5 V. Full state: memory
   `project-watchdog-bench-debug`.
 - [~] **6. Chase the 7 boss confirmations** (from `phase7_blocker_resolution.md`): (1) reference is
-  canonical — gates everything; (2) tablet has Google Play Services? → FCM vs WebSocket; (3) GET
+  canonical — gates everything; (2) ~~tablet has Google Play Services? → FCM vs WebSocket~~ →
+  **ANSWERED 2026-08-04: FCM.** Tablet will have Play Services; we're *advising* for it (better than
+  a persistent WebSocket on a kiosk device) and the manager is expected to provide it. Bench SM-T220
+  already satisfies it. Ask becomes a ratification, not an open question — see OQ #8; (3) GET
   `/transactions/{id}` exists; (4) GET `/config` exists + final payload/units (incl. money unit on
   `amount` — naira vs kobo); (5) confirm offline-USSD 7d deferral; (6) late-payment policy; (7) hosted
   staging URL + test activation code. **Draft ready → `BOSS_CONFIRMATIONS_DRAFT.md`.** Awaiting send +

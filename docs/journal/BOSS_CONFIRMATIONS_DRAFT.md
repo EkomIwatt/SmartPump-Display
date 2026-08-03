@@ -24,10 +24,14 @@ we don't build against guesses. Ordered by priority:
 Everything below assumes the Reference is final. If it's still moving, tell me what's unsettled — this
 is the one answer that gates the whole payment phase.
 
-**2. Does the ordered tablet have Google Play Services? _(unlocks 3 features at once)_**
-This single answer decides our push channel: **yes → FCM**, **no → a persistent WebSocket** the pump
-maintains. It drives payment-PAID notifications, live price pushes, and future credential rotation. I
-can't start the push work without it.
+**2. Please spec the tablets with Google Play Services. _(unlocks 3 features at once)_**
+My recommendation, and I'd like it confirmed rather than left open. With Play Services we use **FCM**
+for push; without it the pump has to hold a **persistent WebSocket** open instead — more battery, more
+reconnect logic for us to own and maintain, on a device meant to sit in a kiosk untouched. FCM is the
+better engineering choice and costs nothing extra. This drives payment-PAID notifications, live price
+pushes, and future credential rotation. The test tablet we've been benching on (Galaxy Tab A7 Lite)
+already has Play Services, so the assumption holds on current hardware — I just need the production
+units to match. **What I need from you: confirmation that they will.**
 
 **3. Confirm these two GET endpoints exist (or are planned) backend-side:**
    - `GET /api/pump/transactions/{id}` — we poll this every 10s during the payment window as the
