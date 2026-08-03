@@ -62,6 +62,14 @@ android {
         buildConfig = true
     }
 
+    // Phase 8: CustomerViewModel unit tests call android.util.Log directly (a stubbed
+    // framework class under plain JVM tests). Return default values instead of throwing
+    // "not mocked", so the tests stay pure-JVM with no Robolectric and no production
+    // Logger-interface refactor. (Decision: test-only flag over touching src/main.)
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     // Room's exported schema JSONs (app/schemas) are bundled as androidTest assets so
     // MigrationTestHelper can load them when migration tests are added.
     sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
