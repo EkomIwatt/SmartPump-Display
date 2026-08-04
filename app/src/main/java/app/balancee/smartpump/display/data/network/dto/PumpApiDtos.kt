@@ -44,9 +44,19 @@ data class AuthoriseRequest(
     @SerialName("pumpId") val pumpId: String,
     // Locally generated, doubles as the idempotency key.
     @SerialName("transactionId") val transactionId: String,
-    // PROVISIONAL UNIT: server validates `amount == expectedLitres × stationPricePerUnit`. Whether
-    // this is naira or kobo is unconfirmed — the app carries money as kobo (Long) internally, so the
-    // repository mapper must convert to whatever the backend expects once confirmed.
+    // UNIT: NAIRA (decided 2026-08-04). The Reference never states a unit, but its worked example
+    // — amount 7000 / expectedLitres 10 → ₦700/L — only reads sensibly as naira (as kobo it would be
+    // ₦7/L). The app carries money as kobo (Long) internally, so the repository mapper owns the ÷100
+    // and is the single place to flip this if the backend ever says otherwise.
+    //
+    // Failure is loud, not silent: the server enforces `amount == expectedLitres ×
+    // stationPricePerUnit` exactly and returns 400 "Amount mismatch", so a wrong unit breaks
+    // /authorise before money moves or fuel flows — it cannot mischarge a customer 100×.
+    //
+    // STILL OPEN: does `amount` accept decimals? The example is integer naira. A fill-up of 38.1 L
+    // at ₦870.50/L is ₦33,166.05, which integer-naira cannot express — and because the server check
+    // is exact, a rounded 33166 is REJECTED rather than merely off-by-a-naira. If they confirm
+    // integer-only, station pricing is constrained to whole naira per litre (a business call).
     @SerialName("amount") val amount: Long,
     @SerialName("expectedLitres") val expectedLitres: Double,
     @SerialName("fuelType") val fuelType: FuelType,

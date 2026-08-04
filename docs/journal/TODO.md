@@ -31,6 +31,42 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
 
 ---
 
+## 🔴 API conformance — from the Reference PDF audit (2026-08-05)
+
+Full analysis: [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md). The network layer was built
+against our *summary* of the API, not the Reference itself (which only landed in the repo 2026-08-04).
+9 issues found. **#11 blocks all backend integration; #12 must land before the first real activation.**
+
+- [ ] **11. Response envelope not handled (CRITICAL).** Every response is
+  `{status, message, data:{…}}`; `PumpApiService` returns the inner shape → **all 5 calls fail**,
+  including `/activate`. Tests pass only because the fixtures encode the same wrong assumption.
+  Fix: `ApiEnvelope<T>` + unwrap in `PumpApiClient` + rebuild every fixture from the Reference's
+  literal JSON. **Do first — nothing else is testable until responses parse.**
+- [ ] **12. `apiKey`/`signingSecret` logged to logcat (HIGH, security).** `Level.BODY` in debug +
+  `redactHeader` only covers headers, so the `/activate` response body prints both secrets.
+  `debugRealHw` is a debug build and we commit logcats to `docs/logcats/`. **No leak yet** (grepped
+  clean; activation never ran). Fix before the first activation against dev — the secret is emitted
+  once and costs a revoke-and-reissue.
+- [ ] **13. `pumpId` never persisted (HIGH).** Returned once by `/activate`, required in the body of
+  `/authorise` and `/upload`, absent from `PumpCredentials`. Also rename to kill the
+  `DeviceConfig.pumpId` ("PUMP 1") vs API `pumpId` (UUID) collision.
+- [ ] **14. Error `message` discarded (MED).** Business errors ("Amount mismatch…", "out of stock",
+  "Payment has not been confirmed") arrive as opaque blobs. Add `ApiError.Business(code, message)`.
+- [ ] **15. Clock skew unguarded (MED).** ±5 min or every request 401s. Enforce automatic network
+  time at install; map that 401 to distinguishable attendant copy.
+- [ ] **16. `deviceId` has no generator (MED).** Ours to mint, must be stable forever (change →
+  revoke-and-reissue). Recommend a random UUID in the encrypted store, not `ANDROID_ID`
+  (resets on factory reset).
+- [x] **17. `amount` money unit — DECIDED 2026-08-05: NAIRA.** Reference example `amount 7000 /
+  expectedLitres 10` → ₦700/L. App stays kobo; repository mapper owns the ÷100. Fails closed at
+  `/authorise` if wrong. Recorded in `PumpApiDtos.kt`. _(Decimals still open — see #18.)_
+- [ ] **18. Backend/spec asks — fold into #6.** (a) `GET /api/pump/config` doesn't exist and
+  **nothing tells the pump its `fuelType`**, which `/authorise` requires; (b)
+  `GET /api/pump/transactions/{id}` doesn't exist → no fallback if an FCM push drops;
+  (c) does `amount` accept decimals? (integer-only constrains pricing to whole naira/L — a business
+  call); (d) full status set (`PAID` is real but missing from the §5 list); (e) what to sign for a
+  GET. **Send today — their lead time is the critical path.**
+
 ## Now — unblocked, high value
 
 - [x] **10. Verify `KeystorePumpCredentialsStore` crypto** (instrumented test) — **merge gate CLOSED

@@ -8,7 +8,9 @@ Strict-design rebuild is complete and merged to `main`: all 5 flows, the attenda
 
 **Phase 8 (CustomerViewModel unit tests) is DONE and MERGED to `main`** (merge commit `d2c4283`, 2026-08-04; branch commits `88be743`/`98fa167`/`a128457`/`0bd45f3`) — 23 new pure-JVM tests (money/cutoff, dispensing completion, boot-resume, lifecycle) via hand-written fakes + an `UnconfinedTestDispatcher` rule; test-only bar one build flag. Post-merge verification on `main`: full suite green at **81 tests** (12 classes, 0 failures/errors/skips) and `compileDebugRealHwKotlin` clean. **Pushed: `main` = `origin/main` = `f5038d8`; branch `feature/phase-8-vm-tests` deleted.**
 
-**Next:** unblocked Phase 7 sub-phases (7b operator config / 7e backend sync) + payment feature flows (#8, gated on the boss confirmations in TODO #6).
+**⚠️ API conformance audit — 2026-08-05.** The Pump API Reference PDF landed in `docs/` on 2026-08-04 (first sight of the *primary* doc; the network layer was built in July against our summary of it). Line-by-line audit found **9 issues** — see [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md), tracked as TODO #11–#18. Headlines: **(#11, critical)** responses are enveloped in `{status,message,data}` and we parse the inner shape → **all 5 calls fail against the real server**, and the MockWebServer fixtures encode the same wrong assumption so the green suite proved nothing; **(#12, security)** debug `Level.BODY` logging prints `apiKey`+`signingSecret` from the `/activate` body — no leak yet (logcats grepped clean; activation never ran), fix before first activation; **(#13)** the once-only `pumpId` is never persisted. **Decided:** `amount` is **naira** (app stays kobo; mapper owns the ÷100). **Backend gaps:** `GET /config` and `GET /transactions/{id}` don't exist, and **nothing tells the pump its `fuelType`** — which `/authorise` requires. Signing, headers, retry policy and the Keystore store all verified **correct**.
+
+**Next:** fix #11 (envelope) → #12 (credential logging) → #14/#15/#13/#16 with the activation flow. Send the #18 backend asks immediately (longest lead time). Then unblocked Phase 7 sub-phases (7b operator config — interim device-local config screen / 7e backend sync) + payment feature flows (#8).
 
 Older entries (Week 1 → Room migrations) are archived in [PROJECT_LOG_ARCHIVE.md](PROJECT_LOG_ARCHIVE.md).
 
@@ -369,3 +371,79 @@ are still provisional.
 Payment feature flows (#8) — activate → persist creds; authorise → Paystack QR; PAID via push + 10 s
 poll; price-config fetcher; WorkManager upload job — **blocked on the 7 boss confirmations (#6).**
 Sandbox-testable; live money gated behind the 14-day parallel run.
+
+---
+
+### API conformance audit — Reference PDF vs the built network layer
+**Date:** 2026-08-05
+**Status:** done (audit + decisions; no code fixes yet)
+**Commit(s):** this entry + `docs/journal/API_CONFORMANCE_AUDIT.md`
+
+**Summary (plain language):**
+The official API document from the backend team was added to the project folder yesterday — the first
+time we've been able to read the *primary* document rather than our own written summary of it. We
+went through it line by line against the code we built in July and found nine problems. The most
+serious: every response from their server arrives wrapped in a standard outer layer
+(`status`/`message`/`data`), and our code expects the contents without the wrapper — so as it stands
+**not one of our five API calls would work against the real server**. Our tests didn't catch this
+because they were written from the same wrong assumption, so they were only ever checking that we
+agreed with ourselves. Second most serious: in test builds we print the server's reply to `/activate`
+into the device log, and that reply contains the pump's permanent secret key — the one thing the API
+document says in capital letters to store securely and never expose. Nothing has actually leaked
+(that step has never been run, and the committed logs are clean), but it had to be caught before the
+first real activation, because that key is issued exactly once.
+
+We also settled a money question that had been open for a month: prices go to the backend in **naira**,
+not kobo. Their worked example (₦7,000 for 10 litres = ₦700/litre) only makes sense that way. Usefully,
+their server rejects any mismatch outright, so a wrong guess here breaks loudly at the till rather than
+silently overcharging a customer 100×.
+
+Three of the nine aren't ours to fix: two endpoints we've designed against **don't exist in their API
+at all**, and one consequence is sharp — nothing in their system currently tells a pump *which fuel it
+sells*, yet their own sale endpoint requires that. That now sits on the critical path for the whole
+payment phase.
+
+**Technical notes:**
+- **Method:** all 526 lines of the Reference (`pdftotext -layout`) vs `data/network/`,
+  `domain/network/`, `di/NetworkModule.kt`. Full write-up with evidence, file:line refs, severities
+  and fixes in `docs/journal/API_CONFORMANCE_AUDIT.md`; tracked as TODO #11–#18.
+- **Root cause:** the layer was built against `phase7_blocker_resolution.md` (our summary of a v3
+  `.docx`). The summary was correct on **endpoint inventory and the signing scheme** — and those parts
+  of the code are verified correct. Compression dropped the **response envelope**, the **once-only
+  `pumpId`**, and the **`fuelType` requirement**. Every defect is payload-shape or lifecycle-value;
+  none is a logic defect.
+- **Critical (#11):** `PumpApiService` returns inner DTOs; server wraps everything in
+  `{status:Boolean, message, data}`. Top-level `status` is Boolean vs our `String` → type mismatch, and
+  all other fields are one level down → missing-field failure. Affects all five calls incl. unsigned
+  `/activate`. `PumpApiClientTest` fixtures are unenveloped, so green tests proved nothing.
+- **Security (#12):** `HttpLoggingInterceptor.Level.BODY` under `BuildConfig.DEBUG`; `redactHeader()`
+  covers headers only, so the `/activate` **body** (`apiKey` + `signingSecret`) prints. `debugRealHw`
+  is a debug build and `docs/logcats/` is committed practice. Grepped `docs/logcats/` for
+  `signingSecret|apiKey|bal_live|sec_|X-Signature` → **0 hits**; exposure is prospective only.
+- **Lifecycle (#13, #16):** `pumpId` is returned once by `/activate`, required in `/authorise` +
+  `/upload` bodies, and absent from `PumpCredentials` → unrecoverable without revoke-and-reissue.
+  Name collision with `DeviceConfig.pumpId` ("PUMP 1" label vs UUID) flagged for a rename. `deviceId`
+  is ours to mint, has no generator, and must be stable forever.
+- **Decision — `amount` is NAIRA** (Reference states no unit anywhere; §4.2 example `7000`/`10 L`
+  → ₦700/L). App stays kobo internally; the repository mapper owns the ÷100 as the single flip point.
+  Server's exact `amount === expectedLitres × stationPricePerUnit` check (`400 Amount mismatch`) makes
+  a wrong unit fail closed. **Open:** whether `amount` accepts decimals — integer-only would reject a
+  ₦33,166.05 fill-up outright (exact check), constraining pricing to whole naira/L (business call).
+- **Verified correct, no action:** `PumpRequestSigner` (HMAC-SHA256 over `timestamp + "." + rawBody`,
+  lower-case hex — now confirmed against their Node reference impl), `PumpSigningInterceptor` (signs
+  the already-serialised body; honours "do not re-serialize after signing"; `@Unsigned` exempts
+  `/activate`), all four headers, upload-only retry, Keystore store, `FuelType` enum.
+- **Backend gaps (#18):** `GET /api/pump/config` and `GET /api/pump/transactions/{id}` are **our
+  proposals, not their endpoints** — the Reference documents exactly three (`/activate`, `/authorise`,
+  `/transactions/upload`), confirmed by its §5 cheat sheet. `/activate` returns credentials only, so
+  there is **no source for `fuelType`**, which `/authorise` requires. `PAID` is a real status (§2
+  diagram) but missing from the §5 list.
+- **Standing lesson:** where a spec exists, build fixtures from its **literal examples**. Had
+  `PumpApiClientTest` used the Reference's verbatim JSON, #11 would have been caught in July.
+
+**Next:**
+Fix #11 (envelope) first — nothing else is testable until responses parse, and it yields the corrected
+fixtures. Then #12 before any real activation. #14/#15/#13/#16 alongside the activation flow. Send the
+#18 asks to the boss immediately (longest lead time). Interim for `/config`: build the device-local
+operator config screen as 7b's first half behind the existing `DeviceConfigRepository` seam — also the
+backend-unreachable fallback, so not throwaway.
