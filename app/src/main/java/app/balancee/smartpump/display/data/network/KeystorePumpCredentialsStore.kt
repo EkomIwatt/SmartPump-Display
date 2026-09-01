@@ -64,10 +64,17 @@ class KeystorePumpCredentialsStore @Inject constructor(
         val blob = prefs.getString(KEY_BLOB, null) ?: return null
         return try {
             val plaintext = decrypt(blob).toString(Charsets.UTF_8)
-            json.decodeFromString(StoredCredentials.serializer(), plaintext).toDomain()
+            val stored = json.decodeFromString(StoredCredentials.serializer(), plaintext)
+            // An unrecognised format is as unusable as ciphertext we cannot decrypt; fall through
+            // to the same purge rather than guess at the fields.
+            if (stored.version != FORMAT_VERSION) throw IllegalStateException(
+                "Unsupported stored-credential format v${stored.version}",
+            )
+            stored.toDomain()
         } catch (e: Exception) {
-            // Corrupt blob or a rotated/invalidated KeyStore key → treat as not activated and
-            // drop the unreadable ciphertext so a fresh activation can write clean state.
+            // Corrupt blob, an older format, or a rotated/invalidated KeyStore key → treat as not
+            // activated and drop the unreadable ciphertext so a fresh activation can write clean
+            // state.
             prefs.edit().remove(KEY_BLOB).commit()
             null
         }
@@ -113,17 +120,35 @@ class KeystorePumpCredentialsStore @Inject constructor(
         return generator.generateKey()
     }
 
+    /**
+     * On-disk shape of the credentials, versioned so a format change is an explicit decision
+     * rather than a silent misread. [version] is checked on load: anything that is not
+     * [FORMAT_VERSION] is treated as unreadable and purged, the same as a corrupt blob.
+     *
+     * Note that a pre-#13 blob (which had no `pumpId`) already fails to decode, because `pumpId`
+     * is required here rather than defaulted. That is deliberate — defaulting it to "" would
+     * decode cleanly and then send an empty pumpId to /authorise, which the server answers with
+     * `401 pumpId does not match authenticated device`: a confusing 401 in the field, where a
+     * "not activated" prompt is the honest and recoverable outcome.
+     */
     @Serializable
     private data class StoredCredentials(
+        @SerialName("v") val version: Int = FORMAT_VERSION,
         @SerialName("deviceId") val deviceId: String,
+        @SerialName("pumpId") val pumpId: String,
         @SerialName("apiKey") val apiKey: String,
         @SerialName("signingSecret") val signingSecret: String,
     )
 
-    private fun PumpCredentials.toStored() = StoredCredentials(deviceId, apiKey, signingSecret)
-    private fun StoredCredentials.toDomain() = PumpCredentials(deviceId, apiKey, signingSecret)
+    private fun PumpCredentials.toStored() =
+        StoredCredentials(FORMAT_VERSION, deviceId, pumpId, apiKey, signingSecret)
+
+    private fun StoredCredentials.toDomain() =
+        PumpCredentials(deviceId, pumpId, apiKey, signingSecret)
 
     private companion object {
+        /** Bump when [StoredCredentials] changes shape; old blobs are then purged, not migrated. */
+        const val FORMAT_VERSION = 2
         const val PREFS_NAME = "pump_credentials"
         const val KEY_BLOB = "credentials_blob"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"

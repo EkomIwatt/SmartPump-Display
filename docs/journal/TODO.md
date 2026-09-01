@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-08-04_
+_Last updated: 2026-09-02_
 
 ---
 
@@ -35,28 +35,117 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
 
 Full analysis: [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md). The network layer was built
 against our *summary* of the API, not the Reference itself (which only landed in the repo 2026-08-04).
-9 issues found. **#11 blocks all backend integration; #12 must land before the first real activation.**
+9 issues found. **#11, #12, #13 and #16 are FIXED (2026-09-01), device-verified and merged to `main`
+(2026-09-02)**: the two that blocked backend integration and the first real activation, plus the two
+identity fields — `pumpId` and `deviceId` — that `/activate` settles once and cannot reissue.
+**#14, #15 and #18 remain.**
 
-- [ ] **11. Response envelope not handled (CRITICAL).** Every response is
-  `{status, message, data:{…}}`; `PumpApiService` returns the inner shape → **all 5 calls fail**,
-  including `/activate`. Tests pass only because the fixtures encode the same wrong assumption.
-  Fix: `ApiEnvelope<T>` + unwrap in `PumpApiClient` + rebuild every fixture from the Reference's
-  literal JSON. **Do first — nothing else is testable until responses parse.**
-- [ ] **12. `apiKey`/`signingSecret` logged to logcat (HIGH, security).** `Level.BODY` in debug +
-  `redactHeader` only covers headers, so the `/activate` response body prints both secrets.
-  `debugRealHw` is a debug build and we commit logcats to `docs/logcats/`. **No leak yet** (grepped
-  clean; activation never ran). Fix before the first activation against dev — the secret is emitted
-  once and costs a revoke-and-reissue.
-- [ ] **13. `pumpId` never persisted (HIGH).** Returned once by `/activate`, required in the body of
-  `/authorise` and `/upload`, absent from `PumpCredentials`. Also rename to kill the
-  `DeviceConfig.pumpId` ("PUMP 1") vs API `pumpId` (UUID) collision.
+- [x] **11. Response envelope not handled — FIXED 2026-09-01** on branch
+  `fix/api-response-envelope`. `ApiEnvelope<T>(status, message, data)` added; every
+  `PumpApiService` method now returns `ApiEnvelope<T>` and `PumpApiClient` calls `unwrap()`.
+  A `status:false` (or `status:true` with no `data`) throws `EnvelopeFailureException`, which
+  `safeApiCall` maps to the new `ApiError.Business(message, httpCode)` — **not** retryable, so the
+  idempotent upload can't hammer a considered refusal. **Every success fixture in
+  `PumpApiClientTest` is now copied verbatim from the Reference's literal §4.1/§4.2/§4.3 JSON**,
+  and `PumpSigningInterceptorTest`'s three fixtures were enveloped too (they had encoded the same
+  wrong assumption and went red the moment the shape was corrected — which is the point). Added a
+  regression test asserting the *old* unenveloped shape now fails as `ApiError.Serialization`.
+  Suite green at **87 tests** (12 classes, 0 failures/errors/skips); `compileDebugRealHwKotlin`
+  clean. _(move to PROJECT_LOG when the conformance batch is logged.)_
+  - **Verified against the primary doc, not a summary:** the PDF has no text layer this machine can
+    read (no poppler/pypdf), so the literal JSON was recovered by decoding the PDF's Flate streams
+    and ToUnicode CMaps directly. Envelope + all three `data` shapes confirmed field-by-field.
+  - **Note for #14:** `ApiError.Business` is the type #14 needs. #14 is now only "parse the envelope
+    out of 4xx *error* bodies and fill in `httpCode`" — no new type, and `ApiError.Http` still
+    carries the raw blob until it lands.
+- [x] **12. `apiKey`/`signingSecret` logged to logcat — FIXED 2026-09-01** on branch
+  `fix/api-response-envelope`. **No leak ever occurred** — `docs/logcats/` re-grepped for
+  `signingSecret`/`apiKey`/`bal_live`/`sec_…`/`X-Signature`: zero hits across all three committed
+  logs, consistent with activation never having run. Two doors closed:
+  - **The wire.** New `PumpLoggingInterceptor` replaces the raw `HttpLoggingInterceptor` in
+    `NetworkModule`. Body logging is now an **allowlist** (`/authorise`, `/config`,
+    `/transactions/upload`, `/transactions/{id}`); everything else — `/activate`, and any endpoint
+    added later, such as the credential rotation anticipated in OQ #8 — drops to `HEADERS`. Chosen
+    over a denylist deliberately: the failure mode of forgetting to update it is thinner logs, not
+    a leaked secret. The `X-Api-Key`/`X-Signature` header redactions are kept.
+  - **`toString()`.** `PumpCredentials` and `ActivateResponse` are both data classes, so their
+    generated `toString()` printed both secrets in full — any stray `Log.d(TAG, "$creds")`, crash
+    report or `ApiResult` dump leaked them just as surely. Both now redact. _(Not in the audit;
+    found while fixing the wire path.)_
+  - **Tests (12 new).** Assert on what was actually **written** — a real OkHttp stack against
+    MockWebServer with a collecting logger, fed the Reference's literal `/activate` response —
+    rather than on how the interceptor is configured, which is what was wrong before. Covers: the
+    secrets never appear; the single-use `activationCode` never appears; `/activate` is *still*
+    logged at header level (guards the wrong fix of just silencing logging); `/authorise` still
+    logs bodies in full; and the allowlist predicate incl. default-deny + base-URL-prefix cases.
+  - Suite green at **99 tests** (14 classes, 0 failures/errors/skips); `compileDebugRealHwKotlin`
+    clean. _(move to PROJECT_LOG when the conformance batch is logged.)_
+- [x] **13. `pumpId` never persisted — FIXED 2026-09-01** on branch `fix/api-response-envelope`.
+  `pumpId` is now a **required** field on `PumpCredentials` and on the store's `StoredCredentials`
+  — required rather than defaulted, so activation code cannot construct credentials without it.
+  That *is* the enforcement; there is no activation flow yet (#8) to remember to do it.
+  - **Collision killed by renaming the other one:** `DeviceConfig.pumpId` → `pumpLabel` (plus the
+    matching UI parameters and the debug form's "Pump label"), so `pumpId` now means the API UUID
+    everywhere. The Room column keeps its name via `@ColumnInfo(name = "pumpId")` → **no migration**;
+    verified the generated `identityHash` is unchanged at `2c9cd927…`.
+  - **Stored blob is now versioned (`v: 2`).** A pre-#13 blob fails to decode and is purged like
+    corrupt ciphertext. Deliberate: defaulting `pumpId` to `""` would decode cleanly and then send
+    an empty pumpId to `/authorise` → `401 pumpId does not match authenticated device`, an opaque
+    401 in the field where "not activated" is the honest, recoverable answer. Nothing real is
+    purged — no device has activated.
+  - **Device-verified 2026-09-02.** `KeystorePumpCredentialsStoreTest` now runs **6** on the SM-T220
+    (was 5 at gate #10): the new `legacyFormatBlob_isPurged_ratherThanPartiallyRead` passes, so the
+    `v: 2` purge is confirmed against real KeyStore crypto, and the original five still pass with
+    `pumpId` required. _(move to PROJECT_LOG when the conformance batch is logged.)_
 - [ ] **14. Error `message` discarded (MED).** Business errors ("Amount mismatch…", "out of stock",
-  "Payment has not been confirmed") arrive as opaque blobs. Add `ApiError.Business(code, message)`.
+  "Payment has not been confirmed") arrive as opaque blobs. ~~Add `ApiError.Business(code, message)`~~
+  — **the type already exists** (added by #11, currently only fed by 2xx envelope refusals). What's
+  left: parse the envelope out of 4xx *error* bodies in `safeApiCall`, fill in `httpCode`, and map
+  the handful of known messages to attendant-facing copy.
+  - **The Reference's full error catalogue is now extracted** (2026-09-01, same Flate/ToUnicode
+    decode as #11 — the audit had only sampled it): global codes 400 / 401 / 404, eight literal 401
+    auth messages, and per-endpoint tables for §4.2 and §4.3. §1 states the failure envelope
+    explicitly (`status:false`, `data` absent, `message` = reason), but the doc never prints a
+    literal failure *body* — so parse defensively and fall back to `ApiError.Http` when a 4xx body
+    is not envelope-shaped, or a plain-text 502 from a proxy becomes `Business(null)`.
+  - **Blocked on copy, not on parsing.** Mapping messages to attendant-facing text needs copy that
+    does not exist: there is no error screen in `docs/Strict design screens/` and OQ #17 is open.
+  - **New #18 ask:** the API returns human message strings only, several with interpolated values
+    ("Amount mismatch for PETROL…", "Fuel type not available at station: PETROL"). Matching on
+    substrings breaks silently if the backend rewords — **request stable error codes** alongside
+    `message`.
 - [ ] **15. Clock skew unguarded (MED).** ±5 min or every request 401s. Enforce automatic network
   time at install; map that 401 to distinguishable attendant copy.
-- [ ] **16. `deviceId` has no generator (MED).** Ours to mint, must be stable forever (change →
-  revoke-and-reissue). Recommend a random UUID in the encrypted store, not `ANDROID_ID`
-  (resets on factory reset).
+  - **Mapping half is ready and rides on #14.** Exact strings confirmed from the Reference:
+    `Request timestamp is not fresh` (clock skew > 5 min from server UTC) and `Invalid request
+    timestamp` (malformed / non-ISO-8601) — two different causes, and only the first means "fix the
+    clock", so they want distinguishable copy.
+  - **Enforcement half has no home yet.** The app is not a device-owner app (kiosk lock-task still
+    deferred), so it **cannot set the clock itself**; the most it can do is read
+    `Settings.Global.AUTO_TIME` and warn. Whether that gate lives in the debug screen now, waits for
+    the activation flow (#8), or becomes a physical install-checklist item is an open call.
+- [x] **16. `deviceId` has no generator — FIXED 2026-09-01** on branch `fix/api-response-envelope`.
+  `DeviceIdProvider` (domain seam) + `PersistentDeviceIdProvider` mint a random UUID once and never
+  re-mint. UUID over `ANDROID_ID` as recommended (`ANDROID_ID` resets on factory reset — the exact
+  maintenance action a technician performs on a misbehaving kiosk).
+  - **Departs from the audit on storage:** kept in its own **plain** prefs file, *not* the encrypted
+    credentials blob. The deviceId is not secret (it goes out as `X-Device-Id`), and the encrypted
+    store deliberately drops its blob on KeyStore invalidation or corruption — so storing identity
+    there would silently mint a new deviceId on the next boot, which is the very failure this issue
+    exists to prevent. A separate file also survives credentials `clear()`, so re-activation
+    presents the identity the backend already knows.
+  - **Two hardenings the issue didn't name:** a failed write **throws** rather than returning an
+    id that only exists in memory, and `PumpApiClient.activate()` now sources the deviceId from the
+    provider instead of taking it as a parameter, so no caller can supply an ad-hoc one.
+  - **Tests:** 8 pure-JVM (mint-once, reuse across a fresh instance, blank-is-absent, failed-write
+    throws, 8-thread concurrent first call, UUID shape) via a `DeviceIdStorage` seam — deliberately
+    off-device, unlike the crypto store's coverage which needed a device and then sat unrun for
+    weeks. Plus 2 **instrumented** tests for what only a device can show (persistence across a fresh
+    instance; credentials `clear()` does not change the id) — **RUN AND GREEN 2026-09-02** on the
+    SM-T220 (Android 14): full `connectedDebugAndroidTest` = **8 tests, 0 failures/errors/skips**.
+    The `clear()` test is the one that matters — it proves on real hardware that the separate-plain-
+    prefs decision holds, i.e. revoke-and-reissue cannot silently take the identity with it.
+    _(move to PROJECT_LOG when the conformance batch is logged.)_
 - [x] **17. `amount` money unit — DECIDED 2026-08-05: NAIRA.** Reference example `amount 7000 /
   expectedLitres 10` → ₦700/L. App stays kobo; repository mapper owns the ÷100. Fails closed at
   `/authorise` if wrong. Recorded in `PumpApiDtos.kt`. _(Decimals still open — see #18.)_

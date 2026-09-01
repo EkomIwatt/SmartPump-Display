@@ -61,7 +61,7 @@ fun CashFixedAmountEntryScreen(
     onAuthorise: (Long) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
 ) {
     // Typed as a String so it can hold an in-progress decimal point; parsed to kobo on use.
     var typed by rememberSaveable { mutableStateOf("") }
@@ -83,7 +83,7 @@ fun CashFixedAmountEntryScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = pumpId,
+            pumpLabel = pumpLabel,
             mode = "Cash · fixed",
             stateLabel = "Authorising",
             stateColor = ActiveCyan,

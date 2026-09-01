@@ -48,7 +48,7 @@ fun FillupDispensingScreen(
     priceKoboPerLitre: Long,
     litresSoFar: Double,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
     stationName: String = "Station",
 ) {
     // Fill-up dispensing is cyan everywhere (design-system: "fill mode" hero numbers + border).
@@ -63,7 +63,7 @@ fun FillupDispensingScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = pumpId,
+            pumpLabel = pumpLabel,
             mode = "Fill up",
             stateLabel = "Filling",
             stateColor = accent,

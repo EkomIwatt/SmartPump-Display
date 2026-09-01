@@ -1,9 +1,11 @@
 // Transport-level client over PumpApiService: every call returns a typed ApiResult instead of
-// throwing, and the idempotent upload gets bounded retry. This is intentionally a THIN wrapper —
-// it does not map to domain models. DTO↔domain mapping lives one layer up in the feature
-// repositories (built in the payment-flows phase), because the mapping is where the still-
-// provisional bits land (money unit on `amount`, the final `/config` shape). Keeping the client
-// transport-only means those open questions don't ripple down into it.
+// throwing, and the idempotent upload gets bounded retry. It also strips the response envelope
+// (Reference §1) via unwrap(), so callers see the payload and never the { status, message, data }
+// wrapper. This is intentionally a THIN wrapper — it does not map to domain models. DTO↔domain
+// mapping lives one layer up in the feature repositories (built in the payment-flows phase),
+// because the mapping is where the still-provisional bits land (money unit on `amount`, the final
+// `/config` shape). Keeping the client transport-only means those open questions don't ripple
+// down into it.
 package app.balancee.smartpump.display.data.network
 
 import app.balancee.smartpump.display.data.network.dto.ActivateRequest
@@ -14,29 +16,42 @@ import app.balancee.smartpump.display.data.network.dto.PumpConfigResponse
 import app.balancee.smartpump.display.data.network.dto.TransactionStatusResponse
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionRequest
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionResponse
+import app.balancee.smartpump.display.data.network.dto.unwrap
+import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class PumpApiClient @Inject constructor(
     private val service: PumpApiService,
+    private val deviceIdProvider: DeviceIdProvider,
 ) {
 
-    /** First-boot activation. Public/unsigned — the one call valid before credentials exist. */
-    suspend fun activate(activationCode: String, deviceId: String): ApiResult<ActivateResponse> =
-        safeApiCall { service.activate(ActivateRequest(activationCode, deviceId)) }
+    /**
+     * First-boot activation. Public/unsigned — the one call valid before credentials exist.
+     *
+     * The deviceId is taken from [DeviceIdProvider] rather than passed in: it is this install's
+     * permanent identity, and a caller free to supply its own could bind the station's once-only
+     * credentials to an id the device will never present again (TODO #16). The signing interceptor
+     * already sources the same value from the credential store for every other call, so activation
+     * reads from the same authority instead of being the one place an ad-hoc id could enter.
+     */
+    suspend fun activate(activationCode: String): ApiResult<ActivateResponse> =
+        safeApiCall {
+            service.activate(ActivateRequest(activationCode, deviceIdProvider.deviceId())).unwrap()
+        }
 
     /** Start a sale. On success the response carries the Paystack authorizationUrl for the QR. */
     suspend fun authorise(request: AuthoriseRequest): ApiResult<AuthoriseResponse> =
-        safeApiCall { service.authorise(request) }
+        safeApiCall { service.authorise(request).unwrap() }
 
     /** Poll payment status during the PENDING_PAYMENT window (fallback to the PAID push). */
     suspend fun transactionStatus(transactionId: String): ApiResult<TransactionStatusResponse> =
-        safeApiCall { service.transactionStatus(transactionId) }
+        safeApiCall { service.transactionStatus(transactionId).unwrap() }
 
     /** Current price per fuel type. */
     suspend fun config(): ApiResult<PumpConfigResponse> =
-        safeApiCall { service.config() }
+        safeApiCall { service.config().unwrap() }
 
     /**
      * Upload a completed dispense. Idempotent on transactionId, so the in-flight [retryingApiCall]
@@ -45,5 +60,5 @@ class PumpApiClient @Inject constructor(
     suspend fun uploadTransaction(
         request: UploadTransactionRequest,
     ): ApiResult<UploadTransactionResponse> =
-        retryingApiCall { safeApiCall { service.uploadTransaction(request) } }
+        retryingApiCall { safeApiCall { service.uploadTransaction(request).unwrap() } }
 }

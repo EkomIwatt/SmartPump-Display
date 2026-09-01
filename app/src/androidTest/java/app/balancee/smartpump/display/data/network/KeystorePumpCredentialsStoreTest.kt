@@ -10,6 +10,7 @@
 package app.balancee.smartpump.display.data.network
 
 import android.content.Context
+import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.balancee.smartpump.display.domain.network.PumpCredentials
@@ -23,6 +24,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.security.KeyStore
+import javax.crypto.Cipher
 
 @RunWith(AndroidJUnit4::class)
 class KeystorePumpCredentialsStoreTest {
@@ -35,6 +38,7 @@ class KeystorePumpCredentialsStoreTest {
 
     private val sampleCreds = PumpCredentials(
         deviceId = "pump-uno-01",
+        pumpId = "7f108b57-7559-4837-8dfb-33c7aac7d632",
         apiKey = "bal_live_abc123",
         signingSecret = "s3cr3t-hmac-key-do-not-log",
     )
@@ -88,6 +92,26 @@ class KeystorePumpCredentialsStoreTest {
         assertNull(newStore().current())
     }
 
+    /**
+     * A blob in the pre-#13 format — no `pumpId`, no version — must be purged, not half-read. The
+     * alternative (defaulting pumpId to "") would decode cleanly and then send an empty pumpId to
+     * /authorise, which the server rejects with `401 pumpId does not match authenticated device`:
+     * an opaque 401 in the field where "not activated" is the honest, recoverable answer.
+     */
+    @Test
+    fun legacyFormatBlob_isPurged_ratherThanPartiallyRead() = runBlocking {
+        // Let the store create its KeyStore key, then overwrite the blob with old-shape plaintext
+        // encrypted under that same key — i.e. exactly what an install from before #13 would hold.
+        newStore().save(sampleCreds)
+        prefs.edit().putString("credentials_blob", encryptWithStoreKey(LEGACY_PLAINTEXT)).commit()
+
+        val store = newStore()
+
+        assertNull(store.current())
+        assertFalse(store.isActivated)
+        assertNull("stale-format blob should be purged", prefs.getString("credentials_blob", null))
+    }
+
     @Test
     fun corruptBlob_fallsBackToNull_andPurgesCiphertext() {
         // "QUJD" is valid Base64 (= "ABC", 3 bytes) but shorter than the 12-byte GCM IV, so decrypt
@@ -100,5 +124,19 @@ class KeystorePumpCredentialsStoreTest {
         assertNull(store.current())
         assertFalse(store.isActivated)
         assertNull("unreadable ciphertext should be purged", prefs.getString("credentials_blob", null))
+    }
+
+    /** Mirrors the store's own crypto (same alias/transformation, IV prepended, Base64 NO_WRAP). */
+    private fun encryptWithStoreKey(plaintext: String): String {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val key = (keyStore.getEntry("pump_credentials_key", null) as KeyStore.SecretKeyEntry).secretKey
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(cipher.iv + ciphertext, Base64.NO_WRAP)
+    }
+
+    private companion object {
+        const val LEGACY_PLAINTEXT =
+            """{"deviceId":"pump-uno-01","apiKey":"bal_live_abc123","signingSecret":"old"}"""
     }
 }

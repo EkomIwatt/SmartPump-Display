@@ -2,6 +2,7 @@
 // throws into a typed ApiError. Plus a bounded exponential-backoff retry for idempotent calls.
 package app.balancee.smartpump.display.data.network
 
+import app.balancee.smartpump.display.data.network.dto.EnvelopeFailureException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.SerializationException
@@ -12,7 +13,9 @@ import java.io.IOException
  * Executes [block] and maps failures to [ApiError]. Coroutine cancellation is never swallowed.
  *
  * Catch order matters: [PumpNotActivatedException] is an [IOException] subtype, so it must be
- * caught before the generic IOException arm.
+ * caught before the generic IOException arm. [EnvelopeFailureException] is a plain
+ * RuntimeException and must be caught before the trailing Throwable arm, or a considered
+ * "no" from the server degrades into [ApiError.Unknown].
  */
 suspend fun <T> safeApiCall(block: suspend () -> T): ApiResult<T> =
     try {
@@ -21,6 +24,8 @@ suspend fun <T> safeApiCall(block: suspend () -> T): ApiResult<T> =
         throw e
     } catch (e: PumpNotActivatedException) {
         ApiResult.Failure(ApiError.NotActivated)
+    } catch (e: EnvelopeFailureException) {
+        ApiResult.Failure(ApiError.Business(e.serverMessage))
     } catch (e: HttpException) {
         val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
         ApiResult.Failure(ApiError.Http(e.code(), body))

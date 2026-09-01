@@ -142,7 +142,7 @@ class DebugViewModel @Inject constructor(
 
     // ---- DeviceConfig form ----
     fun saveDeviceConfig(
-        pumpId: String,
+        pumpLabel: String,
         stationName: String,
         koboPerLitre: Long,
         virtualAccountNumber: String?,
@@ -151,7 +151,7 @@ class DebugViewModel @Inject constructor(
             try {
                 configRepo.saveConfig(
                     DeviceConfig(
-                        pumpId = pumpId.ifBlank { "PUMP 1" },
+                        pumpLabel = pumpLabel.ifBlank { "PUMP 1" },
                         stationName = stationName.ifBlank { "SmartPump Station" },
                         koboPerLitre = koboPerLitre.coerceAtLeast(1L),
                         virtualAccountNumber = virtualAccountNumber?.ifBlank { null },

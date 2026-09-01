@@ -26,7 +26,7 @@ import java.util.Locale
 
 @Composable
 fun PumpHeader(
-    pumpId: String,
+    pumpLabel: String,
     mode: String,
     stateLabel: String,
     stateColor: Color,
@@ -38,7 +38,7 @@ fun PumpHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
-            text = "${pumpId.uppercase(Locale.ROOT)} · ${mode.uppercase(Locale.ROOT)}",
+            text = "${pumpLabel.uppercase(Locale.ROOT)} · ${mode.uppercase(Locale.ROOT)}",
             style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = FontWeight.Medium,
                 color = TextSecondary,
@@ -59,13 +59,13 @@ private fun PumpHeaderPreview() {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             PumpHeader(
-                pumpId = "Pump 1",
+                pumpLabel = "Pump 1",
                 mode = "Fill-up",
                 stateLabel = "Dispensing",
                 stateColor = ActiveCyan,
             )
             PumpHeader(
-                pumpId = "Pump 1",
+                pumpLabel = "Pump 1",
                 mode = "Pre-pay",
                 stateLabel = "Waiting",
                 stateColor = PrimaryGold,

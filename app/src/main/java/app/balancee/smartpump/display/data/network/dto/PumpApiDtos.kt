@@ -35,7 +35,15 @@ data class ActivateResponse(
     @SerialName("pumpId") val pumpId: String,
     @SerialName("apiKey") val apiKey: String,
     @SerialName("signingSecret") val signingSecret: String,
-)
+) {
+    /**
+     * Redacted for the same reason as PumpCredentials.toString() — this is the one response body
+     * carrying the secrets, so it must not be printable by accident (TODO #12). Serialization is
+     * unaffected: kotlinx uses the generated serializer, not toString().
+     */
+    override fun toString(): String =
+        "ActivateResponse(deviceId=$deviceId, pumpId=$pumpId, apiKey=***, signingSecret=***)"
+}
 
 // ---- Start a sale: POST /api/pump/authorise (signed) ----------------------------------------
 

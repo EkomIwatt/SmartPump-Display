@@ -83,7 +83,7 @@ fun OnboardingScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = "Pump 1",
+            pumpLabel = "Pump 1",
             mode = "Setup",
             stateLabel = "Step ${state.step.ordinal + 1} of 3",
             stateColor = BrandBlue,

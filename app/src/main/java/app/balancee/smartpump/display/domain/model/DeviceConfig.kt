@@ -5,7 +5,10 @@ package app.balancee.smartpump.display.domain.model
 import androidx.compose.runtime.Immutable
 
 /**
- * @param pumpId               Display name for the nozzle, e.g. "PUMP 1".
+ * @param pumpLabel            Display name for the nozzle, e.g. "PUMP 1". Screen caption only —
+ *                             NOT the API's `pumpId`, which is the backend UUID held on
+ *                             PumpCredentials and required in /authorise bodies. Renamed from
+ *                             `pumpId` to kill that collision (TODO #13).
  * @param stationName          Station name shown on receipts, e.g. "Total Lekki Ph2".
  * @param koboPerLitre         Current fuel price in kobo (100 kobo = ₦1). e.g. 87_000 = ₦870/L.
  * @param virtualAccountNumber NIP bank-transfer account for post-fill-up QR generation. Null = not yet set.
@@ -13,7 +16,7 @@ import androidx.compose.runtime.Immutable
  */
 @Immutable
 data class DeviceConfig(
-    val pumpId: String = "PUMP 1",
+    val pumpLabel: String = "PUMP 1",
     val stationName: String = "SmartPump Station",
     val koboPerLitre: Long,
     val virtualAccountNumber: String? = null,

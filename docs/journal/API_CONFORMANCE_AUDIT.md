@@ -79,6 +79,13 @@ as the production code, so the suite is green and proves nothing about the wire 
 `ApiEnvelope<AuthoriseResponse>` etc. from `PumpApiService`, unwrap in `PumpApiClient`, and rebuild
 every test fixture from the Reference's literal JSON examples. ~1 hour.
 
+> **RESOLVED 2026-09-01** (branch `fix/api-response-envelope`) — implemented as described. Envelope
+> refusals (`status:false`, or `status:true` with no `data`) now surface as `ApiError.Business`,
+> which is not retryable. `PumpSigningInterceptorTest` carried the same unenveloped assumption in
+> three fixtures and went red on the corrected shape — the audit's point, demonstrated. Suite green
+> at 87 tests. The Reference's `data` field sets for `/activate`, `/authorise` and `/upload` were
+> re-checked field-by-field against the DTOs and all three match; only the nesting was wrong.
+
 ---
 
 ### #2 — Error `message` discarded (Medium)
@@ -129,6 +136,21 @@ exposure is entirely ahead of us.
 interceptor for that path. Do this *before* the first activation against dev, because the secret is
 emitted exactly once and cannot be rotated without revoke-and-reissue at the station.
 
+> **RESOLVED 2026-09-01** (branch `fix/api-response-envelope`). `PumpLoggingInterceptor` replaces the
+> raw `HttpLoggingInterceptor`: body logging is an **allowlist** of vetted paths, so `/activate` —
+> and anything added later — logs headers only. Allowlist over denylist deliberately: forgetting to
+> update it costs log detail, not a secret.
+>
+> **This audit under-scoped the issue.** Both types that hold the credentials — `PumpCredentials` and
+> `ActivateResponse` — are data classes, so their generated `toString()` printed `apiKey` and
+> `signingSecret` in full. A single `Log.d(TAG, "$creds")`, an uncaught-exception dump, or logging an
+> `ApiResult` from activate would have leaked them without the HTTP logger being involved at all.
+> Both now redact. Worth generalising: "don't log X" is not a property of one code path, it is a
+> property of the *type*, and the audit only looked at the path.
+>
+> Exposure re-confirmed as **none**: `docs/logcats/` grepped again across all three committed logs —
+> zero hits for `signingSecret`/`apiKey`/`bal_live`/`sec_…`/`X-Signature`.
+
 ---
 
 ## 4. Design gaps — not yet wrong, but will be
@@ -149,6 +171,23 @@ wiring the label into the request body yields `401 pumpId does not match authent
 than relying on care.
 
 **Fix:** add `pumpId` to `PumpCredentials` + `StoredCredentials`, persist at activation.
+
+> **RESOLVED 2026-09-01** (branch `fix/api-response-envelope`). `pumpId` is now a **required**
+> field on `PumpCredentials` and on the store's `StoredCredentials` — required rather than
+> defaulted, so activation code physically cannot construct credentials without it. That is the
+> whole enforcement: there is no activation flow yet (#8) to "remember" to persist it in.
+>
+> The name collision was killed by renaming the *other* one: `DeviceConfig.pumpId` → `pumpLabel`
+> (and the matching UI parameters), leaving `pumpId` to mean the API UUID everywhere. The Room
+> column keeps its original name via `@ColumnInfo(name = "pumpId")`, so the rename needs **no
+> migration** — verified: the generated `identityHash` is unchanged at `2c9cd927…`.
+>
+> The stored blob is now **versioned** (`v: 2`). A pre-#13 blob fails to decode (no `pumpId`) and
+> is purged as unreadable, exactly like corrupt ciphertext. Deliberate: defaulting `pumpId` to `""`
+> would decode cleanly and then send an empty pumpId to `/authorise`, whose answer is
+> `401 pumpId does not match authenticated device` — an opaque 401 in the field where a
+> "not activated" prompt is the honest, recoverable outcome. No device has activated, so nothing
+> real is being purged.
 
 ---
 
@@ -181,6 +220,30 @@ revoke-and-reissue.
 **Recommendation:** a random UUID minted once into the encrypted credentials store. `ANDROID_ID` is
 tempting but resets on factory reset — which is exactly the maintenance action a confused technician
 performs on a misbehaving kiosk.
+
+> **RESOLVED 2026-09-01** (branch `fix/api-response-envelope`). `DeviceIdProvider` (domain seam) +
+> `PersistentDeviceIdProvider` mint a random UUID on first use and never re-mint. The UUID
+> recommendation is taken as written; the storage recommendation is **not**.
+>
+> **Departure from this audit: the deviceId is stored in its own plain SharedPreferences file, not
+> in the encrypted credentials store.** It is not secret — it travels in the clear as
+> `X-Device-Id` — so encryption buys nothing, and putting it in the encrypted blob would couple
+> identity to the KeyStore key. `KeystorePumpCredentialsStore` deliberately *drops* its blob when
+> that key is invalidated or the ciphertext is unreadable; if the deviceId went with it, the next
+> boot would silently mint a new identity — which is precisely the unrecoverable failure this
+> issue is about, reintroduced by the fix. A separate file also means credentials `clear()`
+> (revoke/reissue, debug re-onboarding) cannot touch it, so re-activation presents the identity
+> the backend already knows.
+>
+> Two further hardenings the issue did not name: a **failed write throws** rather than returning an
+> in-memory-only id (activating against an id that will not survive a reboot is the same
+> unrecoverable state), and `PumpApiClient.activate()` now **sources the deviceId from the provider
+> instead of taking it as a parameter**, so no caller can introduce an ad-hoc one.
+>
+> **Device-verified 2026-09-02** (SM-T220, Android 14). The departure above is the kind of decision
+> that is only worth as much as its test, so both invariants were proved on real hardware rather
+> than argued: the minted id survives a fresh provider instance, and `KeystorePumpCredentialsStore
+> .clear()` leaves it untouched. `connectedDebugAndroidTest` = **8 tests, 0 failures/errors/skips**.
 
 ---
 

@@ -64,7 +64,7 @@ fun FixedDispensingScreen(
     litresAuthorised: Double,
     litresSoFar: Double,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
     stationName: String = "Station",
 ) {
     val isCash = flow == TransactionFlow.CASH_FIXED
@@ -85,7 +85,7 @@ fun FixedDispensingScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = pumpId,
+            pumpLabel = pumpLabel,
             mode = when {
                 isCash -> "Cash · fixed"
                 flow == TransactionFlow.USSD_OFFLINE -> "USSD"

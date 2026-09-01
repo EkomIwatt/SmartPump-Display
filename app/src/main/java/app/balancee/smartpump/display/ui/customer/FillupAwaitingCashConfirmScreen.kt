@@ -48,7 +48,7 @@ fun FillupAwaitingCashConfirmScreen(
     priceKoboPerLitre: Long,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
 ) {
     val accent = PrimaryGold
 
@@ -60,7 +60,7 @@ fun FillupAwaitingCashConfirmScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = pumpId,
+            pumpLabel = pumpLabel,
             mode = "Fill up · cash",
             stateLabel = "Awaiting cash",
             stateColor = accent,

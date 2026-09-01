@@ -5,7 +5,7 @@
 //  - Hardware: pulse rate + tank capacity on MockPulseSource, plus inject-failure buttons.
 //  - Payment: auto-approve toggle, pending delay slider, failure-reason text, force-resolve
 //    button (Flow 5 "SMS arrived" injector — also works as a generic instant-resolve).
-//  - Device config: pumpId / stationName / koboPerLitre / virtualAccountNumber form. Saves
+//  - Device config: pumpLabel / stationName / koboPerLitre / virtualAccountNumber form. Saves
 //    push through DeviceConfigRepository, so CustomerViewModel's price guard picks them up
 //    on its next read.
 package app.balancee.smartpump.display.ui.debug
@@ -376,7 +376,7 @@ private fun DeviceConfigCard(
     saveStatus: String?,
     onSave: (String, String, Long, String?) -> Unit,
 ) {
-    var pumpId by remember(current?.pumpId) { mutableStateOf(current?.pumpId ?: "PUMP 1") }
+    var pumpLabel by remember(current?.pumpLabel) { mutableStateOf(current?.pumpLabel ?: "PUMP 1") }
     var stationName by remember(current?.stationName) {
         mutableStateOf(current?.stationName ?: "SmartPump Station")
     }
@@ -399,7 +399,7 @@ private fun DeviceConfigCard(
             Spacer(Modifier.height(12.dp))
         }
 
-        DebugTextField(label = "Pump ID", value = pumpId, onValueChange = { pumpId = it })
+        DebugTextField(label = "Pump label", value = pumpLabel, onValueChange = { pumpLabel = it })
         Spacer(Modifier.height(8.dp))
         DebugTextField(
             label = "Station name",
@@ -425,7 +425,7 @@ private fun DeviceConfigCard(
                 val kobo = nairaPerLitre.toDoubleOrNull()?.let { (it * 100).roundToLong() }
                     ?: return@BalanceeButton
                 onSave(
-                    pumpId.trim(),
+                    pumpLabel.trim(),
                     stationName.trim(),
                     kobo,
                     virtualAccount.trim().takeIf { it.isNotEmpty() },

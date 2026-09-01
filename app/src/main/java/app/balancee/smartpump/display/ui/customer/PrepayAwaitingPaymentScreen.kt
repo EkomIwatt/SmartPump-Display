@@ -71,7 +71,7 @@ fun PrepayAwaitingPaymentScreen(
     expiresInSeconds: Int,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
 ) {
     val accent = accentFor(method)
 
@@ -105,7 +105,7 @@ fun PrepayAwaitingPaymentScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        text = "${formatNairaAmount(amountKobo)} · $pumpId",
+                        text = "${formatNairaAmount(amountKobo)} · $pumpLabel",
                         style = MaterialTheme.typography.titleMedium.copy(
                             color = TextSecondary,
                             fontWeight = FontWeight.Medium,

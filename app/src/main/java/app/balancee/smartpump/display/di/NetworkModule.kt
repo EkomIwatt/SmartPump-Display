@@ -5,8 +5,11 @@ package app.balancee.smartpump.display.di
 
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.data.network.KeystorePumpCredentialsStore
+import app.balancee.smartpump.display.data.network.PersistentDeviceIdProvider
 import app.balancee.smartpump.display.data.network.PumpApiService
+import app.balancee.smartpump.display.data.network.PumpLoggingInterceptor
 import app.balancee.smartpump.display.data.network.PumpSigningInterceptor
+import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import app.balancee.smartpump.display.domain.network.PumpCredentialsStore
 import dagger.Module
 import dagger.Provides
@@ -15,7 +18,6 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.time.Clock
@@ -30,6 +32,12 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideCredentialsStore(impl: KeystorePumpCredentialsStore): PumpCredentialsStore = impl
+
+    // Mint-once, never-changing deviceId in its own prefs file (TODO #16) — deliberately outside
+    // the encrypted blob above, so a KeyStore wipe cannot change this device's identity.
+    @Provides
+    @Singleton
+    fun provideDeviceIdProvider(impl: PersistentDeviceIdProvider): DeviceIdProvider = impl
 
     @Provides
     @Singleton
@@ -52,16 +60,10 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(signing: PumpSigningInterceptor): OkHttpClient {
-        val logging = HttpLoggingInterceptor().apply {
-            level = if (BuildConfig.DEBUG) {
-                HttpLoggingInterceptor.Level.BODY
-            } else {
-                HttpLoggingInterceptor.Level.NONE
-            }
-            // Never print credential material, even in debug logs.
-            redactHeader("X-Api-Key")
-            redactHeader("X-Signature")
-        }
+        // Never print credential material, even in debug logs. PumpLoggingInterceptor redacts the
+        // credential HEADERS and — the part plain redactHeader() cannot do — withholds the BODY of
+        // /api/pump/activate, which is where apiKey and signingSecret actually arrive (TODO #12).
+        val logging = PumpLoggingInterceptor(enabled = BuildConfig.DEBUG)
         return OkHttpClient.Builder()
             .addInterceptor(signing)   // signs first…
             .addInterceptor(logging)   // …so the log shows the final signed request

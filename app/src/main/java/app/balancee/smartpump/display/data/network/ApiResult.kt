@@ -20,6 +20,18 @@ sealed interface ApiError {
     /** Response body couldn't be parsed into the expected DTO — a contract mismatch. Not retryable. */
     data class Serialization(val cause: Throwable) : ApiError
 
+    /**
+     * The server answered cleanly and said no: the response envelope carried `status:false` (or
+     * `status:true` with no `data`), and [message] is the reason string it supplied — e.g.
+     * "Amount mismatch for PETROL…", "PETROL is currently out of stock". A considered refusal, so
+     * never retryable.
+     *
+     * [httpCode] is null for envelope-level failures on a 2xx response. Parsing the envelope out
+     * of 4xx *error* bodies — where these messages mostly arrive — is TODO #14; that work fills
+     * this in rather than adding a second type.
+     */
+    data class Business(val message: String?, val httpCode: Int? = null) : ApiError
+
     /** A signed call was attempted before the device was activated (no credentials). Not retryable. */
     data object NotActivated : ApiError
 
