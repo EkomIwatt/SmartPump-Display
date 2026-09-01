@@ -79,6 +79,13 @@ as the production code, so the suite is green and proves nothing about the wire 
 `ApiEnvelope<AuthoriseResponse>` etc. from `PumpApiService`, unwrap in `PumpApiClient`, and rebuild
 every test fixture from the Reference's literal JSON examples. ~1 hour.
 
+> **RESOLVED 2026-09-01** (branch `fix/api-response-envelope`) — implemented as described. Envelope
+> refusals (`status:false`, or `status:true` with no `data`) now surface as `ApiError.Business`,
+> which is not retryable. `PumpSigningInterceptorTest` carried the same unenveloped assumption in
+> three fixtures and went red on the corrected shape — the audit's point, demonstrated. Suite green
+> at 87 tests. The Reference's `data` field sets for `/activate`, `/authorise` and `/upload` were
+> re-checked field-by-field against the DTOs and all three match; only the nesting was wrong.
+
 ---
 
 ### #2 — Error `message` discarded (Medium)

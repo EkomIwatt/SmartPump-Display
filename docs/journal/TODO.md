@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-08-04_
+_Last updated: 2026-09-01_
 
 ---
 
@@ -35,13 +35,27 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
 
 Full analysis: [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md). The network layer was built
 against our *summary* of the API, not the Reference itself (which only landed in the repo 2026-08-04).
-9 issues found. **#11 blocks all backend integration; #12 must land before the first real activation.**
+9 issues found. ~~**#11 blocks all backend integration**~~ — **#11 is FIXED (2026-09-01)**;
+**#12 must land before the first real activation.**
 
-- [ ] **11. Response envelope not handled (CRITICAL).** Every response is
-  `{status, message, data:{…}}`; `PumpApiService` returns the inner shape → **all 5 calls fail**,
-  including `/activate`. Tests pass only because the fixtures encode the same wrong assumption.
-  Fix: `ApiEnvelope<T>` + unwrap in `PumpApiClient` + rebuild every fixture from the Reference's
-  literal JSON. **Do first — nothing else is testable until responses parse.**
+- [x] **11. Response envelope not handled — FIXED 2026-09-01** on branch
+  `fix/api-response-envelope`. `ApiEnvelope<T>(status, message, data)` added; every
+  `PumpApiService` method now returns `ApiEnvelope<T>` and `PumpApiClient` calls `unwrap()`.
+  A `status:false` (or `status:true` with no `data`) throws `EnvelopeFailureException`, which
+  `safeApiCall` maps to the new `ApiError.Business(message, httpCode)` — **not** retryable, so the
+  idempotent upload can't hammer a considered refusal. **Every success fixture in
+  `PumpApiClientTest` is now copied verbatim from the Reference's literal §4.1/§4.2/§4.3 JSON**,
+  and `PumpSigningInterceptorTest`'s three fixtures were enveloped too (they had encoded the same
+  wrong assumption and went red the moment the shape was corrected — which is the point). Added a
+  regression test asserting the *old* unenveloped shape now fails as `ApiError.Serialization`.
+  Suite green at **87 tests** (12 classes, 0 failures/errors/skips); `compileDebugRealHwKotlin`
+  clean. _(move to PROJECT_LOG when the conformance batch is logged.)_
+  - **Verified against the primary doc, not a summary:** the PDF has no text layer this machine can
+    read (no poppler/pypdf), so the literal JSON was recovered by decoding the PDF's Flate streams
+    and ToUnicode CMaps directly. Envelope + all three `data` shapes confirmed field-by-field.
+  - **Note for #14:** `ApiError.Business` is the type #14 needs. #14 is now only "parse the envelope
+    out of 4xx *error* bodies and fill in `httpCode`" — no new type, and `ApiError.Http` still
+    carries the raw blob until it lands.
 - [ ] **12. `apiKey`/`signingSecret` logged to logcat (HIGH, security).** `Level.BODY` in debug +
   `redactHeader` only covers headers, so the `/activate` response body prints both secrets.
   `debugRealHw` is a debug build and we commit logcats to `docs/logcats/`. **No leak yet** (grepped
@@ -51,7 +65,10 @@ against our *summary* of the API, not the Reference itself (which only landed in
   `/authorise` and `/upload`, absent from `PumpCredentials`. Also rename to kill the
   `DeviceConfig.pumpId` ("PUMP 1") vs API `pumpId` (UUID) collision.
 - [ ] **14. Error `message` discarded (MED).** Business errors ("Amount mismatch…", "out of stock",
-  "Payment has not been confirmed") arrive as opaque blobs. Add `ApiError.Business(code, message)`.
+  "Payment has not been confirmed") arrive as opaque blobs. ~~Add `ApiError.Business(code, message)`~~
+  — **the type already exists** (added by #11, currently only fed by 2xx envelope refusals). What's
+  left: parse the envelope out of 4xx *error* bodies in `safeApiCall`, fill in `httpCode`, and map
+  the handful of known messages to attendant-facing copy.
 - [ ] **15. Clock skew unguarded (MED).** ±5 min or every request 401s. Enforce automatic network
   time at install; map that 401 to distinguishable attendant copy.
 - [ ] **16. `deviceId` has no generator (MED).** Ours to mint, must be stable forever (change →
