@@ -239,6 +239,11 @@ performs on a misbehaving kiosk.
 > in-memory-only id (activating against an id that will not survive a reboot is the same
 > unrecoverable state), and `PumpApiClient.activate()` now **sources the deviceId from the provider
 > instead of taking it as a parameter**, so no caller can introduce an ad-hoc one.
+>
+> **Device-verified 2026-09-02** (SM-T220, Android 14). The departure above is the kind of decision
+> that is only worth as much as its test, so both invariants were proved on real hardware rather
+> than argued: the minted id survives a fresh provider instance, and `KeystorePumpCredentialsStore
+> .clear()` leaves it untouched. `connectedDebugAndroidTest` = **8 tests, 0 failures/errors/skips**.
 
 ---
 

@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-01_
+_Last updated: 2026-09-02_
 
 ---
 
@@ -35,9 +35,10 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
 
 Full analysis: [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md). The network layer was built
 against our *summary* of the API, not the Reference itself (which only landed in the repo 2026-08-04).
-9 issues found. **#11, #12, #13 and #16 are FIXED (2026-09-01)**: the two that blocked backend
-integration and the first real activation, plus the two identity fields — `pumpId` and `deviceId` —
-that `/activate` settles once and cannot reissue. **#14, #15 and #18 remain.**
+9 issues found. **#11, #12, #13 and #16 are FIXED (2026-09-01), device-verified and merged to `main`
+(2026-09-02)**: the two that blocked backend integration and the first real activation, plus the two
+identity fields — `pumpId` and `deviceId` — that `/activate` settles once and cannot reissue.
+**#14, #15 and #18 remain.**
 
 - [x] **11. Response envelope not handled — FIXED 2026-09-01** on branch
   `fix/api-response-envelope`. `ApiEnvelope<T>(status, message, data)` added; every
@@ -91,7 +92,11 @@ that `/activate` settles once and cannot reissue. **#14, #15 and #18 remain.**
     corrupt ciphertext. Deliberate: defaulting `pumpId` to `""` would decode cleanly and then send
     an empty pumpId to `/authorise` → `401 pumpId does not match authenticated device`, an opaque
     401 in the field where "not activated" is the honest, recoverable answer. Nothing real is
-    purged — no device has activated. _(move to PROJECT_LOG when the conformance batch is logged.)_
+    purged — no device has activated.
+  - **Device-verified 2026-09-02.** `KeystorePumpCredentialsStoreTest` now runs **6** on the SM-T220
+    (was 5 at gate #10): the new `legacyFormatBlob_isPurged_ratherThanPartiallyRead` passes, so the
+    `v: 2` purge is confirmed against real KeyStore crypto, and the original five still pass with
+    `pumpId` required. _(move to PROJECT_LOG when the conformance batch is logged.)_
 - [ ] **14. Error `message` discarded (MED).** Business errors ("Amount mismatch…", "out of stock",
   "Payment has not been confirmed") arrive as opaque blobs. ~~Add `ApiError.Business(code, message)`~~
   — **the type already exists** (added by #11, currently only fed by 2xx envelope refusals). What's
@@ -136,8 +141,11 @@ that `/activate` settles once and cannot reissue. **#14, #15 and #18 remain.**
     throws, 8-thread concurrent first call, UUID shape) via a `DeviceIdStorage` seam — deliberately
     off-device, unlike the crypto store's coverage which needed a device and then sat unrun for
     weeks. Plus 2 **instrumented** tests for what only a device can show (persistence across a fresh
-    instance; credentials `clear()` does not change the id) — **written, not yet run: needs the
-    tablet.** _(move to PROJECT_LOG when the conformance batch is logged.)_
+    instance; credentials `clear()` does not change the id) — **RUN AND GREEN 2026-09-02** on the
+    SM-T220 (Android 14): full `connectedDebugAndroidTest` = **8 tests, 0 failures/errors/skips**.
+    The `clear()` test is the one that matters — it proves on real hardware that the separate-plain-
+    prefs decision holds, i.e. revoke-and-reissue cannot silently take the identity with it.
+    _(move to PROJECT_LOG when the conformance batch is logged.)_
 - [x] **17. `amount` money unit — DECIDED 2026-08-05: NAIRA.** Reference example `amount 7000 /
   expectedLitres 10` → ₦700/L. App stays kobo; repository mapper owns the ÷100. Fails closed at
   `/authorise` if wrong. Recorded in `PumpApiDtos.kt`. _(Decimals still open — see #18.)_
