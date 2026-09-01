@@ -1018,7 +1018,7 @@ class CustomerViewModel @Inject constructor(
         if (deviceConfigRepository.getConfig() == null) {
             deviceConfigRepository.saveConfig(
                 DeviceConfig(
-                    pumpId = "PUMP 1",
+                    pumpLabel = "PUMP 1",
                     stationName = "Total Lekki Ph2",
                     koboPerLitre = DEFAULT_KOBO_PER_LITRE,
                     virtualAccountNumber = "0123456789",

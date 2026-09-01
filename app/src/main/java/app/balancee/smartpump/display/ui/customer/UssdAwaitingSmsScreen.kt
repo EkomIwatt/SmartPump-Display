@@ -78,7 +78,7 @@ fun UssdAwaitingSmsScreen(
     expiresInSeconds: Int,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
 ) {
     Column(
         modifier = modifier
@@ -88,7 +88,7 @@ fun UssdAwaitingSmsScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = pumpId,
+            pumpLabel = pumpLabel,
             mode = "USSD · offline",
             stateLabel = "Awaiting SMS",
             stateColor = ActiveCyan,

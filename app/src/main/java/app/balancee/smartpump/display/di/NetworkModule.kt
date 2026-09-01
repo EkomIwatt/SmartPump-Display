@@ -5,9 +5,11 @@ package app.balancee.smartpump.display.di
 
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.data.network.KeystorePumpCredentialsStore
+import app.balancee.smartpump.display.data.network.PersistentDeviceIdProvider
 import app.balancee.smartpump.display.data.network.PumpApiService
 import app.balancee.smartpump.display.data.network.PumpLoggingInterceptor
 import app.balancee.smartpump.display.data.network.PumpSigningInterceptor
+import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import app.balancee.smartpump.display.domain.network.PumpCredentialsStore
 import dagger.Module
 import dagger.Provides
@@ -30,6 +32,12 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideCredentialsStore(impl: KeystorePumpCredentialsStore): PumpCredentialsStore = impl
+
+    // Mint-once, never-changing deviceId in its own prefs file (TODO #16) — deliberately outside
+    // the encrypted blob above, so a KeyStore wipe cannot change this device's identity.
+    @Provides
+    @Singleton
+    fun provideDeviceIdProvider(impl: PersistentDeviceIdProvider): DeviceIdProvider = impl
 
     @Provides
     @Singleton

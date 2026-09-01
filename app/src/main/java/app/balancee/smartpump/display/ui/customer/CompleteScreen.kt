@@ -62,7 +62,7 @@ fun CompleteScreen(
     onShareReceipt: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
 ) {
     // Flow 1 (digital pre-pay) finishes on a gold receipt card; cash, fill-up, and USSD
     // completions land on a green "dispense succeeded" card. Source: strict-design screens.
@@ -92,7 +92,7 @@ fun CompleteScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = pumpId,
+            pumpLabel = pumpLabel,
             mode = flowMode(flow),
             stateLabel = "Complete",
             stateColor = accent,

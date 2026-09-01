@@ -17,17 +17,29 @@ import app.balancee.smartpump.display.data.network.dto.TransactionStatusResponse
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionRequest
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionResponse
 import app.balancee.smartpump.display.data.network.dto.unwrap
+import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class PumpApiClient @Inject constructor(
     private val service: PumpApiService,
+    private val deviceIdProvider: DeviceIdProvider,
 ) {
 
-    /** First-boot activation. Public/unsigned — the one call valid before credentials exist. */
-    suspend fun activate(activationCode: String, deviceId: String): ApiResult<ActivateResponse> =
-        safeApiCall { service.activate(ActivateRequest(activationCode, deviceId)).unwrap() }
+    /**
+     * First-boot activation. Public/unsigned — the one call valid before credentials exist.
+     *
+     * The deviceId is taken from [DeviceIdProvider] rather than passed in: it is this install's
+     * permanent identity, and a caller free to supply its own could bind the station's once-only
+     * credentials to an id the device will never present again (TODO #16). The signing interceptor
+     * already sources the same value from the credential store for every other call, so activation
+     * reads from the same authority instead of being the one place an ad-hoc id could enter.
+     */
+    suspend fun activate(activationCode: String): ApiResult<ActivateResponse> =
+        safeApiCall {
+            service.activate(ActivateRequest(activationCode, deviceIdProvider.deviceId())).unwrap()
+        }
 
     /** Start a sale. On success the response carries the Paystack authorizationUrl for the QR. */
     suspend fun authorise(request: AuthoriseRequest): ApiResult<AuthoriseResponse> =

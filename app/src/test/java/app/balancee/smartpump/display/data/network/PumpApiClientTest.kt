@@ -9,6 +9,7 @@ package app.balancee.smartpump.display.data.network
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
 import app.balancee.smartpump.display.data.network.dto.FuelType
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionRequest
+import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import app.balancee.smartpump.display.domain.network.PumpCredentials
 import app.balancee.smartpump.display.domain.network.PumpCredentialsStore
 import kotlinx.coroutines.runBlocking
@@ -31,12 +32,18 @@ import java.time.ZoneOffset
 
 class PumpApiClientTest {
 
-    private val creds = PumpCredentials("dev-01", "bal_live_test", "test-signing-secret")
+    private val creds =
+        PumpCredentials("dev-01", "P1", "bal_live_test", "test-signing-secret")
     private val clock = Clock.fixed(Instant.parse("2026-07-03T12:00:00Z"), ZoneOffset.UTC)
 
     private lateinit var server: MockWebServer
     private lateinit var store: FakeStore
     private lateinit var client: PumpApiClient
+
+    /** The client sources the deviceId itself now, so activation can't be handed an ad-hoc one. */
+    private class FakeDeviceIds(private val id: String) : DeviceIdProvider {
+        override fun deviceId(): String = id
+    }
 
     private class FakeStore(var creds: PumpCredentials?) : PumpCredentialsStore {
         override fun current(): PumpCredentials? = creds
@@ -64,7 +71,7 @@ class PumpApiClientTest {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(PumpApiService::class.java)
-        client = PumpApiClient(service)
+        client = PumpApiClient(service, FakeDeviceIds("device_001"))
     }
 
     @After
@@ -94,7 +101,7 @@ class PumpApiClientTest {
             ),
         )
 
-        val result = client.activate("PMP-O8l6zj", "device_001")
+        val result = client.activate("PMP-O8l6zj")
 
         assertTrue(result is ApiResult.Success)
         val body = (result as ApiResult.Success).data
@@ -102,6 +109,37 @@ class PumpApiClientTest {
         assertEquals("7f108b57-7559-4837-8dfb-33c7aac7d632", body.pumpId)
         assertEquals("bal_live_xxxxxxxxxxxxxxxxxxxx", body.apiKey)
         assertEquals("sec_xxxxxxxxxxxxxxxxxxxxxxxx", body.signingSecret)
+    }
+
+    /**
+     * The one call that decides this install's identity forever (TODO #16): whatever the provider
+     * mints must be what reaches /activate, because the credentials the server issues are bound
+     * to it and every later signed request presents it as X-Device-Id.
+     */
+    @Test
+    fun `activate sends the provider's deviceId, not a caller-supplied one`() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "status": true,
+                  "message": "Pump activated successfully",
+                  "data": {
+                    "deviceId": "device_001",
+                    "pumpId": "7f108b57-7559-4837-8dfb-33c7aac7d632",
+                    "apiKey": "bal_live_xxxxxxxxxxxxxxxxxxxx",
+                    "signingSecret": "sec_xxxxxxxxxxxxxxxxxxxxxxxx"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        client.activate("PMP-O8l6zj")
+
+        val sent = server.takeRequest().body.readUtf8()
+        assertTrue(sent.contains(""""deviceId":"device_001""""))
+        assertTrue(sent.contains(""""activationCode":"PMP-O8l6zj""""))
     }
 
     /**

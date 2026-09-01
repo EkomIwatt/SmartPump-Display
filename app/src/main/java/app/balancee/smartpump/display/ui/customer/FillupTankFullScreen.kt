@@ -51,7 +51,7 @@ fun FillupTankFullScreen(
     onPayCash: () -> Unit,
     onPayDigital: () -> Unit,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
     digitalEnabled: Boolean = false,
 ) {
     val accent = PrimaryGold
@@ -64,7 +64,7 @@ fun FillupTankFullScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = pumpId,
+            pumpLabel = pumpLabel,
             mode = "Fill up",
             stateLabel = "Tank full",
             stateColor = accent,

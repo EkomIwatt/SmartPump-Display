@@ -59,7 +59,7 @@ fun FillupDigitalAwaitingPaymentScreen(
     expiresInSeconds: Int,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
-    pumpId: String = "Pump 1",
+    pumpLabel: String = "Pump 1",
 ) {
     val accent = PrimaryGold
 
@@ -71,7 +71,7 @@ fun FillupDigitalAwaitingPaymentScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PumpHeader(
-            pumpId = pumpId,
+            pumpLabel = pumpLabel,
             mode = "Fill up · digital",
             stateLabel = "Scan to pay",
             stateColor = accent,

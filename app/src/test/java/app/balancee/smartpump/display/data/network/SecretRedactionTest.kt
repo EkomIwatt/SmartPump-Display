@@ -17,6 +17,7 @@ class SecretRedactionTest {
 
     private val creds = PumpCredentials(
         deviceId = "device_001",
+        pumpId = "7f108b57-7559-4837-8dfb-33c7aac7d632",
         apiKey = "bal_live_xxxxxxxxxxxxxxxxxxxx",
         signingSecret = "sec_xxxxxxxxxxxxxxxxxxxxxxxx",
     )
@@ -29,12 +30,14 @@ class SecretRedactionTest {
     )
 
     @Test
-    fun `PumpCredentials toString hides both secrets and keeps the deviceId`() {
+    fun `PumpCredentials toString hides both secrets and keeps the ids`() {
         val printed = "$creds"
 
         assertFalse(printed.contains("bal_live_xxxxxxxxxxxxxxxxxxxx"))
         assertFalse(printed.contains("sec_xxxxxxxxxxxxxxxxxxxxxxxx"))
-        assertTrue(printed.contains("device_001")) // not secret, and the useful part of a log line
+        // Neither id is secret, and they are the useful part of a log line.
+        assertTrue(printed.contains("device_001"))
+        assertTrue(printed.contains("7f108b57-7559-4837-8dfb-33c7aac7d632"))
     }
 
     @Test

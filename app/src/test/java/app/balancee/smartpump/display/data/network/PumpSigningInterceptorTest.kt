@@ -31,6 +31,7 @@ class PumpSigningInterceptorTest {
 
     private val creds = PumpCredentials(
         deviceId = "dev-01",
+        pumpId = "P1",
         apiKey = "bal_live_test",
         signingSecret = "test-signing-secret",
     )

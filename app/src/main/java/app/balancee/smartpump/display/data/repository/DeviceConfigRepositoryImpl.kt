@@ -22,7 +22,7 @@ class DeviceConfigRepositoryImpl @Inject constructor(
     override fun observeConfig(): Flow<DeviceConfig?> = dao.observe().map { it?.toDomain() }
 
     private fun DeviceConfigEntity.toDomain() = DeviceConfig(
-        pumpId = pumpId,
+        pumpLabel = pumpLabel,
         stationName = stationName,
         koboPerLitre = koboPerLitre,
         virtualAccountNumber = virtualAccountNumber,
@@ -30,7 +30,7 @@ class DeviceConfigRepositoryImpl @Inject constructor(
     )
 
     private fun DeviceConfig.toEntity() = DeviceConfigEntity(
-        pumpId = pumpId,
+        pumpLabel = pumpLabel,
         stationName = stationName,
         koboPerLitre = koboPerLitre,
         virtualAccountNumber = virtualAccountNumber,
