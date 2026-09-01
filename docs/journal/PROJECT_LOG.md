@@ -1,6 +1,6 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-08-04
+## Current status — 2026-09-02
 
 Strict-design rebuild is complete and merged to `main`: all 5 flows, the attendant overlay, persistence/boot-resume, kobo money, and Room migrations are in. **Phase 7a (real USB-serial hardware) is merged to `main`** (Arduino pulse driver + relay, bench-verified). `main` is pushed to `origin`.
 
@@ -8,9 +8,13 @@ Strict-design rebuild is complete and merged to `main`: all 5 flows, the attenda
 
 **Phase 8 (CustomerViewModel unit tests) is DONE and MERGED to `main`** (merge commit `d2c4283`, 2026-08-04; branch commits `88be743`/`98fa167`/`a128457`/`0bd45f3`) — 23 new pure-JVM tests (money/cutoff, dispensing completion, boot-resume, lifecycle) via hand-written fakes + an `UnconfinedTestDispatcher` rule; test-only bar one build flag. Post-merge verification on `main`: full suite green at **81 tests** (12 classes, 0 failures/errors/skips) and `compileDebugRealHwKotlin` clean. **Pushed: `main` = `origin/main` = `f5038d8`; branch `feature/phase-8-vm-tests` deleted.**
 
-**⚠️ API conformance audit — 2026-08-05.** The Pump API Reference PDF landed in `docs/` on 2026-08-04 (first sight of the *primary* doc; the network layer was built in July against our summary of it). Line-by-line audit found **9 issues** — see [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md), tracked as TODO #11–#18. Headlines: **(#11, critical)** responses are enveloped in `{status,message,data}` and we parse the inner shape → **all 5 calls fail against the real server**, and the MockWebServer fixtures encode the same wrong assumption so the green suite proved nothing; **(#12, security)** debug `Level.BODY` logging prints `apiKey`+`signingSecret` from the `/activate` body — no leak yet (logcats grepped clean; activation never ran), fix before first activation; **(#13)** the once-only `pumpId` is never persisted. **Decided:** `amount` is **naira** (app stays kobo; mapper owns the ÷100). **Backend gaps:** `GET /config` and `GET /transactions/{id}` don't exist, and **nothing tells the pump its `fuelType`** — which `/authorise` requires. Signing, headers, retry policy and the Keystore store all verified **correct**.
+**⚠️ API conformance audit — 2026-08-05 → 4 of 9 issues FIXED and MERGED 2026-09-02.** The Pump API Reference PDF landed in `docs/` on 2026-08-04 (first sight of the *primary* doc; the network layer was built in July against our summary of it). Line-by-line audit found **9 issues** — see [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md), tracked as TODO #11–#18. **`fix/api-response-envelope` is MERGED to `main`** (merge commit `cdb7c55`) closing the two that blocked everything plus the two identity fields: **(#11, critical)** responses are enveloped in `{status,message,data}` and we parsed the inner shape → all 5 calls would have failed against the real server, and the fixtures encoded the same wrong assumption so the green suite proved nothing — now `ApiEnvelope<T>` + `unwrap()`, every fixture rebuilt **verbatim from the Reference's literal JSON**; **(#12, security)** `apiKey`/`signingSecret` could reach logcat via `Level.BODY` *and* via the data-class `toString()` (a route the audit missed) — both closed by an allowlist `PumpLoggingInterceptor` + redacted `toString()`; **no leak ever occurred** (logcats re-grepped clean; activation never ran); **(#13/#16)** the once-only `pumpId` is now persisted and required, and `deviceId` is minted once into its own *plain* prefs file (deliberately **not** the encrypted blob, which self-purges on KeyStore invalidation and would silently re-mint the identity). **Decided:** `amount` is **naira** (app stays kobo; mapper owns the ÷100). Signing, headers, retry policy and the Keystore store were verified **correct**.
 
-**Next:** fix #11 (envelope) → #12 (credential logging) → #14/#15/#13/#16 with the activation flow. Send the #18 backend asks immediately (longest lead time). Then unblocked Phase 7 sub-phases (7b operator config — interim device-local config screen / 7e backend sync) + payment feature flows (#8).
+**Verification at merge:** JVM suite **107 tests / 15 classes**, 0 failures/errors/skips (81 → 107 across the batch); `compileDebugRealHwKotlin` clean; **instrumented on the SM-T220 (Android 14) = 8 tests green** — the 2 deviceId invariants plus the Keystore store now at 6 (the added case proves the `v: 2` legacy-blob purge against real crypto). `main` = `cdb7c55`, **ahead of `origin/main` by 8 — not yet pushed.** Branch `fix/api-response-envelope` still exists locally.
+
+**Still open from the audit — #14, #15, #18.** **#14** (parse the envelope out of 4xx error bodies; `ApiError.Business` already exists) is blocked on *copy*, not code — no error screen in `docs/Strict design screens/`, OQ #17 open. **#15**'s mapping half is ready and rides on #14; its enforcement half has no home (not a device-owner app, so it cannot set the clock — only read `Settings.Global.AUTO_TIME` and warn). **#18 backend asks remain unsent and are the critical path by lead time:** `GET /config` and `GET /transactions/{id}` don't exist, **nothing tells the pump its `fuelType`** (which `/authorise` requires), does `amount` accept decimals, the full status set, what to sign for a GET — plus a new fifth ask: **stable error codes** alongside `message`, since matching on interpolated human strings breaks silently on a reword.
+
+**Next:** send the #18 asks. Then #14/#15 once error copy exists, 7b operator config (the device-local screen doubles as the `/config` fallback), 7e backend sync, and the payment feature flows (#8).
 
 Older entries (Week 1 → Room migrations) are archived in [PROJECT_LOG_ARCHIVE.md](PROJECT_LOG_ARCHIVE.md).
 
@@ -447,3 +451,98 @@ fixtures. Then #12 before any real activation. #14/#15/#13/#16 alongside the act
 #18 asks to the boss immediately (longest lead time). Interim for `/config`: build the device-local
 operator config screen as 7b's first half behind the existing `DeviceConfigRepository` seam — also the
 backend-unreachable fallback, so not throwaway.
+
+---
+
+### API conformance batch — envelope, secret logging, and the two identity fields (#11/#12/#13/#16)
+**Date:** 2026-09-02
+**Status:** done
+**Commit(s):** `cda2f7e` (#11), `e901ecb` (#12), `3ed6fff` (#13/#16), `00e16a4`/`5c17a4f`/`1f03b46`/`b20d349` (docs); merged to `main` as `cdb7c55` from `fix/api-response-envelope`
+
+**Summary (plain language):**
+The Pump API Reference PDF arrived in August, and reading it line by line showed that the code we
+wrote in July — against our own written summary of that API rather than the document itself — had
+four real problems. This phase fixes them.
+
+The big one: every reply the server sends is wrapped in an outer envelope, like a letter in a
+sealed package, and our code was reading the package as though it were the letter. **Every single
+one of the five calls to the backend would have failed** the first time we pointed the app at a
+real server. Worse, our tests had been written with the same misunderstanding baked in, so they
+passed happily and told us nothing — the tests confirmed our mistake instead of catching it. The
+fixtures are now copied word-for-word out of the Reference document, so they can only agree with
+the real server.
+
+The second: the app's debug logging could have printed the two permanent secrets the server hands
+out at setup — the API key and the signing key — into the device log, and we commit device logs
+into this repo. **Nothing actually leaked** (we searched every committed log; the setup step has
+never been run against a real server), but the secrets are issued once, so a leak would have meant
+asking the backend team to cancel and reissue them. Both routes are now closed.
+
+The last two are about identity. When the pump is first set up, the server permanently assigns it
+an ID and expects the pump to remember a second ID it makes up for itself. Neither was being kept.
+Both are now stored properly and, importantly, they survive the kind of maintenance — resetting the
+app's saved credentials — that would otherwise have made the pump unable to prove who it was, with
+no way to recover.
+
+Verified on the actual tablet, not just on the laptop.
+
+**Technical notes:**
+- **#11 envelope (critical).** `ApiEnvelope<T>(status, message, data)`; every `PumpApiService` method
+  now returns `ApiEnvelope<T>` and `PumpApiClient` calls `unwrap()`. `status:false` (or `status:true`
+  with absent `data`) throws `EnvelopeFailureException` → `ApiError.Business(message, httpCode)`,
+  **not retryable**, so the idempotent upload cannot hammer a considered refusal. All success
+  fixtures rebuilt verbatim from §4.1/§4.2/§4.3; `PumpSigningInterceptorTest`'s three fixtures went
+  red the instant the shape was corrected — which was the point. Added a regression test asserting
+  the *old* unenveloped shape now fails as `ApiError.Serialization`.
+- **Reading the primary doc:** the PDF has no text layer this machine can extract (no poppler/pypdf),
+  so the literal JSON was recovered by decoding the PDF's Flate streams and ToUnicode CMaps directly.
+  Envelope + all three `data` shapes confirmed field-by-field. The same pass extracted the full error
+  catalogue, which the audit had only sampled — it now feeds #14/#15.
+- **#12 secret logging (security).** `PumpLoggingInterceptor` replaces raw `HttpLoggingInterceptor`;
+  body logging is an **allowlist** (`/authorise`, `/config`, `/transactions/upload`,
+  `/transactions/{id}`), so `/activate` — and any endpoint added later, e.g. the credential rotation
+  anticipated in OQ #8 — drops to `HEADERS`. Allowlist over denylist deliberately: forgetting to
+  update it yields thinner logs, not a leaked secret. Second door: `PumpCredentials` and
+  `ActivateResponse` are data classes whose generated `toString()` printed both secrets in full — a
+  route the audit missed, closed by redacting both. 12 tests assert on what was actually **written**
+  (real OkHttp stack + MockWebServer + collecting logger) rather than on interceptor configuration,
+  which is precisely what was wrong before.
+- **#13 `pumpId`.** Required (not defaulted) on `PumpCredentials` and `StoredCredentials`, so
+  activation code cannot construct credentials without it — that *is* the enforcement, since there is
+  no activation flow yet (#8) to remember to do it. Collision resolved by renaming the *other* one:
+  `DeviceConfig.pumpId` → `pumpLabel`; Room column preserved via `@ColumnInfo(name = "pumpId")` →
+  **no migration** (`identityHash` unchanged at `2c9cd927…`). Stored blob versioned `v: 2`; a pre-#13
+  blob is purged rather than partially read — defaulting to `""` would decode cleanly and then earn
+  an opaque `401 pumpId does not match authenticated device` in the field, where "not activated" is
+  the honest, recoverable answer. Nothing real was purged; no device has activated.
+- **#16 `deviceId`.** `DeviceIdProvider` (domain seam) + `PersistentDeviceIdProvider` mint a random
+  UUID once and never re-mint. **Departs from the audit on storage:** kept in its own *plain* prefs
+  file, not the encrypted credentials blob. The deviceId is not secret (it goes out as `X-Device-Id`),
+  and the encrypted store deliberately drops its blob on KeyStore invalidation or corruption — so
+  storing identity there would silently mint a new deviceId on the next boot, reintroducing the exact
+  unrecoverable failure the issue exists to prevent. A separate file also survives credentials
+  `clear()`. Two unnamed hardenings: a failed write **throws** rather than returning an
+  in-memory-only id, and `activate()` sources the deviceId from the provider instead of taking it as
+  a parameter, so no caller can supply an ad-hoc one.
+- **Verification.** JVM suite **107 tests / 15 classes**, 0 failures/errors/skips (81 → 107 across
+  the batch); `compileDebugRealHwKotlin` clean. **Instrumented on the SM-T220 (Android 14):**
+  `connectedDebugAndroidTest` = **8 tests, 0 failures/errors/skips** — the 2 new deviceId tests
+  (persists across a fresh instance; credentials `clear()` does not change it) plus
+  `KeystorePumpCredentialsStoreTest` now at **6** (was 5 at gate #10), the added case proving the
+  `v: 2` legacy-blob purge against real KeyStore crypto. Gradle was pinned with
+  `ANDROID_SERIAL=R83WC02H90E` — the tablet enumerates twice (USB + wireless adb) and would
+  otherwise have run the suite against the same physical device twice.
+- **Standing lesson, restated:** where a spec exists, build fixtures from its literal examples. Had
+  `PumpApiClientTest` done that in July, #11 would never have shipped.
+
+**Next:**
+Three audit items remain, none of them code-blocked in the way #11 was. **#14** (parse the envelope
+out of 4xx error bodies, fill in `httpCode`, map known messages to attendant copy) is blocked on
+*copy*, not parsing — there is no error screen in `docs/Strict design screens/` and OQ #17 is open.
+**#15**'s mapping half is ready and rides on #14, but its enforcement half has no home: the app is
+not a device-owner app (kiosk lock-task still deferred), so it cannot set the clock — only read
+`Settings.Global.AUTO_TIME` and warn. **#18**'s backend asks remain the critical path by lead time,
+still unsent, and now carry a fifth: request **stable error codes** alongside `message`, since
+matching on interpolated human strings ("Amount mismatch for PETROL…") breaks silently on a reword.
+Otherwise: 7b operator config (the device-local screen doubles as the `/config` fallback) and the
+payment feature flows (#8).
