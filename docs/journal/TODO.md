@@ -35,8 +35,8 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
 
 Full analysis: [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md). The network layer was built
 against our *summary* of the API, not the Reference itself (which only landed in the repo 2026-08-04).
-9 issues found. ~~**#11 blocks all backend integration**~~ — **#11 is FIXED (2026-09-01)**;
-**#12 must land before the first real activation.**
+9 issues found. **#11 and #12 are both FIXED (2026-09-01)** — the two that blocked, respectively,
+all backend integration and the first real activation. #13–#16 + #18 remain.
 
 - [x] **11. Response envelope not handled — FIXED 2026-09-01** on branch
   `fix/api-response-envelope`. `ApiEnvelope<T>(status, message, data)` added; every
@@ -56,11 +56,28 @@ against our *summary* of the API, not the Reference itself (which only landed in
   - **Note for #14:** `ApiError.Business` is the type #14 needs. #14 is now only "parse the envelope
     out of 4xx *error* bodies and fill in `httpCode`" — no new type, and `ApiError.Http` still
     carries the raw blob until it lands.
-- [ ] **12. `apiKey`/`signingSecret` logged to logcat (HIGH, security).** `Level.BODY` in debug +
-  `redactHeader` only covers headers, so the `/activate` response body prints both secrets.
-  `debugRealHw` is a debug build and we commit logcats to `docs/logcats/`. **No leak yet** (grepped
-  clean; activation never ran). Fix before the first activation against dev — the secret is emitted
-  once and costs a revoke-and-reissue.
+- [x] **12. `apiKey`/`signingSecret` logged to logcat — FIXED 2026-09-01** on branch
+  `fix/api-response-envelope`. **No leak ever occurred** — `docs/logcats/` re-grepped for
+  `signingSecret`/`apiKey`/`bal_live`/`sec_…`/`X-Signature`: zero hits across all three committed
+  logs, consistent with activation never having run. Two doors closed:
+  - **The wire.** New `PumpLoggingInterceptor` replaces the raw `HttpLoggingInterceptor` in
+    `NetworkModule`. Body logging is now an **allowlist** (`/authorise`, `/config`,
+    `/transactions/upload`, `/transactions/{id}`); everything else — `/activate`, and any endpoint
+    added later, such as the credential rotation anticipated in OQ #8 — drops to `HEADERS`. Chosen
+    over a denylist deliberately: the failure mode of forgetting to update it is thinner logs, not
+    a leaked secret. The `X-Api-Key`/`X-Signature` header redactions are kept.
+  - **`toString()`.** `PumpCredentials` and `ActivateResponse` are both data classes, so their
+    generated `toString()` printed both secrets in full — any stray `Log.d(TAG, "$creds")`, crash
+    report or `ApiResult` dump leaked them just as surely. Both now redact. _(Not in the audit;
+    found while fixing the wire path.)_
+  - **Tests (12 new).** Assert on what was actually **written** — a real OkHttp stack against
+    MockWebServer with a collecting logger, fed the Reference's literal `/activate` response —
+    rather than on how the interceptor is configured, which is what was wrong before. Covers: the
+    secrets never appear; the single-use `activationCode` never appears; `/activate` is *still*
+    logged at header level (guards the wrong fix of just silencing logging); `/authorise` still
+    logs bodies in full; and the allowlist predicate incl. default-deny + base-URL-prefix cases.
+  - Suite green at **99 tests** (14 classes, 0 failures/errors/skips); `compileDebugRealHwKotlin`
+    clean. _(move to PROJECT_LOG when the conformance batch is logged.)_
 - [ ] **13. `pumpId` never persisted (HIGH).** Returned once by `/activate`, required in the body of
   `/authorise` and `/upload`, absent from `PumpCredentials`. Also rename to kill the
   `DeviceConfig.pumpId` ("PUMP 1") vs API `pumpId` (UUID) collision.

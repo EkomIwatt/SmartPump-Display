@@ -136,6 +136,21 @@ exposure is entirely ahead of us.
 interceptor for that path. Do this *before* the first activation against dev, because the secret is
 emitted exactly once and cannot be rotated without revoke-and-reissue at the station.
 
+> **RESOLVED 2026-09-01** (branch `fix/api-response-envelope`). `PumpLoggingInterceptor` replaces the
+> raw `HttpLoggingInterceptor`: body logging is an **allowlist** of vetted paths, so `/activate` —
+> and anything added later — logs headers only. Allowlist over denylist deliberately: forgetting to
+> update it costs log detail, not a secret.
+>
+> **This audit under-scoped the issue.** Both types that hold the credentials — `PumpCredentials` and
+> `ActivateResponse` — are data classes, so their generated `toString()` printed `apiKey` and
+> `signingSecret` in full. A single `Log.d(TAG, "$creds")`, an uncaught-exception dump, or logging an
+> `ApiResult` from activate would have leaked them without the HTTP logger being involved at all.
+> Both now redact. Worth generalising: "don't log X" is not a property of one code path, it is a
+> property of the *type*, and the audit only looked at the path.
+>
+> Exposure re-confirmed as **none**: `docs/logcats/` grepped again across all three committed logs —
+> zero hits for `signingSecret`/`apiKey`/`bal_live`/`sec_…`/`X-Signature`.
+
 ---
 
 ## 4. Design gaps — not yet wrong, but will be
