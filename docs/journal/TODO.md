@@ -35,8 +35,9 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
 
 Full analysis: [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md). The network layer was built
 against our *summary* of the API, not the Reference itself (which only landed in the repo 2026-08-04).
-9 issues found. **#11 and #12 are both FIXED (2026-09-01)** — the two that blocked, respectively,
-all backend integration and the first real activation. #13–#16 + #18 remain.
+9 issues found. **#11, #12, #13 and #16 are FIXED (2026-09-01)**: the two that blocked backend
+integration and the first real activation, plus the two identity fields — `pumpId` and `deviceId` —
+that `/activate` settles once and cannot reissue. **#14, #15 and #18 remain.**
 
 - [x] **11. Response envelope not handled — FIXED 2026-09-01** on branch
   `fix/api-response-envelope`. `ApiEnvelope<T>(status, message, data)` added; every
@@ -78,19 +79,65 @@ all backend integration and the first real activation. #13–#16 + #18 remain.
     logs bodies in full; and the allowlist predicate incl. default-deny + base-URL-prefix cases.
   - Suite green at **99 tests** (14 classes, 0 failures/errors/skips); `compileDebugRealHwKotlin`
     clean. _(move to PROJECT_LOG when the conformance batch is logged.)_
-- [ ] **13. `pumpId` never persisted (HIGH).** Returned once by `/activate`, required in the body of
-  `/authorise` and `/upload`, absent from `PumpCredentials`. Also rename to kill the
-  `DeviceConfig.pumpId` ("PUMP 1") vs API `pumpId` (UUID) collision.
+- [x] **13. `pumpId` never persisted — FIXED 2026-09-01** on branch `fix/api-response-envelope`.
+  `pumpId` is now a **required** field on `PumpCredentials` and on the store's `StoredCredentials`
+  — required rather than defaulted, so activation code cannot construct credentials without it.
+  That *is* the enforcement; there is no activation flow yet (#8) to remember to do it.
+  - **Collision killed by renaming the other one:** `DeviceConfig.pumpId` → `pumpLabel` (plus the
+    matching UI parameters and the debug form's "Pump label"), so `pumpId` now means the API UUID
+    everywhere. The Room column keeps its name via `@ColumnInfo(name = "pumpId")` → **no migration**;
+    verified the generated `identityHash` is unchanged at `2c9cd927…`.
+  - **Stored blob is now versioned (`v: 2`).** A pre-#13 blob fails to decode and is purged like
+    corrupt ciphertext. Deliberate: defaulting `pumpId` to `""` would decode cleanly and then send
+    an empty pumpId to `/authorise` → `401 pumpId does not match authenticated device`, an opaque
+    401 in the field where "not activated" is the honest, recoverable answer. Nothing real is
+    purged — no device has activated. _(move to PROJECT_LOG when the conformance batch is logged.)_
 - [ ] **14. Error `message` discarded (MED).** Business errors ("Amount mismatch…", "out of stock",
   "Payment has not been confirmed") arrive as opaque blobs. ~~Add `ApiError.Business(code, message)`~~
   — **the type already exists** (added by #11, currently only fed by 2xx envelope refusals). What's
   left: parse the envelope out of 4xx *error* bodies in `safeApiCall`, fill in `httpCode`, and map
   the handful of known messages to attendant-facing copy.
+  - **The Reference's full error catalogue is now extracted** (2026-09-01, same Flate/ToUnicode
+    decode as #11 — the audit had only sampled it): global codes 400 / 401 / 404, eight literal 401
+    auth messages, and per-endpoint tables for §4.2 and §4.3. §1 states the failure envelope
+    explicitly (`status:false`, `data` absent, `message` = reason), but the doc never prints a
+    literal failure *body* — so parse defensively and fall back to `ApiError.Http` when a 4xx body
+    is not envelope-shaped, or a plain-text 502 from a proxy becomes `Business(null)`.
+  - **Blocked on copy, not on parsing.** Mapping messages to attendant-facing text needs copy that
+    does not exist: there is no error screen in `docs/Strict design screens/` and OQ #17 is open.
+  - **New #18 ask:** the API returns human message strings only, several with interpolated values
+    ("Amount mismatch for PETROL…", "Fuel type not available at station: PETROL"). Matching on
+    substrings breaks silently if the backend rewords — **request stable error codes** alongside
+    `message`.
 - [ ] **15. Clock skew unguarded (MED).** ±5 min or every request 401s. Enforce automatic network
   time at install; map that 401 to distinguishable attendant copy.
-- [ ] **16. `deviceId` has no generator (MED).** Ours to mint, must be stable forever (change →
-  revoke-and-reissue). Recommend a random UUID in the encrypted store, not `ANDROID_ID`
-  (resets on factory reset).
+  - **Mapping half is ready and rides on #14.** Exact strings confirmed from the Reference:
+    `Request timestamp is not fresh` (clock skew > 5 min from server UTC) and `Invalid request
+    timestamp` (malformed / non-ISO-8601) — two different causes, and only the first means "fix the
+    clock", so they want distinguishable copy.
+  - **Enforcement half has no home yet.** The app is not a device-owner app (kiosk lock-task still
+    deferred), so it **cannot set the clock itself**; the most it can do is read
+    `Settings.Global.AUTO_TIME` and warn. Whether that gate lives in the debug screen now, waits for
+    the activation flow (#8), or becomes a physical install-checklist item is an open call.
+- [x] **16. `deviceId` has no generator — FIXED 2026-09-01** on branch `fix/api-response-envelope`.
+  `DeviceIdProvider` (domain seam) + `PersistentDeviceIdProvider` mint a random UUID once and never
+  re-mint. UUID over `ANDROID_ID` as recommended (`ANDROID_ID` resets on factory reset — the exact
+  maintenance action a technician performs on a misbehaving kiosk).
+  - **Departs from the audit on storage:** kept in its own **plain** prefs file, *not* the encrypted
+    credentials blob. The deviceId is not secret (it goes out as `X-Device-Id`), and the encrypted
+    store deliberately drops its blob on KeyStore invalidation or corruption — so storing identity
+    there would silently mint a new deviceId on the next boot, which is the very failure this issue
+    exists to prevent. A separate file also survives credentials `clear()`, so re-activation
+    presents the identity the backend already knows.
+  - **Two hardenings the issue didn't name:** a failed write **throws** rather than returning an
+    id that only exists in memory, and `PumpApiClient.activate()` now sources the deviceId from the
+    provider instead of taking it as a parameter, so no caller can supply an ad-hoc one.
+  - **Tests:** 8 pure-JVM (mint-once, reuse across a fresh instance, blank-is-absent, failed-write
+    throws, 8-thread concurrent first call, UUID shape) via a `DeviceIdStorage` seam — deliberately
+    off-device, unlike the crypto store's coverage which needed a device and then sat unrun for
+    weeks. Plus 2 **instrumented** tests for what only a device can show (persistence across a fresh
+    instance; credentials `clear()` does not change the id) — **written, not yet run: needs the
+    tablet.** _(move to PROJECT_LOG when the conformance batch is logged.)_
 - [x] **17. `amount` money unit — DECIDED 2026-08-05: NAIRA.** Reference example `amount 7000 /
   expectedLitres 10` → ₦700/L. App stays kobo; repository mapper owns the ÷100. Fails closed at
   `/authorise` if wrong. Recorded in `PumpApiDtos.kt`. _(Decimals still open — see #18.)_

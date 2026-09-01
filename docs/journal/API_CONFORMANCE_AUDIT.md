@@ -172,6 +172,23 @@ than relying on care.
 
 **Fix:** add `pumpId` to `PumpCredentials` + `StoredCredentials`, persist at activation.
 
+> **RESOLVED 2026-09-01** (branch `fix/api-response-envelope`). `pumpId` is now a **required**
+> field on `PumpCredentials` and on the store's `StoredCredentials` — required rather than
+> defaulted, so activation code physically cannot construct credentials without it. That is the
+> whole enforcement: there is no activation flow yet (#8) to "remember" to persist it in.
+>
+> The name collision was killed by renaming the *other* one: `DeviceConfig.pumpId` → `pumpLabel`
+> (and the matching UI parameters), leaving `pumpId` to mean the API UUID everywhere. The Room
+> column keeps its original name via `@ColumnInfo(name = "pumpId")`, so the rename needs **no
+> migration** — verified: the generated `identityHash` is unchanged at `2c9cd927…`.
+>
+> The stored blob is now **versioned** (`v: 2`). A pre-#13 blob fails to decode (no `pumpId`) and
+> is purged as unreadable, exactly like corrupt ciphertext. Deliberate: defaulting `pumpId` to `""`
+> would decode cleanly and then send an empty pumpId to `/authorise`, whose answer is
+> `401 pumpId does not match authenticated device` — an opaque 401 in the field where a
+> "not activated" prompt is the honest, recoverable outcome. No device has activated, so nothing
+> real is being purged.
+
 ---
 
 ### #3 — Clock skew unguarded (Medium)
@@ -203,6 +220,25 @@ revoke-and-reissue.
 **Recommendation:** a random UUID minted once into the encrypted credentials store. `ANDROID_ID` is
 tempting but resets on factory reset — which is exactly the maintenance action a confused technician
 performs on a misbehaving kiosk.
+
+> **RESOLVED 2026-09-01** (branch `fix/api-response-envelope`). `DeviceIdProvider` (domain seam) +
+> `PersistentDeviceIdProvider` mint a random UUID on first use and never re-mint. The UUID
+> recommendation is taken as written; the storage recommendation is **not**.
+>
+> **Departure from this audit: the deviceId is stored in its own plain SharedPreferences file, not
+> in the encrypted credentials store.** It is not secret — it travels in the clear as
+> `X-Device-Id` — so encryption buys nothing, and putting it in the encrypted blob would couple
+> identity to the KeyStore key. `KeystorePumpCredentialsStore` deliberately *drops* its blob when
+> that key is invalidated or the ciphertext is unreadable; if the deviceId went with it, the next
+> boot would silently mint a new identity — which is precisely the unrecoverable failure this
+> issue is about, reintroduced by the fix. A separate file also means credentials `clear()`
+> (revoke/reissue, debug re-onboarding) cannot touch it, so re-activation presents the identity
+> the backend already knows.
+>
+> Two further hardenings the issue did not name: a **failed write throws** rather than returning an
+> in-memory-only id (activating against an id that will not survive a reboot is the same
+> unrecoverable state), and `PumpApiClient.activate()` now **sources the deviceId from the provider
+> instead of taking it as a parameter**, so no caller can introduce an ad-hoc one.
 
 ---
 
