@@ -16,4 +16,14 @@ data class PumpCredentials(
     val deviceId: String,
     val apiKey: String,
     val signingSecret: String,
-)
+) {
+    /**
+     * Redacted. The generated data-class toString() would print both secrets, so any
+     * `Log.d(TAG, "$credentials")`, any crash report, any `ApiResult` dump would leak them — the
+     * same defect as logging the /activate body (TODO #12), just via a different door. deviceId is
+     * kept: it is not secret (it goes out in the clear as X-Device-Id) and it is what you actually
+     * need when reading a log.
+     */
+    override fun toString(): String =
+        "PumpCredentials(deviceId=$deviceId, apiKey=***, signingSecret=***)"
+}
