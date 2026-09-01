@@ -1,3 +1,6 @@
+// These tests assert on the REQUEST the interceptor produces; the response fixtures only need to
+// be parseable. They still carry the Reference §1 envelope so nothing here quietly re-encodes
+// the unenveloped assumption that TODO #11 removed.
 package app.balancee.smartpump.display.data.network
 
 import app.balancee.smartpump.display.data.network.dto.ActivateRequest
@@ -69,8 +72,9 @@ class PumpSigningInterceptorTest {
     @Test
     fun `signed POST carries all four headers and signs the exact body sent`() = runBlocking {
         server.enqueue(MockResponse().setBody(
-            """{"status":"PENDING_PAYMENT","transactionId":"T1","paymentReference":"PR1",""" +
-                """"authorizationUrl":"https://paystack/x","expiresAt":"2026-07-03T12:05:00Z"}"""
+            """{"status":true,"message":"Transaction authorised","data":{""" +
+                """"status":"PENDING_PAYMENT","transactionId":"T1","paymentReference":"PR1",""" +
+                """"authorizationUrl":"https://paystack/x","expiresAt":"2026-07-03T12:05:00Z"}}"""
         ))
 
         service.authorise(
@@ -91,7 +95,8 @@ class PumpSigningInterceptorTest {
     @Test
     fun `unsigned activation endpoint carries no signing headers`() = runBlocking {
         server.enqueue(MockResponse().setBody(
-            """{"deviceId":"dev-01","pumpId":"P1","apiKey":"bal_live_x","signingSecret":"s"}"""
+            """{"status":true,"message":"Pump activated successfully","data":{""" +
+                """"deviceId":"dev-01","pumpId":"P1","apiKey":"bal_live_x","signingSecret":"s"}}"""
         ))
 
         service.activate(ActivateRequest("CODE-123", "dev-01"))
@@ -105,7 +110,7 @@ class PumpSigningInterceptorTest {
 
     @Test
     fun `signed GET with no body signs over timestamp and empty body`() = runBlocking {
-        server.enqueue(MockResponse().setBody("""{"prices":{"PETROL":87050}}"""))
+        server.enqueue(MockResponse().setBody("""{"status":true,"data":{"prices":{"PETROL":87050}}}"""))
 
         service.config()
 

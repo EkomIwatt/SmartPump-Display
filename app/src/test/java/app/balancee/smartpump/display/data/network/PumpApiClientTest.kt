@@ -1,3 +1,9 @@
+// Every success fixture below is copied VERBATIM from docs/pump-api-reference-v3.pdf — the literal
+// "Success Response (200 OK)" JSON of §4.1/§4.2/§4.3, envelope and all. That is deliberate: the
+// previous version of this file hand-wrote unenveloped fixtures matching our DTOs, so the suite was
+// green while the client could not actually parse a single real response (TODO #11). Fixtures that
+// restate an assumption test only self-consistency. If a fixture here needs editing to make a test
+// pass, the Reference is what must be re-read — not the fixture.
 package app.balancee.smartpump.display.data.network
 
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
@@ -13,6 +19,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -65,24 +72,179 @@ class PumpApiClientTest {
         runCatching { server.shutdown() }
     }
 
+    // ---- Success paths: the Reference's literal enveloped responses -----------------------------
+
+    /** Reference §4.1, "Success Response (200 OK)". */
     @Test
-    fun `authorise 2xx maps to Success with parsed DTO`() = runBlocking {
-        server.enqueue(MockResponse().setBody(
-            """{"status":"PENDING_PAYMENT","transactionId":"T1","paymentReference":"PR1",""" +
-                """"authorizationUrl":"https://paystack/x","expiresAt":"2026-07-03T12:05:00Z"}"""
-        ))
+    fun `activate unwraps the envelope and parses the once-only credentials`() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "status": true,
+                  "message": "Pump activated successfully",
+                  "data": {
+                    "deviceId": "device_001",
+                    "pumpId": "7f108b57-7559-4837-8dfb-33c7aac7d632",
+                    "apiKey": "bal_live_xxxxxxxxxxxxxxxxxxxx",
+                    "signingSecret": "sec_xxxxxxxxxxxxxxxxxxxxxxxx"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = client.activate("PMP-O8l6zj", "device_001")
+
+        assertTrue(result is ApiResult.Success)
+        val body = (result as ApiResult.Success).data
+        assertEquals("device_001", body.deviceId)
+        assertEquals("7f108b57-7559-4837-8dfb-33c7aac7d632", body.pumpId)
+        assertEquals("bal_live_xxxxxxxxxxxxxxxxxxxx", body.apiKey)
+        assertEquals("sec_xxxxxxxxxxxxxxxxxxxxxxxx", body.signingSecret)
+    }
+
+    /**
+     * Reference §4.2, "Success Response (200 OK)". Note the two unrelated `status` fields: the
+     * envelope's Boolean transport flag and `data.status`, the transaction status String. Reading
+     * the outer one as the transaction status is exactly the bug this test exists to catch.
+     */
+    @Test
+    fun `authorise unwraps the envelope and parses the inner data`() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "status": true,
+                  "message": "Transaction authorised",
+                  "data": {
+                    "status": "PENDING_PAYMENT",
+                    "transactionId": "txn_0007",
+                    "paymentReference": "BPM-5397913a552441f4aa853eb60ca47d05",
+                    "authorizationUrl": "https://checkout.paystack.com/pkjo1mam84zn2sx",
+                    "expiresAt": "2026-06-13T19:28:42Z"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
 
         val result = client.authorise(authoriseReq)
 
         assertTrue(result is ApiResult.Success)
         val body = (result as ApiResult.Success).data
         assertEquals("PENDING_PAYMENT", body.status)
-        assertEquals("https://paystack/x", body.authorizationUrl)
+        assertEquals("txn_0007", body.transactionId)
+        assertEquals("BPM-5397913a552441f4aa853eb60ca47d05", body.paymentReference)
+        assertEquals("https://checkout.paystack.com/pkjo1mam84zn2sx", body.authorizationUrl)
+        assertEquals("2026-06-13T19:28:42Z", body.expiresAt)
+    }
+
+    /** Reference §4.3, "Success Response (200 OK)". */
+    @Test
+    fun `upload unwraps the envelope and parses the inner data`() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "status": true,
+                  "message": "Transaction recorded",
+                  "data": {
+                    "status": "DISPENSED",
+                    "transactionId": "txn_0007",
+                    "paymentReference": "BPM-5397913a552441f4aa853eb60ca47d05"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = client.uploadTransaction(uploadReq)
+
+        assertTrue(result is ApiResult.Success)
+        val body = (result as ApiResult.Success).data
+        assertEquals("DISPENSED", body.status)
+        assertEquals("txn_0007", body.transactionId)
+        assertEquals("BPM-5397913a552441f4aa853eb60ca47d05", body.paymentReference)
+    }
+
+    /** Regression guard for #11: the shape we used to expect must now fail, loudly. */
+    @Test
+    fun `an unenveloped body is a Serialization failure, not a silent success`() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"status":"PENDING_PAYMENT","transactionId":"txn_0007",""" +
+                    """"paymentReference":"PR1","authorizationUrl":"https://paystack/x",""" +
+                    """"expiresAt":"2026-06-13T19:28:42Z"}""",
+            ),
+        )
+
+        val result = client.authorise(authoriseReq)
+
+        assertTrue(result is ApiResult.Failure)
+        assertTrue((result as ApiResult.Failure).error is ApiError.Serialization)
+    }
+
+    // ---- Envelope-level refusals ---------------------------------------------------------------
+
+    /**
+     * Reference §1: on failure `status` is false, `data` is absent, and `message` carries the
+     * reason. The documented business errors ship as 4xx (covered by the Http arm below), but a
+     * 2xx envelope saying no must not be read as success — `data` would be null.
+     */
+    @Test
+    fun `2xx envelope with status false maps to Business carrying the server message`() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"status":false,"message":"PETROL is currently out of stock"}""",
+            ),
+        )
+
+        val result = client.authorise(authoriseReq)
+
+        assertTrue(result is ApiResult.Failure)
+        val error = (result as ApiResult.Failure).error
+        assertTrue(error is ApiError.Business)
+        assertEquals("PETROL is currently out of stock", (error as ApiError.Business).message)
+        assertNull(error.httpCode) // envelope-level, not an HTTP status
     }
 
     @Test
+    fun `envelope claiming success with no data is a Business failure, never a crash`() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"status":true,"message":"Transaction authorised"}"""))
+
+        val result = client.authorise(authoriseReq)
+
+        assertTrue(result is ApiResult.Failure)
+        assertTrue((result as ApiResult.Failure).error is ApiError.Business)
+    }
+
+    /** A refusal is a considered answer, not a blip — the idempotent upload must not retry it. */
+    @Test
+    fun `upload does not retry an envelope-level refusal`() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"status":false,"message":"Payment has not been confirmed for this transaction. """ +
+                    """Do not dispense fuel."}""",
+            ),
+        )
+
+        val result = client.uploadTransaction(uploadReq)
+
+        assertTrue(result is ApiResult.Failure)
+        assertTrue((result as ApiResult.Failure).error is ApiError.Business)
+        assertEquals(1, server.requestCount)
+    }
+
+    // ---- Transport failures (unchanged by #11) -------------------------------------------------
+
+    @Test
     fun `non-2xx maps to Http error carrying code and body`() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":"bad amount"}"""))
+        server.enqueue(
+            MockResponse().setResponseCode(400).setBody(
+                """{"status":false,"message":"Amount mismatch for PETROL..."}""",
+            ),
+        )
 
         val result = client.authorise(authoriseReq)
 
@@ -90,7 +252,8 @@ class PumpApiClientTest {
         val error = (result as ApiResult.Failure).error
         assertTrue(error is ApiError.Http)
         assertEquals(400, (error as ApiError.Http).code)
-        assertTrue(error.body!!.contains("bad amount"))
+        // The message is still an opaque blob here — parsing it out is TODO #14.
+        assertTrue(error.body!!.contains("Amount mismatch for PETROL"))
     }
 
     @Test
@@ -126,9 +289,21 @@ class PumpApiClientTest {
     @Test
     fun `upload retries a 5xx then succeeds`() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(503))
-        server.enqueue(MockResponse().setBody(
-            """{"status":"DISPENSED","transactionId":"T1","paymentReference":"PR1"}"""
-        ))
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "status": true,
+                  "message": "Transaction recorded",
+                  "data": {
+                    "status": "DISPENSED",
+                    "transactionId": "txn_0007",
+                    "paymentReference": "BPM-5397913a552441f4aa853eb60ca47d05"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
 
         val result = client.uploadTransaction(uploadReq)
 
