@@ -198,10 +198,30 @@ never per pulse (AVR EEPROM is ~100k cycles — per-pulse writes at 50 pps destr
 hour); the totaliser is a **reporting figure**, with the app remaining system of record for litres
 sold.
 
-- [ ] **19. Blocked on Olonade — two spec readings to confirm before any code.**
-  - "stores last 10,000 pulse counts" — totaliser with rollover headroom, or a 10k-entry ring
-    buffer of per-dispense records? Determines whether OQ #24's session mark is free or must be
-    added to the protocol. *(User is confirming.)*
+- [ ] **19. Blocked on Olonade.**
+  - ~~"stores last 10,000 pulse counts" — totaliser or ring buffer?~~ **ANSWERED 2026-09-02 by his
+    bench sketch: a single lifetime totaliser, wear-levelled over 100 slots.** So the session mark
+    is *not* free and must be added to the protocol (**OQ #24 stands**). The "10,000" figure in the
+    spec matches neither reading and is still unexplained.
+  - **🔴 BLOCKER FOR T-01 — the 150 ms ISR debounce must be removed before any calibration run.**
+    It caps counting at 6.67 pulses/s ~= **4 L/min** at the placeholder K-factor; a real dispenser
+    flows 30-50 L/min. The loss is flow-rate dependent, so a K-factor derived through it is not a
+    constant and the +/-0.5% tolerance is unreachable. The 150 ms figure is correct for the
+    *pushbutton* the bench uses and must not survive contact with a meter (real meters need
+    sub-millisecond debounce, ideally hardware RC + optocoupler per spec).
+  - **🔴 On a Mega the sketch counts nothing.** `attachInterrupt` is used on pins **7** and **5**;
+    verified against the installed AVR core 1.8.7 (`variants/mega/pins_arduino.h:110`) the Mega maps
+    only pins **2, 3, 18, 19, 20, 21**. Both calls resolve to `NOT_AN_INTERRUPT` (-1), which
+    `attachInterrupt`'s `uint8_t` parameter turns into 255, failing the
+    `< EXTERNAL_NUM_INTERRUPTS` guard (`WInterrupts.c`) — a **silent no-op**. No pulse counting, no
+    power-fail save. The sketch's own comment claims the opposite.
+  - **Torn-write bug in the power-fail save.** `PumpData` orders `sequence` before `pulseCount`, and
+    `EEPROM.put` writes ascending, so a cut *during* the save (the exact case it exists for) can
+    commit a new highest `sequence` against a **stale `pulseCount` from 100 cuts ago** — which
+    recovery then elects as the winner. Fix: write `pulseCount` first and `sequence` last as the
+    commit marker, plus a CRC over the slot.
+  - `CAL` frame for the sealed K-factor (**OQ #23**) — protocol change, must land before the
+    adapter firmware is written.
   - `CAL` frame for the sealed K-factor (**OQ #23**) — protocol change, must land before the
     adapter firmware is written.
   - Whether `max()` gets a session mark (**OQ #24**), since the literal rule is not implementable.
@@ -213,6 +233,16 @@ sold.
 - [ ] **21. `CanStartTransactionUseCase` third `Missing` case** — no K-factor = no cutoff = refuse
   the sale, exactly as for price and fuel type (**OQ #23a**). Small; rides on the 7b guard already
   built.
+- [ ] **24. Merge the two sketches.** Olonade's bench sketch and
+  `smartpump_pulse_adapter.ino` are currently disjoint experiments and **cannot be swapped for one
+  another**: his emits bare `PULSE:<n>
+` with **no checksum**, so `SerialFrameParser` rejects every
+  line as `Invalid` ("missing checksum delimiter", `SerialFrameParser.kt:19`) — the app would count
+  zero litres — and it has **no `BOOT`/`HB` frames, no `RLY:1`/`RLY:0` relay control and no `PING`
+  handling**, so there is no fuel cut-off and none of the comms-loss watchdog that closed merge gate
+  #2. It also claims **D7** for the pulse input, which is our relay pin. The merge must keep the
+  checksummed framing, the fail-closed relay and the PING watchdog, and take the EEPROM/power-fail
+  half from his.
 - [ ] **22. Firmware:** `ENABLE_AUTO_PULSE = false` for real-meter runs; optocoupler + debounce
   replaces the bench `INPUT_PULLUP` (spec decides this — bare pullup must not survive into the
   adapter design). Bench meter output type + voltage incoming from Kelvin.
