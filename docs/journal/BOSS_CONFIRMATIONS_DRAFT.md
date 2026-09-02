@@ -34,21 +34,45 @@ the contract itself, and they are why this message is now mostly a backend conve
 
 ---
 
-## The message
+## The cover note — this is the part he reads
 
-**Subject: Pump app — backend gaps blocking the payment flows (one is a hard blocker)**
+Short by design. Everything under it is for the backend team, not for him.
+
+---
+
+**Subject: Pump app — two things needed from the backend team**
 
 Hi [Boss],
 
-Quick status first: the pump's network layer is built and tested — request signing, the API client,
-encrypted credential storage, activation identity. We audited all of it line-by-line against the Pump
-API Reference you sent through, found nine issues, and have **fixed the four that were on our side**
-(verified on the tablet, merged last week).
+The pump's payment side is built and tested. We audited it against the Pump API Reference, found nine
+issues, and have **fixed the four that were ours** — verified on the tablet, done last week.
 
-The rest aren't things we can fix in the app — they're gaps in the API contract, and one of them
-means **the payment flow cannot be completed as the contract currently stands**. Ordered by how much
-each blocks us. Items 1–3 are for the backend team; I've written them so you can forward this
-straight on.
+The rest we can't fix in the app, because the information isn't there to fix it with. The main one:
+**the pump has no way to find out which fuel it's selling or what price to charge.** Ringing up a sale
+requires the fuel type, but nothing in the API ever tells the pump what it is. As things stand, the
+payment flow can't be completed. There's a second, smaller gap — if a payment confirmation doesn't
+reach the pump, it has no way to check whether the customer actually paid, so someone who has paid
+could be left standing at a pump that won't dispense.
+
+Both need small additions on the backend. **Their turnaround sets our date, not our work** — which is
+why I'm raising it now rather than when we get to that stage.
+
+Full detail is below, written so you can forward it straight on. You only need the bolded first line
+of each numbered item; the rest is for whoever picks it up.
+
+Thanks,
+[You]
+
+---
+
+## The detail — for forwarding to the backend team
+
+Context for whoever picks this up: the pump app's network layer is built and tested — request
+signing, the API client, encrypted credential storage, activation identity. We audited it
+line-by-line against the Pump API Reference, found nine issues, and **fixed the four that were on our
+side** (verified on the tablet). The five below aren't fixable in the app — they're gaps in the
+contract itself, and the first one means **the payment flow cannot be completed as it currently
+stands**. Ordered by how much each blocks us.
 
 ---
 
@@ -152,10 +176,12 @@ the reason we haven't run it against anything real yet.
 
 ---
 
-For context: none of this is a rush toward live money — customer payments stay gated behind the
+**On urgency:** none of this is a rush toward live money — customer payments stay gated behind the
 14-day parallel-run accuracy check regardless. It's about building and sandbox-testing against the
-real contract instead of against our assumptions, which is precisely the mistake that cost us the
-rework this month.
+real contract instead of against our assumptions, which is exactly the mistake that cost us rework
+this month. **What sets the date is items 1 and 2, since those are yours to build, not ours.**
+
+Happy to jump on a call if any of it is easier discussed than written.
 
 Thanks,
 [You]
