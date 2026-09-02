@@ -283,10 +283,10 @@ class CustomerViewModel @Inject constructor(
                     priceKoboPerLitre = result.config.koboPerLitre
                     setState(TransactionState.ModeSelect())
                 }
-                CanStartTransactionUseCase.Result.PriceNotSet -> {
+                is CanStartTransactionUseCase.Result.NotConfigured -> {
                     setState(
                         TransactionState.Error(
-                            message = "Price not set — contact operator.",
+                            message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
                         )
                     )
@@ -385,10 +385,10 @@ class CustomerViewModel @Inject constructor(
                     )
                     startFillupDispensing(txnId)
                 }
-                CanStartTransactionUseCase.Result.PriceNotSet -> {
+                is CanStartTransactionUseCase.Result.NotConfigured -> {
                     setState(
                         TransactionState.Error(
-                            message = "Price not set — contact operator.",
+                            message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
                         )
                     )
@@ -607,10 +607,10 @@ class CustomerViewModel @Inject constructor(
                     _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
                     setState(TransactionState.CashFixedAmountEntry)
                 }
-                CanStartTransactionUseCase.Result.PriceNotSet -> {
+                is CanStartTransactionUseCase.Result.NotConfigured -> {
                     setState(
                         TransactionState.Error(
-                            message = "Price not set — contact operator.",
+                            message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
                         )
                     )

@@ -13,6 +13,7 @@ package app.balancee.smartpump.display.ui.customer
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PulseMessage
@@ -116,7 +117,13 @@ class FakePaymentProcessor : PaymentProcessor {
 }
 
 class FakeDeviceConfigRepository(
-    var config: DeviceConfig? = DeviceConfig(koboPerLitre = TEST_KOBO_PER_LITRE),
+    // A fully configured pump is the default: fuelType is as load-bearing as price now
+    // (CanStartTransactionUseCase blocks without it), so omitting it here would silently turn
+    // every flow test into a not-configured assertion.
+    var config: DeviceConfig? = DeviceConfig(
+        koboPerLitre = TEST_KOBO_PER_LITRE,
+        fuelType = FuelType.PETROL,
+    ),
 ) : DeviceConfigRepository {
     var saveCount = 0; private set
     override suspend fun getConfig(): DeviceConfig? = config
