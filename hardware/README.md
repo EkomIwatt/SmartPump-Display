@@ -70,7 +70,7 @@ self-heals on the next one and the exact send cadence doesn't matter.
 | `D7` | Relay control out | to a relay module IN, or an LED + resistor |
 | `D13` (`LED_BUILTIN`) | Relay mirror | lights while dispensing — lets you demo with a bare board |
 | `D2` | Real flow-meter pulse in | **must be interrupt-capable**; `INPUT_PULLUP`, FALLING edge |
-| `D3` | Power-fail sense in | **must be interrupt-capable**; see EEPROM totaliser below |
+| `D3` | Power-fail sense in | only when `ENABLE_POWER_FAIL_SAVE` is on (default **off**) — otherwise unused. **Do not leave a button here** |
 | `D4` | Manual pulse button | optional; momentary button to GND, injects pulses while held |
 | USB | Serial + power | to the tablet (OTG) |
 
@@ -133,7 +133,7 @@ and recovery reads `lifetime_now − lifetime_at_mark`. That is a protocol chang
 | `RELAY_ACTIVE_LOW` | `false` | set `true` for active-LOW relay boards (LOW = energised) |
 | `AUTO_PPS` | `50` | synthetic pulse rate — 50 pps ≈ 30 L/min at 100 pulses/L |
 | `PULSE_DEBOUNCE_US` | `250` | ISR debounce for a **real meter**, in microseconds; `0` disables |
-| `ENABLE_POWER_FAIL_SAVE` | `true` | arm the `D3` power-fail interrupt |
+| `ENABLE_POWER_FAIL_SAVE` | `false` | arm the `D3` power-fail interrupt — **leave off until a sense circuit exists** |
 | `POWER_FAIL_EDGE` | `RISING` | edge meaning "power lost" (active-low sense line) |
 | `DEBUG_BANNERS` | `false` | unframed Serial Monitor banners — **must stay false with the app attached** |
 

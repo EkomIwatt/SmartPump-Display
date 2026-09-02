@@ -111,7 +111,11 @@ const unsigned long HEARTBEAT_TIMEOUT_MS = 3000;
 // pull-up drags it high, so we trigger on RISING. Flip to FALLING if the sense circuit is
 // inverted. With nothing wired the pull-up holds the pin high and the edge never comes, so an
 // unwired rig simply never saves on power loss — it does not false-trigger.
-const bool ENABLE_POWER_FAIL_SAVE = true;
+// DEFAULT false: no power-sense circuit exists on any rig yet, and arming this interrupt without
+// one is actively harmful. D3 was the button pin before this merge, so on existing bench wiring a
+// button press would fire onPowerFail() on release — the board commits to EEPROM and HALTS, which
+// looks exactly like a hang mid-demo. Turn this on only once the sense circuit is actually built.
+const bool ENABLE_POWER_FAIL_SAVE = false;
 const int  POWER_FAIL_EDGE        = RISING;
 
 // Human-readable banners for a bare Serial Monitor. MUST be false whenever the app is attached:
