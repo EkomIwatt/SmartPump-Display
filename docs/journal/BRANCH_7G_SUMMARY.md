@@ -57,8 +57,28 @@ added on top.
 | EEPROM save order | A power cut *during* a save could store a good record number against a stale count — the exact failure the feature exists to prevent. |
 | Power-fail order | Relay now drops *before* the memory write, not after. |
 
-The first two are worth passing to Olonade regardless of our sketch, because **his board design
-still has them**.
+### Where those four fixes do and do not apply
+
+**The demo ran on Olonade's own Mega, reflashed with our merged sketch.** So on *that board*, all
+four are fixed, and the demo counting correctly is proof that the pin-2 interrupt path works.
+
+**They are not fixed in his source**, which is the copy the production adapter will be built from —
+and `HW-C-05` puts that on a different chip (STM32F103 or ATmega328P), so it is a fresh firmware
+build, not this one. If he writes it from his sketch, both bugs return.
+
+The pin bug is far more expensive there. On a breadboard it is a one-line change; on a laid-out
+PCB with the pulse input routed to a non-interrupt pin it is a board respin. **Send him bugs 1 and
+2 regardless of Friday.**
+
+**Hardware check on that shared board:** his sketch used **D7 as the pulse input**; ours drives
+**D7 as the relay output**. Anything left wired to D7 from his setup that pulls the pin low while
+our firmware drives it high is an output into a short — capable of damaging the pin. D7 should
+have nothing on it but the relay module or an LED.
+
+**Its EEPROM also holds his old records** (8-byte slots against our 10-byte ones). Ours may read
+one as valid and report a large number in the `BOOT` line. Harmless — only deltas are used for
+counting, and calibration reads deltas too — but erase the EEPROM if clean numbers are wanted for
+the run sheet.
 
 ### 5. A spec question settled by arithmetic
 
