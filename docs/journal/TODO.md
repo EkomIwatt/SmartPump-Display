@@ -199,10 +199,16 @@ hour); the totaliser is a **reporting figure**, with the app remaining system of
 sold.
 
 - [ ] **19. Blocked on Olonade.**
-  - ~~"stores last 10,000 pulse counts" — totaliser or ring buffer?~~ **ANSWERED 2026-09-02 by his
-    bench sketch: a single lifetime totaliser, wear-levelled over 100 slots.** So the session mark
-    is *not* free and must be added to the protocol (**OQ #24 stands**). The "10,000" figure in the
-    spec matches neither reading and is still unexplained.
+  - ~~"stores last 10,000 pulse counts" — totaliser or ring buffer?~~ **SETTLED 2026-09-02, twice
+    over.** His bench sketch implements a single lifetime totaliser wear-levelled over 100 slots;
+    and independently, the ring-buffer reading is *physically impossible on the spec'd MCU* —
+    10,000 records need 40 KB at a 4-byte count (20 KB even as 2-byte deltas), while `HW-C-05`'s
+    ATmega328P has **1 KB** of EEPROM and the bench Mega 2560 only **4 KB** (verified by compiling
+    `E2END + 1` for both against AVR core 1.8.7). Short by 20-40x, and the STM32F103 has no true
+    EEPROM at all. So `HW-C-04` contradicts `HW-C-05` under that reading — send it to Olonade as a
+    **correction**, not a question. Worth still asking what "10,000" was meant to size, since it is
+    only ~100 L at the placeholder K-factor. **OQ #24 is unaffected: the session mark is not free
+    and must be added to the protocol.**
   - **🔴 BLOCKER FOR T-01 — the 150 ms ISR debounce must be removed before any calibration run.**
     It caps counting at 6.67 pulses/s ~= **4 L/min** at the placeholder K-factor; a real dispenser
     flows 30-50 L/min. The loss is flow-rate dependent, so a K-factor derived through it is not a

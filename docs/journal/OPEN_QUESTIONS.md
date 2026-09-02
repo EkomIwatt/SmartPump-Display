@@ -48,6 +48,20 @@ Decisions still owed before V1 ships. Resolved questions are removed (not crosse
     > per-dispense scoping, so `max()` still compares a lifetime totaliser against a per-transaction
     > count and this question stands as written.
 
+    > **SETTLED 2026-09-02 on physics — `HW-C-04` cannot mean a ring buffer, because `HW-C-05`
+    > forbids it.** The ring-buffer reading of "stores last 10,000 pulse counts" needs 10,000
+    > records; at a 4-byte count that is **40 KB**, and even a 2-byte delta is **20 KB**. The spec's
+    > own MCU choice (`HW-C-05`: STM32F103 **or ATmega328P**) gives the ATmega328P **1 KB** of
+    > EEPROM, and the bench Mega 2560 of `HW-C-10` only **4 KB** — verified by compiling `E2END + 1`
+    > for both targets against AVR core 1.8.7, not read off a datasheet. The ring buffer is short by
+    > **20-40x**, and the STM32F103 has no true EEPROM at all (flash emulation). So `HW-C-04` and
+    > `HW-C-05` are in direct contradiction under that reading and consistent under the totaliser
+    > one. **Treat "10,000 pulse counts" as loose wording for rollover headroom.** This is a
+    > correction to send Olonade, not a question — though the count still wants confirming, since
+    > "10,000 pulses" is only ~100 L at the placeholder K-factor, which would be a strange thing to
+    > size a lifetime totaliser to. Consequence for **OQ-03/#24 stands unchanged**: no per-dispense
+    > scoping exists anywhere, so the session mark must be added to the protocol.
+
 25. **Pulses counted while the tablet is down are silently discarded — live on `main` today.** Independent of any EEPROM work, and the sharper half of #24. In the production topology the adapter is **UPS-powered and the tablet may not be**, so the adapter can outlive a tablet restart. If the tablet dies mid-dispense the firmware watchdog closes the relay after `HEARTBEAT_TIMEOUT_MS` (3 s) — but fuel flows for those 3 s and the adapter counts it. Because the *adapter* never rebooted it sends no `BOOT`, so on the tablet's return `PulseAccumulator.onPulse` hits its uninitialised branch (`PulseAccumulator.kt:43-47`), adopts the running count as a baseline and contributes **0** — roughly 1.5 L at the placeholder K-factor, delivered to the customer and billed to nobody. A second, smaller leak exists on every recovery path: the app persists only every `PULSE_PERSIST_EVERY_N = 25` pulses, so up to 24 pulses before any cut are never written. Both always under-count, so the station absorbs the loss rather than the customer. **Decision needed:** do these pulses land on the live transaction, or in a reconciliation log? They must land somewhere explicit — absorbing them into a new baseline is the current behaviour and is what the spec's recovery rule exists to prevent.
 
 ## Payment integration
