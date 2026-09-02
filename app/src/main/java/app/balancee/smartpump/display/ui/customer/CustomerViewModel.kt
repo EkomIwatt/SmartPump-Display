@@ -34,12 +34,14 @@
 //  - Cash-fixed cutoff is computed via DeviceConfig.litresCutoff(amountKobo) — floored to
 //    0.01L per state-machine invariant ("never dispense more than was paid").
 //  - Pulse counts come from the injected PulseSource; the mock generates ~50 pps when the
-//    relay is open. Litres are derived at 100 pulses/L (see OPEN_QUESTIONS #1).
+//    relay is open. Litres are derived via PULSES_PER_LITRE, whose value is still a
+//    placeholder pending calibration task T-01 (see OPEN_QUESTIONS #1).
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.balancee.smartpump.display.BuildConfig
+import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
@@ -69,7 +71,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private const val PULSES_PER_LITRE = 100
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
 private const val FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60
 private const val USSD_SMS_TIMEOUT_SECONDS = 5 * 60
@@ -77,10 +78,11 @@ private const val FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L
 private const val FILLUP_WATCHDOG_POLL_MS = 500L
 
 /**
- * Persist pulse count every N pulses during a dispense — at 100 pulses/L this is one
- * write every 0.25L (~25 writes for a full 10L pre-pay). Frequent enough that a
- * power-cut resume reconstructs litresSoFar within ±0.25L, cheap enough not to thrash
- * the SD card on the kiosk.
+ * Persist pulse count every N pulses during a dispense. Frequent enough that a power-cut
+ * resume reconstructs litresSoFar closely, cheap enough not to thrash the SD card on the
+ * kiosk. NOTE the resulting resolution is in *pulses*, so the litre precision it buys
+ * moves with PULSES_PER_LITRE — at the current placeholder 100 pulses/L it is one write
+ * per 0.25L (~25 writes for a full 10L pre-pay); a higher K-factor makes it finer.
  */
 private const val PULSE_PERSIST_EVERY_N = 25
 
