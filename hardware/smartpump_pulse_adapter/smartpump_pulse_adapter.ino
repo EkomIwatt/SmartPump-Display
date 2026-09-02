@@ -72,7 +72,19 @@
 // digitalPinToInterrupt() returns NOT_AN_INTERRUPT for those, which attachInterrupt()'s uint8_t
 // parameter turns into 255 — failing its "< EXTERNAL_NUM_INTERRUPTS" guard and silently doing
 // nothing. No compile error, no warning, and nothing is ever counted.)
-const uint8_t  PIN_PULSE_IN    = 2;   // INT — flow-meter signal (Uno INT0 / Mega INT4)
+// *** NEVER connect a dispenser pulse line straight to this pin. *** HW-C-02 requires the input
+// to accept BOTH 5 V and 12 V signals (Gilbarco / Wayne / Tokheim), and 12 V on an AVR input
+// destroys the pin. HW-C-01/HW-C-06 require an optical isolator with 2500 V galvanic isolation,
+// and HW-C-09/HW-C-10 name the part: a 4N35, already in the bench BOM.
+//
+// 4N35 wiring for this sketch (LED side floats with the meter, transistor side with the Arduino):
+//   meter pulse (+) --[R]-- 4N35 pin 1 (anode);  4N35 pin 2 (cathode) -- meter ground
+//   4N35 pin 5 (collector) -- D2;                4N35 pin 4 (emitter) -- Arduino GND
+//   R (about 15 mA through the LED):  5 V line -> 220-270 ohm;  12 V line -> 680 ohm - 1 kohm
+// The opto pulls D2 down when the meter pulse is active, which is why this pin is INPUT_PULLUP
+// and the interrupt is on FALLING. Do not tie the meter ground to the Arduino ground — keeping
+// them separate is the entire point of the isolation.
+const uint8_t  PIN_PULSE_IN    = 2;   // INT — flow-meter signal via 4N35 (Uno INT0 / Mega INT4)
 const uint8_t  PIN_POWER_SENSE = 3;   // INT — power-fail early warning, ahead of the reservoir cap
 const uint8_t  PIN_RELAY       = 7;   // relay module / LED driving the pump solenoid
 const uint8_t  PIN_BUTTON      = 4;   // manual pulse inject, to GND — POLLED, no interrupt needed
@@ -84,12 +96,10 @@ const bool     RELAY_ACTIVE_LOW   = false; // true for active-LOW relay boards (
 //                               but you cannot pause or stop the flow.
 //   AUTO false, BUTTON true   -> the button IS the nozzle trigger: hold to flow, release to stop.
 //                               Nothing counts unless a button is wired to PIN_BUTTON.
-// >>> DEMO CONFIG 2026-09-02: both OFF. The button is wired to PIN_PULSE_IN (D2) instead, so each
-// press is a REAL counted edge through the pulse ISR rather than a software-generated stand-in.
-// This exercises the actual capture path. See PULSE_DEBOUNCE_US below — it is set for a finger,
-// NOT for a meter, and MUST be changed back before any meter is connected. <<<
+// >>> METER CONFIG 2026-09-02: both OFF — the only pulse source is the real meter on D2. Any
+// synthetic source left on would ride on top of the meter and corrupt the calibration. <<<
 const bool     ENABLE_AUTO_PULSE  = false; // synthesise pulses while dispensing (hands-off demo)
-const bool     ENABLE_BUTTON      = false; // polled D4 gate — off; the button is on D2 now
+const bool     ENABLE_BUTTON      = false; // polled D4 inject — off for meter work
 
 // Injection rate for BOTH sources above — 50 pps is ~30 L/min at 100 pulses/L, so a 10 L fill
 // takes about 20 s of holding. Raise it to make demo fills quicker.
@@ -113,17 +123,22 @@ const unsigned int  AUTO_PPS      = 50;    // synthetic pulse rate (~30 L/min @ 
 // dependent, a K-factor derived through it is not a constant at all. Calibration task T-01
 // (5 x 10 L, +/-0.5%) is invalid if run with a debounce anywhere near that. The button does not
 // need debouncing here because it is polled and injects at AUTO_PPS while held, never via the ISR.
-// >>> DEMO CONFIG 2026-09-02: 150 ms, set for a PUSH BUTTON on D2, not a meter. A mechanical
-// contact bounces for milliseconds with many transitions, so at the 250 us meter value a single
-// press would register as several pulses. 150 ms is the right number for a finger — it is the
-// value Olonade's bench sketch used, and for his button-on-the-interrupt-pin design it was
-// correct.
+// >>> METER CONFIG 2026-09-02: back to 250 us from the 150 ms demo value. <<<
 //
-// *** REVERT TO 250 BEFORE CONNECTING A METER. *** At 150 ms the ceiling is 6.67 pps ~= 4 L/min
-// against a dispenser's 30-50, the loss varies with flow rate, and TEST-01/T-01 calibration would
-// produce five agreeing and entirely wrong runs against a +/-0.5% gate. Same number, right for a
-// button, disastrous for a meter.
-const unsigned long PULSE_DEBOUNCE_US = 150000;   // 150 ms — BUTTON ONLY (meter value: 250)
+// 250 us gives a 4000 pps ceiling — about 2400 L/min at 100 pulses/L, or 530 L/min even at a
+// high-resolution 450 pulses/L meter. Comfortably clear of a dispenser's 30-50 L/min, while still
+// filtering electrical ringing on the opto output.
+//
+// CHECK THIS AGAINST THE ACTUAL METER before the first calibration run:
+//     peak_pps = max_flow_L_per_min / 60 * pulses_per_litre
+//     PULSE_DEBOUNCE_US must be well under 1e6 / peak_pps
+// A 450 pulses/L meter at 50 L/min peaks at 375 pps = 2.67 ms between pulses, so 250 us has ~10x
+// headroom. If the meter turns out to be far higher resolution, drop this or set it to 0.
+//
+// Do NOT restore the 150 ms demo value with a meter attached. It caps counting at 6.67 pps
+// (~4 L/min), the loss varies with flow rate so the error is not a constant offset, and TEST-01
+// would return five agreeing and entirely wrong runs against its +/-0.5% gate.
+const unsigned long PULSE_DEBOUNCE_US = 250;      // us — METER value (button demo used 150000)
 
 const unsigned long HB_INTERVAL_MS   = 2000; // keep-alive cadence when idle
 const unsigned long PULSE_TX_MIN_MS  = 30;   // min gap between PULSE frames (throttle the stream)
