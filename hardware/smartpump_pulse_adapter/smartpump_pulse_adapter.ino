@@ -78,8 +78,23 @@ const uint8_t  PIN_RELAY       = 7;   // relay module / LED driving the pump sol
 const uint8_t  PIN_BUTTON      = 4;   // manual pulse inject, to GND — POLLED, no interrupt needed
 
 const bool     RELAY_ACTIVE_LOW   = false; // true for active-LOW relay boards (LOW = energised)
-const bool     ENABLE_AUTO_PULSE  = true;  // synthesise pulses while dispensing (meter-free demo)
+
+// Where pulses come from. These two are the demo's main control:
+//   AUTO true,  BUTTON either -> fuel flows by itself the whole time the relay is open. Hands-off,
+//                               but you cannot pause or stop the flow.
+//   AUTO false, BUTTON true   -> the button IS the nozzle trigger: hold to flow, release to stop.
+//                               Nothing counts unless a button is wired to PIN_BUTTON.
+// Currently set for the button, so a demo can stop part-way and show a partial fill.
+const bool     ENABLE_AUTO_PULSE  = false; // synthesise pulses while dispensing (hands-off demo)
 const bool     ENABLE_BUTTON      = true;  // inject pulses while the button is held
+
+// Injection rate for BOTH sources above — 50 pps is ~30 L/min at 100 pulses/L, so a 10 L fill
+// takes about 20 s of holding. Raise it to make demo fills quicker.
+//
+// Note this is a RATE while held, not one pulse per press. One-pulse-per-press would need ~1000
+// presses for a 10 L fill at 100 pulses/L, which is why the button is a hold-to-flow control.
+// It is also why the button needs no debouncing: it is polled here, never routed through the
+// pulse ISR, so contact bounce costs at most a pulse or two of jitter rather than a false count.
 const unsigned int  AUTO_PPS      = 50;    // synthetic pulse rate (~30 L/min @ 100 pulses/L)
 
 // Debounce for the REAL meter input, in MICROseconds, applied in the ISR.
