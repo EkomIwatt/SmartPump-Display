@@ -39,9 +39,11 @@ package app.balancee.smartpump.display.ui.customer
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PostFillIntent
@@ -1021,6 +1023,12 @@ class CustomerViewModel @Inject constructor(
                     pumpLabel = "PUMP 1",
                     stationName = "Total Lekki Ph2",
                     koboPerLitre = DEFAULT_KOBO_PER_LITRE,
+                    // Debug only. Seeding a fuel type in release would make every pump silently
+                    // claim PETROL and authorise a diesel sale against the wrong fuel — the guess
+                    // DeviceConfig.fuelType exists to prevent. Release leaves it null so the
+                    // operator config screen must set it; debug keeps the simulator demo working
+                    // out of the box.
+                    fuelType = if (BuildConfig.DEBUG) FuelType.PETROL else null,
                     virtualAccountNumber = "0123456789",
                 )
             )

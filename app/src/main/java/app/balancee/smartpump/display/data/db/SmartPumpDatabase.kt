@@ -17,7 +17,7 @@ import app.balancee.smartpump.display.data.db.entities.TransactionEntity
         PulseStateEntity::class,
         StationIdentityEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class SmartPumpDatabase : RoomDatabase() {

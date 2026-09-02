@@ -17,6 +17,12 @@ data class DeviceConfigEntity(
     val stationName: String,
     /** Fuel price in kobo (100 kobo = ₦1). e.g. 87_000 = ₦870/L. */
     val koboPerLitre: Long,
+    /**
+     * Which fuel this pump dispenses, stored as the `FuelType` enum name (the same string
+     * /authorise expects). Null until set — added in schema v3, so every pre-existing row
+     * migrates to null and is blocked by the transaction guard until someone configures it.
+     */
+    val fuelType: String?,
     /** NIP bank-transfer account for post-fill-up QR generation. Null until operator sets it. */
     val virtualAccountNumber: String?,
     val updatedAt: Long,

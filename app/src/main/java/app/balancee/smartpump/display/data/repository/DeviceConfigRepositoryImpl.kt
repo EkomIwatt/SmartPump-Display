@@ -4,6 +4,7 @@ package app.balancee.smartpump.display.data.repository
 import app.balancee.smartpump.display.data.db.DeviceConfigDao
 import app.balancee.smartpump.display.data.db.entities.DeviceConfigEntity
 import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -25,6 +26,9 @@ class DeviceConfigRepositoryImpl @Inject constructor(
         pumpLabel = pumpLabel,
         stationName = stationName,
         koboPerLitre = koboPerLitre,
+        // Unrecognised stored value → null (i.e. "not configured"), which blocks transactions.
+        // An enum renamed or dropped on the backend must not crash a pump mid-shift.
+        fuelType = fuelType?.let { name -> FuelType.entries.firstOrNull { it.name == name } },
         virtualAccountNumber = virtualAccountNumber,
         updatedAt = updatedAt,
     )
@@ -33,6 +37,7 @@ class DeviceConfigRepositoryImpl @Inject constructor(
         pumpLabel = pumpLabel,
         stationName = stationName,
         koboPerLitre = koboPerLitre,
+        fuelType = fuelType?.name,
         virtualAccountNumber = virtualAccountNumber,
         updatedAt = updatedAt,
     )

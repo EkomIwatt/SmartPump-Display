@@ -7,7 +7,7 @@
 package app.balancee.smartpump.display.data.network
 
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
-import app.balancee.smartpump.display.data.network.dto.FuelType
+import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionRequest
 import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import app.balancee.smartpump.display.domain.network.PumpCredentials

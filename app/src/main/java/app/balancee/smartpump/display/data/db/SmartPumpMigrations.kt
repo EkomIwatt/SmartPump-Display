@@ -18,11 +18,30 @@
 package app.balancee.smartpump.display.data.db
 
 import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 object SmartPumpMigrations {
 
-    /** All migrations, in order. Empty until the first post-baseline schema change (v2 → v3). */
+    /**
+     * v2 → v3 (Phase 7b): adds `device_config.fuelType`.
+     *
+     * `/authorise` requires a fuel type and nothing in the Pump API supplies one
+     * (API_CONFORMANCE_AUDIT.md §6 #4), so an operator sets it on the device. Added as a
+     * **nullable** column with no default: existing rows migrate to NULL, which the transaction
+     * guard treats as "not configured" and blocks on. Back-filling a guess — PETROL, say — would
+     * silently authorise a diesel pump against the wrong fuel, so NULL is the honest state.
+     *
+     * Only an ADDed column, so no table rebuild: the audit log, identity row and PIN hash are
+     * untouched.
+     */
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE device_config ADD COLUMN fuelType TEXT DEFAULT NULL")
+        }
+    }
+
+    /** All migrations, in order. */
     val ALL: Array<Migration> = arrayOf(
-        // MIGRATION_2_3,
+        MIGRATION_2_3,
     )
 }
