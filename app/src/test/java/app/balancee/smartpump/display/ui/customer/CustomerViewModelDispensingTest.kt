@@ -3,6 +3,7 @@
 // live litre count tracks pulses; plus the fill-up nozzle-shutoff → tank-full transition.
 package app.balancee.smartpump.display.ui.customer
 
+import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionMode
@@ -19,6 +20,24 @@ class CustomerViewModelDispensingTest {
 
     private val harness = VmHarness()
     private fun state(vm: CustomerViewModel) = vm.ui.value.state
+
+    /**
+     * Pulses that represent [litres] at the CURRENT meter K-factor.
+     *
+     * These tests used to hardcode the pulse counts (380 for 3.8 L), which silently pinned
+     * PULSES_PER_LITRE = 100 into assertions that are not about the K-factor at all. The
+     * constant is a placeholder awaiting T-01 calibration and is expected to change, so the
+     * tests derive from it instead of restating it.
+     */
+    private fun pulsesFor(litres: Double) = Math.round(litres * PULSES_PER_LITRE).toInt()
+
+    /**
+     * Litres that [pulses] actually represent. Needed because not every litre figure is
+     * representable at every K-factor - 3.8 L needs 0.2 L granularity, which a low
+     * PULSES_PER_LITRE does not have. Asserting against this keeps the test about the real
+     * invariant (litres = pulses / K) rather than about one convenient constant.
+     */
+    private fun litresOf(pulses: Int) = pulses.toDouble() / PULSES_PER_LITRE
 
     /** Drive a pre-pay dispense up to (not through) the litre target. */
     private fun startPrepayDispense(vm: CustomerViewModel) {
@@ -40,10 +59,10 @@ class CustomerViewModelDispensingTest {
         assertTrue(state(vm) is TransactionState.FixedDispensing)
         assertTrue(harness.relay.isDispensing.value)
 
-        harness.pulseSource.emitPulse(count = 250) // 2.5 L, mid-dispense
+        harness.pulseSource.emitPulse(count = pulsesFor(2.5)) // mid-dispense
         assertEquals(2.5, (state(vm) as TransactionState.FixedDispensing).litresSoFar, 0.0)
 
-        harness.pulseSource.emitPulse(count = 500) // 5.0 L → target
+        harness.pulseSource.emitPulse(count = pulsesFor(5.0)) // target
         val done = state(vm) as TransactionState.Complete
         assertEquals(5.0, done.litres, 0.0)
         assertEquals(TransactionFlow.FIXED_PREPAY_DIGITAL, done.flow)
@@ -55,7 +74,7 @@ class CustomerViewModelDispensingTest {
         val vm = harness.build()
         startPrepayDispense(vm)
 
-        harness.pulseSource.emitPulse(count = 900) // 9.0 L >> 5.0 target
+        harness.pulseSource.emitPulse(count = pulsesFor(9.0)) // >> 5.0 target
         val done = state(vm) as TransactionState.Complete
         assertEquals(5.0, done.litres, 0.0) // billed at the target, never the overrun
     }
@@ -71,7 +90,7 @@ class CustomerViewModelDispensingTest {
         assertTrue(state(vm) is TransactionState.CashFixedDispensing)
         assertTrue(harness.relay.isDispensing.value)
 
-        harness.pulseSource.emitPulse(count = 300) // 3.0 L → cutoff
+        harness.pulseSource.emitPulse(count = pulsesFor(3.0)) // cutoff
         val done = state(vm) as TransactionState.Complete
         assertEquals(3.0, done.litres, 0.0)
         assertEquals(TransactionFlow.CASH_FIXED, done.flow)
@@ -88,20 +107,23 @@ class CustomerViewModelDispensingTest {
         assertTrue(state(vm) is TransactionState.FillupDispensing)
         assertTrue(harness.relay.isDispensing.value)
 
-        harness.pulseSource.emitPulse(count = 380) // 3.8 L, no target
-        assertEquals(3.8, (state(vm) as TransactionState.FillupDispensing).litresSoFar, 1e-9)
+        val pulses = pulsesFor(3.8) // no target
+        harness.pulseSource.emitPulse(count = pulses)
+        assertEquals(litresOf(pulses), (state(vm) as TransactionState.FillupDispensing).litresSoFar, 1e-9)
     }
 
     @Test
     fun `fill-up nozzle shutoff locks verified litres and amount due, closing the relay`() {
         val vm = harness.build()
         vm.onAttendantFillUpAuthorise()
-        harness.pulseSource.emitPulse(count = 380) // 3.8 L flowed
+        val pulses = pulsesFor(3.8)
+        harness.pulseSource.emitPulse(count = pulses)
         vm.onSimulateNozzleShutoff()
 
+        val litres = litresOf(pulses)
         val full = state(vm) as TransactionState.FillupTankFull
-        assertEquals(3.8, full.verifiedLitres, 1e-9)
-        assertEquals(380_000, full.amountDueKobo) // 3.8 L × ₦1000/L
+        assertEquals(litres, full.verifiedLitres, 1e-9)
+        assertEquals(Math.round(litres * TEST_KOBO_PER_LITRE), full.amountDueKobo)
         assertFalse(harness.relay.isDispensing.value)
     }
 }

@@ -24,4 +24,19 @@ package app.balancee.smartpump.display.domain.hardware
  * When the sealed board exists, this is replaced by the value carried in the BOOT frame; it
  * must **never** be moved into operator config, which is an editable tamper surface.
  */
-const val PULSES_PER_LITRE = 100
+// ============================================================================================
+// >>> DEMO VALUE 2026-09-02 — NOT 100. REVERT BEFORE ANY METER WORK. <<<
+//
+// Set to 2 (one button press = 0.5 L) for the push-button demo, where the button is wired to the
+// adapter's interrupt pin and each press is one real pulse. At the usual 100 a single press would
+// be 0.01 L, so a 5.75 L pre-pay would need 575 presses.
+//
+// This is a DEMO-ONLY figure on the 7g branch. It must go back to the placeholder 100 — and then
+// to the measured T-01 value — before the meter is connected. Paired with PULSE_DEBOUNCE_US =
+// 150000 in the firmware; the two only make sense together.
+//
+// Consequence while it is 2: litre granularity is half a litre, so a cutoff of 5.74 L is reached
+// on the press that crosses it. The never-over-dispense guard still holds and the app will not
+// report more than was paid for.
+// ============================================================================================
+const val PULSES_PER_LITRE = 2

@@ -84,9 +84,12 @@ const bool     RELAY_ACTIVE_LOW   = false; // true for active-LOW relay boards (
 //                               but you cannot pause or stop the flow.
 //   AUTO false, BUTTON true   -> the button IS the nozzle trigger: hold to flow, release to stop.
 //                               Nothing counts unless a button is wired to PIN_BUTTON.
-// Currently set for the button, so a demo can stop part-way and show a partial fill.
+// >>> DEMO CONFIG 2026-09-02: both OFF. The button is wired to PIN_PULSE_IN (D2) instead, so each
+// press is a REAL counted edge through the pulse ISR rather than a software-generated stand-in.
+// This exercises the actual capture path. See PULSE_DEBOUNCE_US below — it is set for a finger,
+// NOT for a meter, and MUST be changed back before any meter is connected. <<<
 const bool     ENABLE_AUTO_PULSE  = false; // synthesise pulses while dispensing (hands-off demo)
-const bool     ENABLE_BUTTON      = true;  // inject pulses while the button is held
+const bool     ENABLE_BUTTON      = false; // polled D4 gate — off; the button is on D2 now
 
 // Injection rate for BOTH sources above — 50 pps is ~30 L/min at 100 pulses/L, so a 10 L fill
 // takes about 20 s of holding. Raise it to make demo fills quicker.
@@ -110,7 +113,17 @@ const unsigned int  AUTO_PPS      = 50;    // synthetic pulse rate (~30 L/min @ 
 // dependent, a K-factor derived through it is not a constant at all. Calibration task T-01
 // (5 x 10 L, +/-0.5%) is invalid if run with a debounce anywhere near that. The button does not
 // need debouncing here because it is polled and injects at AUTO_PPS while held, never via the ISR.
-const unsigned long PULSE_DEBOUNCE_US = 250;
+// >>> DEMO CONFIG 2026-09-02: 150 ms, set for a PUSH BUTTON on D2, not a meter. A mechanical
+// contact bounces for milliseconds with many transitions, so at the 250 us meter value a single
+// press would register as several pulses. 150 ms is the right number for a finger — it is the
+// value Olonade's bench sketch used, and for his button-on-the-interrupt-pin design it was
+// correct.
+//
+// *** REVERT TO 250 BEFORE CONNECTING A METER. *** At 150 ms the ceiling is 6.67 pps ~= 4 L/min
+// against a dispenser's 30-50, the loss varies with flow rate, and TEST-01/T-01 calibration would
+// produce five agreeing and entirely wrong runs against a +/-0.5% gate. Same number, right for a
+// button, disastrous for a meter.
+const unsigned long PULSE_DEBOUNCE_US = 150000;   // 150 ms — BUTTON ONLY (meter value: 250)
 
 const unsigned long HB_INTERVAL_MS   = 2000; // keep-alive cadence when idle
 const unsigned long PULSE_TX_MIN_MS  = 30;   // min gap between PULSE frames (throttle the stream)
