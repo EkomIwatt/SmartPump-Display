@@ -185,6 +185,45 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
   call); (d) full status set (`PAID` is real but missing from the §5 list); (e) what to sign for a
   GET. **Send today — their lead time is the critical path.**
 
+## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SCOPED, not started)
+
+Source: **Prototype Specification v1.0**, Hardware → "Pulse-tap adapter board" and Software →
+"Power-cut transaction recovery". Not in the original Phase 7 plan (7a–7f), so filed as **7g**.
+Spec lines that drive it: optically-isolated read-only tap, 5 V + 12 V pulse input (Gilbarco /
+Wayne / Tokheim), 2500 V galvanic isolation, STM32F103 or ATmega328P, raw pulse count in onboard
+EEPROM surviving power cuts and independently readable, K-factor sealed post-calibration.
+
+**Agreed constraints (settled 2026-09-02):** write **only at end-of-dispense** via `EEPROM.put`,
+never per pulse (AVR EEPROM is ~100k cycles — per-pulse writes at 50 pps destroy it within the
+hour); the totaliser is a **reporting figure**, with the app remaining system of record for litres
+sold.
+
+- [ ] **19. Blocked on Olonade — two spec readings to confirm before any code.**
+  - "stores last 10,000 pulse counts" — totaliser with rollover headroom, or a 10k-entry ring
+    buffer of per-dispense records? Determines whether OQ #24's session mark is free or must be
+    added to the protocol. *(User is confirming.)*
+  - `CAL` frame for the sealed K-factor (**OQ #23**) — protocol change, must land before the
+    adapter firmware is written.
+  - Whether `max()` gets a session mark (**OQ #24**), since the literal rule is not implementable.
+- [ ] **20. Recovery correctness — do first, independent of the board (OQ #25).** Pulses counted
+  while the tablet is down are silently absorbed into a new baseline
+  (`PulseAccumulator.kt:43-47`). **This is live on `main` today**, needs no EEPROM to fix, and is
+  the behaviour the spec's recovery rule exists to prevent. Decide: onto the live transaction, or
+  into a reconciliation log. Wants VM tests (Phase 8 harness exists).
+- [ ] **21. `CanStartTransactionUseCase` third `Missing` case** — no K-factor = no cutoff = refuse
+  the sale, exactly as for price and fuel type (**OQ #23a**). Small; rides on the 7b guard already
+  built.
+- [ ] **22. Firmware:** `ENABLE_AUTO_PULSE = false` for real-meter runs; optocoupler + debounce
+  replaces the bench `INPUT_PULLUP` (spec decides this — bare pullup must not survive into the
+  adapter design). Bench meter output type + voltage incoming from Kelvin.
+- [ ] **23. Bench:** Mega is a drop-in — flash target `arduino:avr:mega` only; manifest filter
+  (vendor-only, `usb_device_filter.xml:6`) and the default CDC prober already cover Mega 2560 R3.
+  Only the `// INT0` comment at `.ino:43` goes stale (pin 2 is INT4 on Mega;
+  `digitalPinToInterrupt` handles it). If a clone gives the USB dialog but no `BOOT` frame, it
+  needs a custom `ProbeTable`.
+
+**Not blocked:** #20 and #21 can proceed now. #19 gates the firmware half.
+
 ## Now — unblocked, high value
 
 - [x] **10. Verify `KeystorePumpCredentialsStore` crypto** (instrumented test) — **merge gate CLOSED
