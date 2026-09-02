@@ -41,6 +41,7 @@ import app.balancee.smartpump.display.ui.attendant.AttendantOverlayHost
 import app.balancee.smartpump.display.ui.customer.CustomerStateHost
 import app.balancee.smartpump.display.ui.customer.CustomerViewModel
 import app.balancee.smartpump.display.ui.debug.DebugScreen
+import app.balancee.smartpump.display.ui.operator.OperatorConfigScreen
 import app.balancee.smartpump.display.ui.onboarding.GateState
 import app.balancee.smartpump.display.ui.onboarding.IdentityGateViewModel
 import app.balancee.smartpump.display.ui.onboarding.OnboardingScreen
@@ -90,10 +91,21 @@ private fun SmartPumpRoot(
     val gateState by gateVm.state.collectAsStateWithLifecycle()
     val pinBypass by gateVm.pinBypassEnabled.collectAsStateWithLifecycle()
     var debugVisible by rememberSaveable { mutableStateOf(false) }
+    // Survives rotation/process death: an operator mid-configuration should not be dropped back
+    // to the customer screen. Re-entry still costs a PIN, since the overlay is closed by then.
+    var settingsVisible by rememberSaveable { mutableStateOf(false) }
 
     if (debugVisible) {
         DebugScreen(
             onClose = { debugVisible = false },
+            modifier = Modifier.fillMaxSize(),
+        )
+        return
+    }
+
+    if (settingsVisible) {
+        OperatorConfigScreen(
+            onClose = { settingsVisible = false },
             modifier = Modifier.fillMaxSize(),
         )
         return
@@ -118,6 +130,7 @@ private fun SmartPumpRoot(
                     onAttendantCashFixed = customerVm::onAttendantCashFixed,
                     onAttendantCashReceived = customerVm::onAttendantCashReceived,
                     onAttendantEndFillup = customerVm::onSimulateNozzleShutoff,
+                    onOpenSettings = { settingsVisible = true },
                     pinBypassEnabled = pinBypass,
                     verifyPin = gateVm::verifyPin,
                     modifier = Modifier.fillMaxSize(),

@@ -63,6 +63,7 @@ fun AttendantOverlayHost(
     onAttendantCashFixed: () -> Unit,
     onAttendantCashReceived: () -> Unit,
     onAttendantEndFillup: () -> Unit,
+    onOpenSettings: () -> Unit,
     pinBypassEnabled: Boolean,
     verifyPin: suspend (String) -> Boolean,
     modifier: Modifier = Modifier,
@@ -147,6 +148,12 @@ fun AttendantOverlayHost(
                     onEndFillup = {
                         onAttendantEndFillup()
                         visible = false
+                    },
+                    // Closing the panel first means settings opens over a clean screen, and the
+                    // PIN that opened the panel is the same one gating settings — no second prompt.
+                    onOpenSettings = {
+                        visible = false
+                        onOpenSettings()
                     },
                     onDismiss = { visible = false },
                 )

@@ -1016,19 +1016,27 @@ class CustomerViewModel @Inject constructor(
         fillupWatchdogJob = null
     }
 
+    /**
+     * Seeds a playable demo config on first launch — **debug builds only**.
+     *
+     * This used to run in every build type, so a fresh release install silently gave itself a
+     * ₦870/L price and the station name "Total Lekki Ph2". The price guard could therefore never
+     * fire in production, and an operator opening the settings screen would find a plausible price
+     * already filled in — which does not ask to be read. (The header comment above has always
+     * described this as a debug-build seed; the code simply did not honour it.)
+     *
+     * A real pump now starts genuinely unconfigured: the guard blocks, the customer screen says so,
+     * and the operator screen opens with empty fields that have to be filled deliberately.
+     */
     private suspend fun seedDefaultConfigIfMissing() {
+        if (!BuildConfig.DEBUG) return
         if (deviceConfigRepository.getConfig() == null) {
             deviceConfigRepository.saveConfig(
                 DeviceConfig(
                     pumpLabel = "PUMP 1",
                     stationName = "Total Lekki Ph2",
                     koboPerLitre = DEFAULT_KOBO_PER_LITRE,
-                    // Debug only. Seeding a fuel type in release would make every pump silently
-                    // claim PETROL and authorise a diesel sale against the wrong fuel — the guess
-                    // DeviceConfig.fuelType exists to prevent. Release leaves it null so the
-                    // operator config screen must set it; debug keeps the simulator demo working
-                    // out of the box.
-                    fuelType = if (BuildConfig.DEBUG) FuelType.PETROL else null,
+                    fuelType = FuelType.PETROL,
                     virtualAccountNumber = "0123456789",
                 )
             )
