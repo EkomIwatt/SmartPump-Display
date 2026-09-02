@@ -1,77 +1,175 @@
 /*
- * SmartPump Display — pulse-adapter firmware (Phase 7a)
- * Target: Arduino Uno R3 (or any AVR/clone with a hardware-interrupt pin)
+ * SmartPump Display — pulse-adapter firmware (Phase 7a + 7g)
+ * Target: Arduino Uno R3 or Mega 2560 (any AVR with two external-interrupt pins)
+ *
+ * Merge of two sketches:
+ *   - the Phase 7a adapter (checksummed framing, relay control, comms-loss watchdog) — bench
+ *     verified 2026-06-11 and 2026-07-10, merge gate #2;
+ *   - the Phase 7g bench sketch (wear-levelled EEPROM totaliser + power-fail save).
+ * The 7a half is authoritative on anything the Android side parses; the 7g half adds the
+ * non-volatile totaliser required by Prototype Specification v1.0 (Hardware -> pulse-tap adapter
+ * board). Previous single-purpose versions are in git history.
  *
  * Speaks the SmartPump serial protocol over USB @ 115200 8N1. This is the other end of the
  * Android UsbSerialConnection / SerialFrameParser, so the framing + checksum here MUST stay
  * byte-for-byte identical to the Kotlin side.
  *
  * Framing (line-delimited, '\n'):
- *   device -> app :  PULSE:<cum>*<cs>     a fuel pulse; <cum> is this adapter's free-running count
+ *   device -> app :  PULSE:<cum>*<cs>     a fuel pulse; <cum> is this adapter's running count
  *                    HB:<cum>*<cs>        keep-alive, ~2s when idle
- *                    BOOT:<cum>*<cs>      sent once at power-up (count starts at 0)
- *                    ERR:<code>*<cs>      rejected/garbled inbound command, or ERR:WDOG when the
- *                                         comms-loss watchdog auto-closes the relay (see below)
+ *                    BOOT:<cum>*<cs>      sent once at power-up; <cum> is the EEPROM-restored
+ *                                         totaliser, so it is NO LONGER always 0 (see below)
+ *                    ERR:<code>*<cs>      rejected/garbled inbound command, ERR:WDOG on watchdog
+ *                                         trip, ERR:PWR on a power-fail save
  *   app -> device :  PING*<cs>            liveness heartbeat, sent ~every 1s while the link is up
  *                    RLY:1*<cs>           energise relay (fuel on)  — one-shot edge command
  *                    RLY:0*<cs>           de-energise relay (fuel off) — one-shot edge command
  *
- * Comms-loss heartbeat watchdog: the relay is a fail-closed output. While dispensing, the adapter
- * must keep hearing the app's PING heartbeat; if none arrives within HEARTBEAT_TIMEOUT_MS the comms
- * are presumed dead (USB data drop, frozen/crashed controller) and the adapter closes the relay on
- * its own GPIO — "comms dead, fail safe", and it does NOT need to know litres_authorised. It never
- * re-energises on its own: once tripped, only an explicit RLY:1 from the app resumes fuel. In
- * production the adapter is powered from the UPS (not the tablet's USB), so it stays alive to enforce
- * this even when the data link drops. (The app->device PING is distinct from the device->app HB.)
  *   <cs> = XOR-8 of every ASCII byte BEFORE the '*', printed as two UPPERCASE hex digits.
- *          e.g. PULSE:1 -> 54, HB:0 -> 00, BOOT:0 -> 1C, RLY:1 -> 4C, RLY:0 -> 4D
- *          (the boss's illustrative "PULSE:0042817*7C" is wrong; the real XOR is 5D.)
+ *          e.g. PULSE:1 -> 54, HB:0 -> 00, BOOT:0 -> 1C, RLY:1 -> 4C, RLY:0 -> 4D,
+ *               ERR:WDOG -> 64, ERR:PWR -> 2A, PING -> 10
  *
- * The app takes the DELTA between successive cumulative counts, so dropped lines self-heal and
- * the exact PULSE cadence does not matter — we throttle PULSE frames and lean on the counter.
+ * NOTHING may be printed outside this framing while the app is attached — SerialFrameParser
+ * classifies any unframed line as SerialFrame.Invalid. Human-readable banners are therefore
+ * behind DEBUG_BANNERS, which MUST be false in normal operation.
  *
- * Demo without a real flow meter: with ENABLE_AUTO_PULSE, the adapter synthesises pulses while
- * the relay is energised (~30 L/min at 100 pulses/L). A button can also inject pulses by hand.
- * A real meter wired to PIN_PULSE_IN works too (counted on the interrupt) — set ENABLE_AUTO_PULSE
- * to false if you don't want the synthetic pulses on top.
+ * The app takes the DELTA between successive counts, so dropped lines self-heal and the exact
+ * PULSE cadence does not matter — we throttle PULSE frames and lean on the counter.
+ *
+ * Comms-loss heartbeat watchdog: the relay is a fail-closed output and this adapter — not the
+ * app — is its safety authority. While dispensing, the adapter must keep hearing the app's PING;
+ * if none arrives within HEARTBEAT_TIMEOUT_MS the comms are presumed dead (USB data drop, frozen
+ * or crashed controller) and the adapter closes the relay on its own GPIO. It does NOT need to
+ * know litres_authorised to do this, and it never re-energises on its own: once tripped, only an
+ * explicit RLY:1 resumes fuel. In production the adapter is powered from the UPS, not the
+ * tablet's USB, so it stays alive to enforce this even when the data link drops.
+ *
+ * EEPROM totaliser (7g): a single LIFETIME pulse count, wear-levelled over MAX_SLOTS slots. Per
+ * the agreed constraint it is written only at end-of-dispense (on RLY:0) and on power failure —
+ * never per pulse, which at 50 pps would exhaust the ~100k cycle endurance within the hour. It
+ * is a REPORTING figure: the Android app remains system of record for litres sold.
+ *
+ * KNOWN GAP — do not mistake this for complete. Prototype Specification v1.0 (Software ->
+ * power-cut transaction recovery) calls for resuming max(adapter_eeprom, android_persisted).
+ * That comparison is not yet implementable: this totaliser is lifetime-scoped while the app's
+ * persisted count is per-transaction, so a literal max() always returns the lifetime value. It
+ * needs a session-mark command (app signals session-zero at relay-open; adapter records the
+ * totaliser at that mark; recovery reads lifetime_now - lifetime_at_mark). That is a protocol
+ * change and is deliberately NOT invented here — see OPEN_QUESTIONS #24, pending Olonade.
+ * The same applies to the sealed pulses-per-litre constant and its proposed CAL frame (OQ #23).
  */
+
+#include <EEPROM.h>
 
 // ---- Configuration ----------------------------------------------------------------------
 #define BAUD 115200
 
-const uint8_t  PIN_RELAY    = 7;   // relay module / LED driving the pump solenoid
-const uint8_t  PIN_PULSE_IN = 2;   // INT0 — real flow-meter signal (optional)
-const uint8_t  PIN_BUTTON   = 3;   // manual pulse inject, to GND (optional)
+// Pins. PIN_PULSE_IN and PIN_POWER_SENSE must BOTH be external-interrupt capable. On an Uno
+// that is pins 2 and 3 only; on a Mega, 2, 3, 18, 19, 20, 21. Pins 2 and 3 are the only pair
+// valid on both boards, so they are used here and the button moved to a polled pin.
+//
+// (The earlier bench sketch attached interrupts to pins 7 and 5. On a Mega
+// digitalPinToInterrupt() returns NOT_AN_INTERRUPT for those, which attachInterrupt()'s uint8_t
+// parameter turns into 255 — failing its "< EXTERNAL_NUM_INTERRUPTS" guard and silently doing
+// nothing. No compile error, no warning, and nothing is ever counted.)
+const uint8_t  PIN_PULSE_IN    = 2;   // INT — flow-meter signal (Uno INT0 / Mega INT4)
+const uint8_t  PIN_POWER_SENSE = 3;   // INT — power-fail early warning, ahead of the reservoir cap
+const uint8_t  PIN_RELAY       = 7;   // relay module / LED driving the pump solenoid
+const uint8_t  PIN_BUTTON      = 4;   // manual pulse inject, to GND — POLLED, no interrupt needed
 
-const bool     RELAY_ACTIVE_LOW   = false; // set true for active-LOW relay boards (LOW = energised)
+const bool     RELAY_ACTIVE_LOW   = false; // true for active-LOW relay boards (LOW = energised)
 const bool     ENABLE_AUTO_PULSE  = true;  // synthesise pulses while dispensing (meter-free demo)
 const bool     ENABLE_BUTTON      = true;  // inject pulses while the button is held
 const unsigned int  AUTO_PPS      = 50;    // synthetic pulse rate (~30 L/min @ 100 pulses/L)
 
+// Debounce for the REAL meter input, in MICROseconds, applied in the ISR.
+//
+// Read the arithmetic before changing this: the debounce sets a hard ceiling on countable flow.
+//     max_pulses_per_sec = 1e6 / PULSE_DEBOUNCE_US
+//     max_litres_per_min = max_pulses_per_sec * 60 / pulses_per_litre
+// At the default 250 us that is 4000 pps — about 2400 L/min at 100 pulses/L, i.e. far above any
+// dispenser, while still swallowing contact ringing. Set to 0 to disable entirely.
+//
+// It is deliberately NOT the 150 ms used for the bench pushbutton. 150 ms caps counting at 6.67
+// pps — roughly 4 L/min against a real dispenser's 30-50 — and, because the loss is flow-rate
+// dependent, a K-factor derived through it is not a constant at all. Calibration task T-01
+// (5 x 10 L, +/-0.5%) is invalid if run with a debounce anywhere near that. The button does not
+// need debouncing here because it is polled and injects at AUTO_PPS while held, never via the ISR.
+const unsigned long PULSE_DEBOUNCE_US = 250;
+
 const unsigned long HB_INTERVAL_MS   = 2000; // keep-alive cadence when idle
 const unsigned long PULSE_TX_MIN_MS  = 30;   // min gap between PULSE frames (throttle the stream)
 
-// Comms-loss heartbeat watchdog: while the relay is energised the app must keep sending its PING
-// heartbeat (~every 1s). If none arrives for this long the comms are presumed dead and we fail the
-// relay closed. Generous enough not to false-trip on USB latency, tight enough to bound uncontrolled
-// flow. NOTE the app->device PING is distinct from the device->app HB above.
+// Comms-loss heartbeat watchdog: while the relay is energised the app must keep sending PING
+// (~every 1s). If none arrives for this long we fail the relay closed. Generous enough not to
+// false-trip on USB latency, tight enough to bound uncontrolled flow. NOTE the app->device PING
+// is distinct from the device->app HB.
 const unsigned long HEARTBEAT_TIMEOUT_MS = 3000;
 
+// Power-fail save. The sense line is expected ACTIVE-LOW ("power good" holds the pin low, e.g.
+// via an opto energised from the incoming rail); losing power releases it and the internal
+// pull-up drags it high, so we trigger on RISING. Flip to FALLING if the sense circuit is
+// inverted. With nothing wired the pull-up holds the pin high and the edge never comes, so an
+// unwired rig simply never saves on power loss — it does not false-trigger.
+const bool ENABLE_POWER_FAIL_SAVE = true;
+const int  POWER_FAIL_EDGE        = RISING;
+
+// Human-readable banners for a bare Serial Monitor. MUST be false whenever the app is attached:
+// unframed lines are parsed as SerialFrame.Invalid.
+const bool DEBUG_BANNERS = false;
+
+// ---- EEPROM wear-levelled totaliser -----------------------------------------------------
+// Field order is load-bearing. EEPROM.put() writes ascending, so "crc" lands LAST and acts as
+// the commit marker: a write torn by a power cut leaves a stale/garbage crc, recovery rejects
+// that slot, and the previous slot's older-but-valid data wins.
+//
+// (The bench sketch ordered "sequence" first with no crc. A cut mid-save could therefore commit
+// a new highest sequence against a stale pulseCount left from a full lap of the ring — and
+// recovery, picking purely on sequence, would elect exactly that corrupt slot. The failure case
+// was the one the mechanism exists to survive.)
+struct PumpData {
+  unsigned long pulseCount;   // bytes 0-3  — written first
+  unsigned long sequence;     // bytes 4-7
+  uint16_t      crc;          // bytes 8-9  — written last: commit marker
+};
+
+const int MAX_SLOTS         = 64;               // 64 * 10 B = 640 B; fits Uno (1 KB) and Mega (4 KB)
+const int SLOT_SIZE         = sizeof(PumpData);
+const int EEPROM_START_ADDR = 0;
+const unsigned long SEQ_ERASED = 0xFFFFFFFFUL;  // erased-cell sentinel
+
+static_assert(MAX_SLOTS * SLOT_SIZE <= E2END + 1, "EEPROM ring does not fit this MCU");
+
 // ---- State ------------------------------------------------------------------------------
-volatile unsigned long pulseCount = 0;   // free-running, shared with the ISR
+volatile unsigned long pulseCount = 0;   // free-running lifetime count, shared with the ISR
+volatile bool powerFailLatched = false;
 bool dispensing = false;
 
-unsigned long lastFrameMs   = 0;  // last frame of ANY type sent (gates HB)
-unsigned long lastPulseTxMs = 0;  // last PULSE frame sent (throttle)
-unsigned long lastAutoMs    = 0;  // last synthetic-pulse tick
-unsigned long lastSentCount = 0;  // cumulative at the last PULSE frame
-unsigned long lastHeartbeatMs = 0; // last PING heartbeat received from the app (feeds the watchdog)
+unsigned long lastFrameMs     = 0;  // last frame of ANY type sent (gates HB)
+unsigned long lastPulseTxMs   = 0;  // last PULSE frame sent (throttle)
+unsigned long lastAutoMs      = 0;  // last synthetic-pulse tick
+unsigned long lastSentCount   = 0;  // count at the last PULSE frame
+unsigned long lastHeartbeatMs = 0;  // last PING received from the app (feeds the watchdog)
+unsigned long lastSavedCount  = 0;  // count at the last EEPROM commit (skips no-op saves)
+
+unsigned long currentSequence = 0;
+int activeSlotIndex = MAX_SLOTS - 1;  // so the first save lands on slot 0
 
 char rxBuf[40];
 uint8_t rxLen = 0;
 
 // ---- Pulse counter ----------------------------------------------------------------------
-void onPulseEdge() { pulseCount++; }            // ISR — keep it tiny
+void onPulseEdge() {
+  if (PULSE_DEBOUNCE_US > 0) {
+    static unsigned long lastEdgeUs = 0;
+    // micros() is ISR-safe on AVR (it reads TCNT0 and folds in a pending overflow), unlike
+    // millis(), which cannot advance while we are in here.
+    unsigned long nowUs = micros();
+    if (nowUs - lastEdgeUs < PULSE_DEBOUNCE_US) return;
+    lastEdgeUs = nowUs;
+  }
+  pulseCount++;
+}
 
 unsigned long readCount() {
   noInterrupts();
@@ -113,12 +211,98 @@ void sendError(const char* code) {
   sendRaw(body);
 }
 
+// ---- EEPROM totaliser -------------------------------------------------------------------
+uint16_t crc16(const uint8_t* data, uint8_t len) {   // CRC-16/CCITT-FALSE
+  uint16_t crc = 0xFFFF;
+  for (uint8_t i = 0; i < len; i++) {
+    crc ^= (uint16_t)data[i] << 8;
+    for (uint8_t b = 0; b < 8; b++) {
+      crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+    }
+  }
+  return crc;
+}
+
+uint16_t slotCrc(const PumpData& d) {
+  return crc16((const uint8_t*)&d, sizeof(PumpData) - sizeof(d.crc));
+}
+
+// Commit [count] to the next slot in the ring. Safe to be interrupted by the power-fail ISR:
+// activeSlotIndex advances only AFTER the put returns, so the ISR targets the same slot and
+// simply completes a consistent record over the top of the partial one.
+void saveTotaliser(unsigned long count) {
+  int nextSlot = (activeSlotIndex + 1) % MAX_SLOTS;
+  PumpData d;
+  d.pulseCount = count;
+  d.sequence   = currentSequence + 1;
+  d.crc        = slotCrc(d);
+  EEPROM.put(EEPROM_START_ADDR + nextSlot * SLOT_SIZE, d);
+  activeSlotIndex = nextSlot;
+  currentSequence = d.sequence;
+  lastSavedCount  = count;
+}
+
+// Scan every slot for the highest sequence that still passes its CRC.
+void recoverLatestState() {
+  unsigned long bestSeq = 0;
+  int bestSlot = -1;
+  PumpData t;
+
+  for (int i = 0; i < MAX_SLOTS; i++) {
+    EEPROM.get(EEPROM_START_ADDR + i * SLOT_SIZE, t);
+    if (t.sequence == SEQ_ERASED) continue;       // never written
+    if (t.crc != slotCrc(t)) continue;            // torn write or corruption — ignore
+    if (bestSlot < 0 || t.sequence > bestSeq) {
+      bestSeq  = t.sequence;
+      bestSlot = i;
+    }
+  }
+
+  if (bestSlot < 0) {                             // first boot, or every slot unusable
+    currentSequence = 0;
+    pulseCount      = 0;
+    activeSlotIndex = MAX_SLOTS - 1;              // first save goes to slot 0
+  } else {
+    EEPROM.get(EEPROM_START_ADDR + bestSlot * SLOT_SIZE, t);
+    currentSequence = t.sequence;
+    pulseCount      = t.pulseCount;
+    activeSlotIndex = bestSlot;
+  }
+  lastSavedCount = pulseCount;
+}
+
 // ---- Relay ------------------------------------------------------------------------------
 void setRelay(bool on) {
   dispensing = on;
   bool level = RELAY_ACTIVE_LOW ? !on : on;
   digitalWrite(PIN_RELAY, level ? HIGH : LOW);
-  digitalWrite(LED_BUILTIN, on ? HIGH : LOW);    // visual cue on a bare Uno
+  digitalWrite(LED_BUILTIN, on ? HIGH : LOW);    // visual cue on a bare board
+}
+
+// ---- Power-fail ISR ---------------------------------------------------------------------
+// Ordering is deliberate: fuel off first (a couple of register writes), then the EEPROM commit,
+// then a best-effort notice, then halt. The reservoir capacitor must hold the rail up long
+// enough for the commit — worst case ~10 x 3.3 ms, though EEPROM.put() skips bytes that already
+// match, so a small delta is much cheaper than that bound suggests.
+void onPowerFail() {
+  if (powerFailLatched) return;
+  powerFailLatched = true;
+
+  setRelay(false);                                           // safety before bookkeeping
+
+  detachInterrupt(digitalPinToInterrupt(PIN_PULSE_IN));      // protect the write
+  detachInterrupt(digitalPinToInterrupt(PIN_POWER_SENSE));
+
+  saveTotaliser(pulseCount);
+
+  // Best effort — the link may already be gone. HardwareSerial drains its buffer by polling
+  // when interrupts are disabled, so both of these work from inside an ISR; without the flush
+  // the bytes would sit in the buffer forever once we spin below.
+  sendError("PWR");
+  Serial.flush();
+
+  digitalWrite(LED_BUILTIN, HIGH);
+  while (true) { }                                           // hold until the rail collapses
 }
 
 // ---- Inbound command parsing ------------------------------------------------------------
@@ -133,7 +317,12 @@ void processLine(char* line) {
   // RLY:1 also seeds the heartbeat clock so the watchdog can't trip in the instant between
   // energising the relay and the first PING of the dispense.
   else if (strcmp(line, "RLY:1") == 0) { lastHeartbeatMs = millis(); setRelay(true); }
-  else if (strcmp(line, "RLY:0") == 0) setRelay(false);
+  else if (strcmp(line, "RLY:0") == 0) {
+    setRelay(false);
+    // End of dispense — the agreed commit point for the totaliser.
+    unsigned long c = readCount();
+    if (c != lastSavedCount) saveTotaliser(c);
+  }
   else                                 sendError("CMD");
 }
 
@@ -175,6 +364,8 @@ void serviceRelayWatchdog() {
   if (dispensing && (millis() - lastHeartbeatMs) >= HEARTBEAT_TIMEOUT_MS) {
     setRelay(false);
     sendError("WDOG");
+    unsigned long c = readCount();
+    if (c != lastSavedCount) saveTotaliser(c);   // the dispense ended here, however abruptly
   }
 }
 
@@ -200,17 +391,35 @@ void setup() {
   setRelay(false);                               // relay OFF on boot — relay-open-on-boot invariant
   if (ENABLE_BUTTON) pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_PULSE_IN, INPUT_PULLUP);
+
+  recoverLatestState();                          // restores pulseCount before any frame is sent
+
   attachInterrupt(digitalPinToInterrupt(PIN_PULSE_IN), onPulseEdge, FALLING);
+  if (ENABLE_POWER_FAIL_SAVE) {
+    pinMode(PIN_POWER_SENSE, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PIN_POWER_SENSE), onPowerFail, POWER_FAIL_EDGE);
+  }
 
   Serial.begin(BAUD);
   delay(50);
-  sendFrame("BOOT", readCount());                // count == 0
+
+  if (DEBUG_BANNERS) {                           // unframed — never with the app attached
+    Serial.println(F("# SmartPump adapter (7a+7g)"));
+    Serial.print(F("# slot="));     Serial.print(activeSlotIndex);
+    Serial.print(F(" seq="));       Serial.print(currentSequence);
+    Serial.print(F(" pulses="));    Serial.println(pulseCount);
+  }
+
+  // BOOT carries the restored totaliser, which is 0 only on a virgin board. PulseAccumulator
+  // adopts it as its baseline and contributes 0 fuel, so a non-zero value is safe.
+  sendFrame("BOOT", readCount());
 
   unsigned long t = millis();
   lastFrameMs = t;
   lastPulseTxMs = t;
   lastAutoMs = t;
   lastHeartbeatMs = t;  // dispensing == false at boot, so the watchdog stays idle until a dispense
+  lastSentCount = readCount();
 }
 
 void loop() {

@@ -233,16 +233,34 @@ sold.
 - [ ] **21. `CanStartTransactionUseCase` third `Missing` case** — no K-factor = no cutoff = refuse
   the sale, exactly as for price and fuel type (**OQ #23a**). Small; rides on the 7b guard already
   built.
-- [ ] **24. Merge the two sketches.** Olonade's bench sketch and
-  `smartpump_pulse_adapter.ino` are currently disjoint experiments and **cannot be swapped for one
-  another**: his emits bare `PULSE:<n>
-` with **no checksum**, so `SerialFrameParser` rejects every
-  line as `Invalid` ("missing checksum delimiter", `SerialFrameParser.kt:19`) — the app would count
-  zero litres — and it has **no `BOOT`/`HB` frames, no `RLY:1`/`RLY:0` relay control and no `PING`
-  handling**, so there is no fuel cut-off and none of the comms-loss watchdog that closed merge gate
-  #2. It also claims **D7** for the pulse input, which is our relay pin. The merge must keep the
-  checksummed framing, the fail-closed relay and the PING watchdog, and take the EEPROM/power-fail
-  half from his.
+- [~] **24. Merge the two sketches — WRITTEN 2026-09-02, NOT YET FLASHED.** The two were disjoint
+  experiments and could not be swapped for one another: the bench sketch emitted bare `PULSE:<n>`
+  with **no checksum**, so `SerialFrameParser` rejected every line as `Invalid` ("missing checksum
+  delimiter", `SerialFrameParser.kt:19`) and the app would have counted zero litres; it also had
+  **no `BOOT`/`HB`, no `RLY:1`/`RLY:0` and no `PING`**, so no fuel cut-off and none of the
+  comms-loss watchdog that closed merge gate #2; and it claimed **D7**, our relay pin.
+  `smartpump_pulse_adapter.ino` now carries both halves — 7a framing/relay/watchdog kept intact,
+  7g EEPROM totaliser + power-fail save added. Four defects fixed in the merge:
+  - **Interrupt pins → `D2` (pulse) and `D3` (power sense).** Those are the only interrupt-capable
+    pair common to Uno and Mega, so the button moved to polled `D4`. Verified by compiling
+    `static_assert(digitalPinToInterrupt(p) != NOT_AN_INTERRUPT)` against AVR core 1.8.7: pins 2/3
+    pass on both boards, pins **7/5 fail on both** — so the bench sketch counted nothing on a Uno
+    either, not just a Mega.
+  - **Debounce 150 ms → `PULSE_DEBOUNCE_US = 250`** (µs, in the ISR), with the flow-ceiling
+    arithmetic documented at the constant and in `hardware/README.md`.
+  - **Torn-write fixed.** `PumpData` reordered to `{pulseCount, sequence, crc}` + CRC-16/CCITT;
+    `EEPROM.put()` writes ascending so the CRC lands last as a commit marker, and recovery rejects
+    any slot failing it.
+  - **Power-fail ISR drops the relay before the EEPROM commit**, and `Serial.flush()` after
+    `ERR:PWR` so the notice actually leaves before the halt loop.
+  - Also: totaliser commits on `RLY:0` **and on a watchdog trip** (a dispense ended, however
+    abruptly); `DEBUG_BANNERS` (default `false`) gates all unframed output; 64 slots × 10 B = 640 B
+    fits Uno and Mega, enforced by `static_assert`.
+  - **Verified:** compiles clean with `-Wall` for `atmega2560` and `atmega328p`. **Not flashed, not
+    bench-run** — see the new "EEPROM totaliser (7g)" checklist in `hardware/README.md`.
+  - **Deliberately NOT added:** the session mark (OQ #24) and the `CAL` frame (OQ #23). Both are
+    protocol changes and both are Olonade's to ratify; inventing them unilaterally is the mistake
+    this project already made once with the API summary.
 - [ ] **22. Firmware:** `ENABLE_AUTO_PULSE = false` for real-meter runs; optocoupler + debounce
   replaces the bench `INPUT_PULLUP` (spec decides this — bare pullup must not survive into the
   adapter design). Bench meter output type + voltage incoming from Kelvin.
