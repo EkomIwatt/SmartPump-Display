@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-02_
+_Last updated: 2026-09-02 (7b)_
 
 ---
 
@@ -28,6 +28,35 @@ The boss watchdog safety summary + report shipped on top (`ceef973`, `8b72775`).
 
 Network-layer foundation (#1/#3/#4/#5) also landed in the merge. **Non-blocking post-merge follow-up:**
 spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validate on external 5 V.
+
+---
+
+## ✅ Phase 7b (first half) — device-local operator config — DONE 2026-09-02
+
+Branch `feature/phase-7b-operator-config` (`05556c1` schema+migration test / `37388c5` guard /
+`af43918` screen). PROJECT_LOG entry filed. **Merge-ready pending review.**
+
+- **Why it existed:** `/authorise` requires a `fuelType` and nothing in the Pump API supplies one
+  (audit §6 #4). Rather than wait on the backend, the pump is now told locally.
+- `DeviceConfig.fuelType: FuelType?` at **schema v3** — nullable on purpose, since defaulting to
+  PETROL would let a diesel pump authorise against the wrong fuel and price.
+- **First Room migration + first migration test** in the project — step 4 of the workflow documented
+  at the top of `SmartPumpMigrations.kt`, never previously carried out. `room.testing` was already
+  wired and unused.
+- Guard now blocks on a missing fuel type as on a missing price; `NotConfigured(missing:Set<Missing>)`
+  tells the operator screen *which* field, while the customer sees one message either way.
+- **Latent bug fixed:** `seedDefaultConfigIfMissing()` ran in **every** build type, so a fresh
+  *release* install seeded itself ₦870/L + "Total Lekki Ph2" and the price guard could never fire in
+  production. Now debug-only, which is what the file header always claimed.
+- **Deviation flagged:** no operator/settings screen exists in `docs/Strict design screens/`. Entry
+  is a chip in the attendant panel's chrome row, **not** a fourth action card (the three are fixed by
+  `flows.md`).
+- **Accepted risk (OQ #19):** same shared PIN, so any attendant who can authorise a sale can change
+  the price. Role-based PINs stay V2.
+- Verified: JVM **125 tests / 17 classes** green; `compileDebugRealHwKotlin` clean; **12 instrumented
+  green on the SM-T220** (4 migration + 6 Keystore + 2 deviceId).
+
+**Second half (`GET /config` sync) is BLOCKED** — it is item 1 of `BOSS_CONFIRMATIONS_DRAFT.md`.
 
 ---
 
