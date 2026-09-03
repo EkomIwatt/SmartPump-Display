@@ -31,10 +31,12 @@ spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validat
 
 ---
 
-## ✅ Phase 7b (first half) — device-local operator config — DONE 2026-09-02
+## ✅ Phase 7b (first half) — device-local operator config — MERGED 2026-09-03
 
 Branch `feature/phase-7b-operator-config` (`05556c1` schema+migration test / `37388c5` guard /
-`af43918` screen). PROJECT_LOG entry filed. **Merge-ready pending review.**
+`af43918` screen). **MERGED to `main` as `0cfba90` and pushed** — `main` = `origin/main` =
+`0cfba90`. Verified on `main` after merging: 125 JVM tests / 17 classes green, both variants
+compile. PROJECT_LOG entry filed.
 
 - **Why it existed:** `/authorise` requires a `fuelType` and nothing in the Pump API supplies one
   (audit §6 #4). Rather than wait on the backend, the pump is now told locally.

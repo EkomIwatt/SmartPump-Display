@@ -1,6 +1,28 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-02 (7b)
+## Current status — 2026-09-03 (7b merged; 7g in flight)
+
+**Phase 7b (first half) is MERGED to `main`** (merge commit `0cfba90`, 2026-09-03; `main` =
+`origin/main` = `0cfba90`). Verified before merge: 125 JVM tests / 17 classes, 12 instrumented on
+the SM-T220, both variants compiling.
+
+**Phase 7g (adapter EEPROM totaliser) is in flight on `feature/phase-7g-eeprom-totaliser`** —
+pushed, 13 commits past the merge point, **not merged**. It merges the previously separate bench
+sketch into `smartpump_pulse_adapter.ino`, fixing four firmware defects on the way (interrupts on
+non-interrupt pins, a 150 ms debounce that capped counting at ~4 L/min, a torn-write ordering bug
+in the EEPROM save, and relay-after-commit in the power-fail path), and adds a format marker plus
+an erase utility. **The EEPROM totaliser has never been verified on hardware** — that is its merge
+gate, on the 7a-hardening precedent.
+
+**Live meter trial: Friday 2026-09-04.** Firmware is meter-ready (250 µs debounce, no synthetic
+pulse sources, 4N35 front end documented). See `docs/FIELD_RUN_SHEET_2026-09-04.md` and the Friday
+checklist in `docs/journal/BRANCH_7G_SUMMARY.md`. The day's goal is one number — the meter's
+K-factor, which has never been measured. Two spec problems found while preparing: `TEST-01` states
+two tolerances ten times apart, and deriving K and verifying K cannot be the same runs.
+
+---
+
+## Previous status — 2026-09-02 (7b)
 
 Strict-design rebuild is complete and merged to `main`: all 5 flows, the attendant overlay, persistence/boot-resume, kobo money, and Room migrations are in. **Phase 7a (real USB-serial hardware) is merged to `main`** (Arduino pulse driver + relay, bench-verified). `main` is pushed to `origin`.
 
@@ -631,3 +653,36 @@ manual override and as what the pump falls back to when the backend is unreachab
 `BOSS_CONFIRMATIONS_DRAFT.md`, still unsent and still the critical path by lead time. Unblocked
 alternatives: 7e backend sync (audit-log upload via WorkManager, self-contained), or #14/#15 once
 attendant error copy exists (OQ #17).
+
+---
+
+### Phase 7b (first half) — merged to `main`
+**Date:** 2026-09-03
+**Status:** done
+**Commit(s):** `0cfba90` (merge); branch `feature/phase-7b-operator-config`
+
+**Summary (plain language):**
+The pump settings work merged into the mainline. A manager can now set which fuel the pump sells
+and its price on the tablet, behind the attendant PIN, and a pump that hasn't been configured
+refuses to sell rather than guessing. This existed because the backend never tells the pump its
+fuel type, yet every sale has to declare one.
+
+**Technical notes:**
+- No-fast-forward merge, verified on `main` after merging: **125 JVM tests / 17 classes**, 0
+  failures/errors; `compileDebugKotlin` and `compileDebugRealHwKotlin` both clean. 12 instrumented
+  tests were green on the SM-T220 before the merge (4 migration + 6 Keystore + 2 deviceId).
+- Carries `DeviceConfig.fuelType` at schema v3 with the project's first Room migration and first
+  migration test, the `NotConfigured(missing:Set<Missing>)` guard split, the PIN-gated operator
+  screen, and the fix for `seedDefaultConfigIfMissing()` running in every build type.
+- Also carries the `PULSES_PER_LITRE` collapse from two definitions to one
+  (`domain/hardware/MeterCalibration.kt`).
+- `main` = `origin/main` = `0cfba90`, pushed.
+- **Accepted risk (OQ #19), unchanged:** the settings screen sits behind the same shared PIN as the
+  authorise actions, so any attendant who can authorise a sale can change the price. Role-based
+  PINs stay V2.
+
+**Next:**
+Friday 2026-09-04 live meter trial on `feature/phase-7g-eeprom-totaliser`. That trial is also the
+merge gate for 7g, whose EEPROM totaliser has never been verified on hardware. After it: OQ #25
+(pulses counted while the tablet is down are silently absorbed — live on `main`), then the spec's
+payment-direction conflict (`DELTA-04`/`DELTA-05`), which nobody has examined yet.
