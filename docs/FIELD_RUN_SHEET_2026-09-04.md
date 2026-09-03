@@ -119,6 +119,10 @@ front end or the debounce is wrong, and no amount of averaging fixes a systemati
 
 1. Edit `PULSES_PER_LITRE` in
    `app/src/main/java/app/balancee/smartpump/display/domain/hardware/MeterCalibration.kt`
+   **Enter the value exactly as calculated — do not round it to something tidy.** The constant is
+   a `Double` for this reason: rounding to a whole number costs up to 0.5 pulses, which at
+   ~100 pulses/L is a **0.5% error before the meter is even involved** — the entire TEST-01
+   tolerance, spent on tidying a number. Write `98.7`, not `99`.
 2. `./gradlew :app:installDebugRealHw` (tablet on the laptop's USB)
 3. Move the Mega's cable to the tablet, grant USB permission
 4. Run `TEST-01` proper — **3 runs each at 10 L, 20 L and 50 L**, reading litres off the Android
