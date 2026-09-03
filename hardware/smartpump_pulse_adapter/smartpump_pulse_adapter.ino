@@ -174,16 +174,26 @@ const bool DEBUG_BANNERS = false;
 // a new highest sequence against a stale pulseCount left from a full lap of the ring — and
 // recovery, picking purely on sequence, would elect exactly that corrupt slot. The failure case
 // was the one the mechanism exists to survive.)
+// A format marker leads the record. Without one, "is this slot ours?" rests entirely on a CRC-16,
+// which foreign bytes pass about 1 time in 65,536 — and with 64 slots that is a ~0.1% chance per
+// boot of adopting someone else's data as a pulse count. Not hypothetical: this firmware shares a
+// board with an earlier sketch that used a different 8-byte layout, so the EEPROM genuinely does
+// contain records in another format. The marker makes rejecting them a certainty instead of a bet.
+//
+// Bump SLOT_MAGIC whenever the struct changes, so an older layout is rejected rather than
+// misread.
+const uint16_t SLOT_MAGIC = 0x5350;   // "SP" — erased cells read 0xFFFF, so they never collide
+
 struct PumpData {
-  unsigned long pulseCount;   // bytes 0-3  — written first
-  unsigned long sequence;     // bytes 4-7
-  uint16_t      crc;          // bytes 8-9  — written last: commit marker
+  uint16_t      magic;        // bytes 0-1   — written first; identifies the record as ours
+  unsigned long pulseCount;   // bytes 2-5
+  unsigned long sequence;     // bytes 6-9
+  uint16_t      crc;          // bytes 10-11 — written last: commit marker
 };
 
-const int MAX_SLOTS         = 64;               // 64 * 10 B = 640 B; fits Uno (1 KB) and Mega (4 KB)
+const int MAX_SLOTS         = 64;               // 64 * 12 B = 768 B; fits Uno (1 KB) and Mega (4 KB)
 const int SLOT_SIZE         = sizeof(PumpData);
 const int EEPROM_START_ADDR = 0;
-const unsigned long SEQ_ERASED = 0xFFFFFFFFUL;  // erased-cell sentinel
 
 static_assert(MAX_SLOTS * SLOT_SIZE <= E2END + 1, "EEPROM ring does not fit this MCU");
 
@@ -280,6 +290,7 @@ uint16_t slotCrc(const PumpData& d) {
 void saveTotaliser(unsigned long count) {
   int nextSlot = (activeSlotIndex + 1) % MAX_SLOTS;
   PumpData d;
+  d.magic      = SLOT_MAGIC;
   d.pulseCount = count;
   d.sequence   = currentSequence + 1;
   d.crc        = slotCrc(d);
@@ -297,7 +308,7 @@ void recoverLatestState() {
 
   for (int i = 0; i < MAX_SLOTS; i++) {
     EEPROM.get(EEPROM_START_ADDR + i * SLOT_SIZE, t);
-    if (t.sequence == SEQ_ERASED) continue;       // never written
+    if (t.magic != SLOT_MAGIC) continue;          // erased, or written by other firmware
     if (t.crc != slotCrc(t)) continue;            // torn write or corruption — ignore
     if (bestSlot < 0 || t.sequence > bestSeq) {
       bestSeq  = t.sequence;

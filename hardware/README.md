@@ -91,9 +91,21 @@ state and `ENABLE_AUTO_PULSE` makes litres tick without any meter.
 
 ## EEPROM totaliser (Phase 7g)
 
-A single **lifetime** pulse count, wear-levelled across 64 slots of `{pulseCount, sequence, crc}`
-(10 bytes each = 640 B, fitting the Uno's 1 KB and the Mega's 4 KB). Recovery scans every slot and
-takes the highest `sequence` that still passes its CRC.
+A single **lifetime** pulse count, wear-levelled across 64 slots of
+`{magic, pulseCount, sequence, crc}` (12 bytes each = 768 B, fitting the Uno's 1 KB and the Mega's
+4 KB). Recovery scans every slot and takes the highest `sequence` that carries the right format
+marker **and** still passes its CRC.
+
+`magic` (`SLOT_MAGIC`, currently `0x5350`) exists because a CRC-16 alone is a bet, not a check:
+foreign bytes pass it roughly 1 time in 65,536, and across 64 slots that is a ~0.1% chance per
+boot of adopting another firmware's data as a pulse count. This board has genuinely held records
+in an older 8-byte layout, so the case is real rather than theoretical. **Bump `SLOT_MAGIC`
+whenever the struct changes**, so an older layout is rejected instead of misread.
+
+To wipe an adapter's totaliser, flash `hardware/eeprom_erase/` once (LED goes solid when it has
+erased *and verified*), then flash the adapter sketch back. Do not do this on a deployed adapter —
+the totaliser is the pump's lifetime count and is meant to reconcile against station stock
+records.
 
 **Written only at end-of-dispense (on `RLY:0`, and on a watchdog trip) and on power failure** —
 never per pulse. At 50 pps a per-pulse write would burn through the ~100k-cycle endurance within the
