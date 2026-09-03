@@ -55,6 +55,7 @@ fun AttendantPanel(
     onAuthoriseCash: () -> Unit,
     onCashReceived: () -> Unit,
     onEndFillup: () -> Unit,
+    onOpenSettings: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -79,6 +80,27 @@ fun AttendantPanel(
             Column {
                 LabelText(text = "Attendant · interface")
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimensions.itemSpacing)) {
+            // Pump settings lives in this chrome row, deliberately NOT as a fourth action card:
+            // the three cards are fixed by docs/flows.md and the strict-design screens. It is
+            // chrome alongside DISMISS, which is already a non-action control.
+            Box(
+                modifier = Modifier
+                    .clickable(onClick = onOpenSettings)
+                    .background(
+                        color = Surface,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                            Dimensions.cornerChip,
+                        ),
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = "PUMP SETTINGS",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TextSecondary,
+                )
+            }
             // Pull-tab affordance: tappable area to dismiss without a swipe.
             Box(
                 modifier = Modifier
@@ -96,6 +118,7 @@ fun AttendantPanel(
                     style = MaterialTheme.typography.labelLarge,
                     color = TextSecondary,
                 )
+            }
             }
         }
 
@@ -213,6 +236,7 @@ private fun AttendantPanelIdlePreview() {
             onAuthoriseCash = {},
             onCashReceived = {},
             onEndFillup = {},
+            onOpenSettings = {},
             onDismiss = {},
         )
     }
@@ -232,6 +256,7 @@ private fun AttendantPanelAwaitingCashPreview() {
             onAuthoriseCash = {},
             onCashReceived = {},
             onEndFillup = {},
+            onOpenSettings = {},
             onDismiss = {},
         )
     }
@@ -251,6 +276,7 @@ private fun AttendantPanelFillingPreview() {
             onAuthoriseCash = {},
             onCashReceived = {},
             onEndFillup = {},
+            onOpenSettings = {},
             onDismiss = {},
         )
     }

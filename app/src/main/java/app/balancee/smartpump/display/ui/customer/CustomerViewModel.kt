@@ -34,14 +34,18 @@
 //  - Cash-fixed cutoff is computed via DeviceConfig.litresCutoff(amountKobo) — floored to
 //    0.01L per state-machine invariant ("never dispense more than was paid").
 //  - Pulse counts come from the injected PulseSource; the mock generates ~50 pps when the
-//    relay is open. Litres are derived at 100 pulses/L (see OPEN_QUESTIONS #1).
+//    relay is open. Litres are derived via PULSES_PER_LITRE, whose value is still a
+//    placeholder pending calibration task T-01 (see OPEN_QUESTIONS #1).
 package app.balancee.smartpump.display.ui.customer
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.balancee.smartpump.display.BuildConfig
+import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PostFillIntent
@@ -67,7 +71,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private const val PULSES_PER_LITRE = 100
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
 private const val FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60
 private const val USSD_SMS_TIMEOUT_SECONDS = 5 * 60
@@ -75,10 +78,11 @@ private const val FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L
 private const val FILLUP_WATCHDOG_POLL_MS = 500L
 
 /**
- * Persist pulse count every N pulses during a dispense — at 100 pulses/L this is one
- * write every 0.25L (~25 writes for a full 10L pre-pay). Frequent enough that a
- * power-cut resume reconstructs litresSoFar within ±0.25L, cheap enough not to thrash
- * the SD card on the kiosk.
+ * Persist pulse count every N pulses during a dispense. Frequent enough that a power-cut
+ * resume reconstructs litresSoFar closely, cheap enough not to thrash the SD card on the
+ * kiosk. NOTE the resulting resolution is in *pulses*, so the litre precision it buys
+ * moves with PULSES_PER_LITRE — at the current placeholder 100 pulses/L it is one write
+ * per 0.25L (~25 writes for a full 10L pre-pay); a higher K-factor makes it finer.
  */
 private const val PULSE_PERSIST_EVERY_N = 25
 
@@ -281,10 +285,10 @@ class CustomerViewModel @Inject constructor(
                     priceKoboPerLitre = result.config.koboPerLitre
                     setState(TransactionState.ModeSelect())
                 }
-                CanStartTransactionUseCase.Result.PriceNotSet -> {
+                is CanStartTransactionUseCase.Result.NotConfigured -> {
                     setState(
                         TransactionState.Error(
-                            message = "Price not set — contact operator.",
+                            message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
                         )
                     )
@@ -383,10 +387,10 @@ class CustomerViewModel @Inject constructor(
                     )
                     startFillupDispensing(txnId)
                 }
-                CanStartTransactionUseCase.Result.PriceNotSet -> {
+                is CanStartTransactionUseCase.Result.NotConfigured -> {
                     setState(
                         TransactionState.Error(
-                            message = "Price not set — contact operator.",
+                            message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
                         )
                     )
@@ -605,10 +609,10 @@ class CustomerViewModel @Inject constructor(
                     _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
                     setState(TransactionState.CashFixedAmountEntry)
                 }
-                CanStartTransactionUseCase.Result.PriceNotSet -> {
+                is CanStartTransactionUseCase.Result.NotConfigured -> {
                     setState(
                         TransactionState.Error(
-                            message = "Price not set — contact operator.",
+                            message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
                         )
                     )
@@ -1014,13 +1018,27 @@ class CustomerViewModel @Inject constructor(
         fillupWatchdogJob = null
     }
 
+    /**
+     * Seeds a playable demo config on first launch — **debug builds only**.
+     *
+     * This used to run in every build type, so a fresh release install silently gave itself a
+     * ₦870/L price and the station name "Total Lekki Ph2". The price guard could therefore never
+     * fire in production, and an operator opening the settings screen would find a plausible price
+     * already filled in — which does not ask to be read. (The header comment above has always
+     * described this as a debug-build seed; the code simply did not honour it.)
+     *
+     * A real pump now starts genuinely unconfigured: the guard blocks, the customer screen says so,
+     * and the operator screen opens with empty fields that have to be filled deliberately.
+     */
     private suspend fun seedDefaultConfigIfMissing() {
+        if (!BuildConfig.DEBUG) return
         if (deviceConfigRepository.getConfig() == null) {
             deviceConfigRepository.saveConfig(
                 DeviceConfig(
                     pumpLabel = "PUMP 1",
                     stationName = "Total Lekki Ph2",
                     koboPerLitre = DEFAULT_KOBO_PER_LITRE,
+                    fuelType = FuelType.PETROL,
                     virtualAccountNumber = "0123456789",
                 )
             )

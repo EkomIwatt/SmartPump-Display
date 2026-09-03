@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
@@ -96,7 +98,7 @@ private fun DebugScreenContent(
     onPendingDelayMs: (Long) -> Unit,
     onFailureReason: (String) -> Unit,
     onTriggerInstantResolve: () -> Unit,
-    onSaveConfig: (String, String, Long, String?) -> Unit,
+    onSaveConfig: (String, String, Long, FuelType?, String?) -> Unit,
     onPinBypass: (Boolean) -> Unit,
     onResetOnboarding: () -> Unit,
     modifier: Modifier = Modifier,
@@ -374,7 +376,7 @@ private fun SecurityCard(
 private fun DeviceConfigCard(
     current: app.balancee.smartpump.display.domain.model.DeviceConfig?,
     saveStatus: String?,
-    onSave: (String, String, Long, String?) -> Unit,
+    onSave: (String, String, Long, FuelType?, String?) -> Unit,
 ) {
     var pumpLabel by remember(current?.pumpLabel) { mutableStateOf(current?.pumpLabel ?: "PUMP 1") }
     var stationName by remember(current?.stationName) {
@@ -386,6 +388,8 @@ private fun DeviceConfigCard(
     var virtualAccount by remember(current?.virtualAccountNumber) {
         mutableStateOf(current?.virtualAccountNumber.orEmpty())
     }
+    // Null is a real, selectable value here — testers need to reproduce an unconfigured pump.
+    var fuelType by remember(current?.fuelType) { mutableStateOf(current?.fuelType) }
 
     BalanceeCard(borderColor = SuccessGreen) {
         LabelText(text = "Device config", color = SuccessGreen)
@@ -394,6 +398,7 @@ private fun DeviceConfigCard(
         current?.let {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 LedgerRow(label = "Price / L (live)", value = formatNaira(it.koboPerLitre))
+                LedgerRow(label = "Fuel type (live)", value = it.fuelType?.displayName ?: "NOT SET")
                 LedgerRow(label = "Updated at", value = it.updatedAt.toString())
             }
             Spacer(Modifier.height(12.dp))
@@ -413,6 +418,22 @@ private fun DeviceConfigCard(
             onValueChange = { nairaPerLitre = it.filter { ch -> ch.isDigit() || ch == '.' } },
         )
         Spacer(Modifier.height(8.dp))
+        LabelText(text = "Fuel type")
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            (FuelType.entries + null).forEach { option ->
+                val selected = fuelType == option
+                Text(
+                    text = option?.displayName ?: "Not set",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clickable { fuelType = option }
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         DebugTextField(
             label = "Virtual account (NIP)",
             value = virtualAccount,
@@ -428,6 +449,7 @@ private fun DeviceConfigCard(
                     pumpLabel.trim(),
                     stationName.trim(),
                     kobo,
+                    fuelType,
                     virtualAccount.trim().takeIf { it.isNotEmpty() },
                 )
             },
@@ -499,7 +521,7 @@ private fun DebugScreenPreview() {
                 onPendingDelayMs = {},
                 onFailureReason = {},
                 onTriggerInstantResolve = {},
-                onSaveConfig = { _, _, _, _ -> },
+                onSaveConfig = { _, _, _, _, _ -> },
                 onPinBypass = {},
                 onResetOnboarding = {},
                 modifier = Modifier.padding(PaddingValues(0.dp)),

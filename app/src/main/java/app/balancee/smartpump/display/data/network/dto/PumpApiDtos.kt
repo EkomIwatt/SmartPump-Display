@@ -8,17 +8,11 @@
 // the wire contract. Json is configured with ignoreUnknownKeys, so extra server fields are safe.
 package app.balancee.smartpump.display.data.network.dto
 
+// FuelType is a domain type (a pump knows what it sells before it ever talks to the backend) and
+// carries the @SerialName wire strings /authorise expects. See domain/model/FuelType.kt.
+import app.balancee.smartpump.display.domain.model.FuelType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-
-/** Fuel types accepted by /authorise. Serial names must match the backend's enum strings. */
-@Serializable
-enum class FuelType {
-    @SerialName("PETROL") PETROL,
-    @SerialName("KEROSENE") KEROSENE,
-    @SerialName("DIESEL") DIESEL,
-    @SerialName("COOKING_GAS") COOKING_GAS,
-}
 
 // ---- Activation: POST /api/pump/activate (public, @Unsigned) --------------------------------
 

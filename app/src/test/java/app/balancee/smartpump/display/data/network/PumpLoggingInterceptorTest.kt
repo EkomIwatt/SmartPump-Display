@@ -6,7 +6,7 @@ package app.balancee.smartpump.display.data.network
 
 import app.balancee.smartpump.display.data.network.dto.ActivateRequest
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
-import app.balancee.smartpump.display.data.network.dto.FuelType
+import app.balancee.smartpump.display.domain.model.FuelType
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType

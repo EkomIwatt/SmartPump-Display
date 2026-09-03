@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import app.balancee.smartpump.display.data.hardware.MockPulseSource
 import app.balancee.smartpump.display.data.payment.MockPaymentProcessor
 import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.StationIdentityRepository
 import app.balancee.smartpump.display.domain.security.SecurityPreferences
@@ -145,6 +146,7 @@ class DebugViewModel @Inject constructor(
         pumpLabel: String,
         stationName: String,
         koboPerLitre: Long,
+        fuelType: FuelType?,
         virtualAccountNumber: String?,
     ) {
         viewModelScope.launch {
@@ -154,6 +156,7 @@ class DebugViewModel @Inject constructor(
                         pumpLabel = pumpLabel.ifBlank { "PUMP 1" },
                         stationName = stationName.ifBlank { "SmartPump Station" },
                         koboPerLitre = koboPerLitre.coerceAtLeast(1L),
+                        fuelType = fuelType,
                         virtualAccountNumber = virtualAccountNumber?.ifBlank { null },
                     )
                 )

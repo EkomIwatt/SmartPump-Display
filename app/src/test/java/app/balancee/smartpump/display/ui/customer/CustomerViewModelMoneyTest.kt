@@ -93,7 +93,7 @@ class CustomerViewModelMoneyTest {
 
         val s = state(vm) as TransactionState.Error
         assertTrue(s.recoverable)
-        assertTrue(s.message.contains("Price not set"))
+        assertTrue(s.message.contains("Fuel parameters not set"))
     }
 
     @Test

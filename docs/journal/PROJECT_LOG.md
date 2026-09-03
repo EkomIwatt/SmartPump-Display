@@ -1,6 +1,6 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-02
+## Current status — 2026-09-02 (7b)
 
 Strict-design rebuild is complete and merged to `main`: all 5 flows, the attendant overlay, persistence/boot-resume, kobo money, and Room migrations are in. **Phase 7a (real USB-serial hardware) is merged to `main`** (Arduino pulse driver + relay, bench-verified). `main` is pushed to `origin`.
 
@@ -14,7 +14,9 @@ Strict-design rebuild is complete and merged to `main`: all 5 flows, the attenda
 
 **Still open from the audit — #14, #15, #18.** **#14** (parse the envelope out of 4xx error bodies; `ApiError.Business` already exists) is blocked on *copy*, not code — no error screen in `docs/Strict design screens/`, OQ #17 open. **#15**'s mapping half is ready and rides on #14; its enforcement half has no home (not a device-owner app, so it cannot set the clock — only read `Settings.Global.AUTO_TIME` and warn). **#18 backend asks remain unsent and are the critical path by lead time:** `GET /config` and `GET /transactions/{id}` don't exist, **nothing tells the pump its `fuelType`** (which `/authorise` requires), does `amount` accept decimals, the full status set, what to sign for a GET — plus a new fifth ask: **stable error codes** alongside `message`, since matching on interpolated human strings breaks silently on a reword.
 
-**Next:** send the #18 asks. Then #14/#15 once error copy exists, 7b operator config (the device-local screen doubles as the `/config` fallback), 7e backend sync, and the payment feature flows (#8).
+**✅ Phase 7b (first half) — device-local operator config — DONE 2026-09-02**, branch `feature/phase-7b-operator-config` (`05556c1`/`37388c5`/`af43918`). The pump had no way to know **which fuel it sells** — `/authorise` requires a `fuelType` and the API supplies none — so a manager now sets fuel type + price on the tablet, behind the attendant PIN. `DeviceConfig.fuelType` added at **schema v3** with the project's **first Room migration + migration test** (step 4 of the documented workflow, never previously done). The transaction guard blocks on a missing fuel type exactly as on a missing price. Also fixed: `seedDefaultConfigIfMissing()` ran in **every** build type, so a fresh release install seeded itself ₦870/L and the price guard could never fire in production — now debug-only. JVM **125 tests / 17 classes** green; **12 instrumented green on the SM-T220**. Accepted risk in OQ #19: same shared PIN, so any attendant can change the price (role-based PINs are V2).
+
+**Next:** send the #18 asks — still unsent, still the critical path by lead time, and 7b's second half (`/config` sync) is blocked on exactly that. Then #14/#15 once attendant error copy exists (OQ #17), 7e backend sync (self-contained, unblocked), and the payment feature flows (#8).
 
 Older entries (Week 1 → Room migrations) are archived in [PROJECT_LOG_ARCHIVE.md](PROJECT_LOG_ARCHIVE.md).
 
@@ -546,3 +548,86 @@ still unsent, and now carry a fifth: request **stable error codes** alongside `m
 matching on interpolated human strings ("Amount mismatch for PETROL…") breaks silently on a reword.
 Otherwise: 7b operator config (the device-local screen doubles as the `/config` fallback) and the
 payment feature flows (#8).
+
+---
+
+### Phase 7b (first half) — device-local operator config: fuel type + price
+**Date:** 2026-09-02
+**Status:** done
+**Commit(s):** `05556c1` (schema v3 + migration test), `37388c5` (guard), `af43918` (operator screen); branch `feature/phase-7b-operator-config`
+
+**Summary (plain language):**
+Until now the pump had no way of knowing which fuel it sells. That sounds absurd for a fuel pump, and
+it is — but the reason is real: the backend never tells it. Every sale has to declare a fuel type,
+and nothing in their API supplies one. We asked for it (it's the headline item in the message going
+to the backend team), but their build time is not something we control, so this phase gives the pump
+a way to be told locally.
+
+There is now a **pump settings screen**. A manager opens the attendant panel with the usual PIN, taps
+"Pump settings", and chooses the fuel and the price. The screen says plainly whether the pump can
+currently take sales, and if not, exactly what's missing.
+
+Two things about it are deliberately awkward. It opens **blank** on a new pump rather than filled in
+with sensible-looking numbers, and it makes you **pick** a fuel rather than pre-selecting petrol.
+Both are because a filled-in field doesn't invite you to check it — and the mistakes here are the
+expensive kind: a pump quietly selling at a leftover demo price, or a diesel pump billing as petrol.
+A pump that isn't configured now refuses to sell and says *"Fuel parameters not set — please see
+attendant"* rather than guessing.
+
+While doing this we found that the app was seeding itself a demo price of ₦870/L on **every** build,
+including the production one — so the "no price set" safety check could never actually fire on a
+real pump. That's now fixed; a real pump starts genuinely blank.
+
+This is not throwaway work. When the backend endpoint eventually ships, this screen stays on as the
+manual override and as what the pump falls back to when the backend is unreachable.
+
+**Technical notes:**
+- **`FuelType` moved** from `data/network/dto/PumpApiDtos.kt` to `domain/model/`. `DeviceConfig` needs
+  it, and leaving it in the DTO file would have made the domain layer reach into a transport type. It
+  keeps its `@SerialName` wire strings rather than being mirrored by a parallel enum + mapper — the
+  backend's vocabulary *is* the domain vocabulary here, so the second enum would guard nothing.
+- **`DeviceConfig.fuelType: FuelType?`** — nullable on purpose. An unconfigured pump genuinely has no
+  answer, and defaulting to `PETROL` would let a diesel pump authorise against the wrong fuel *and*
+  the wrong price. Null blocks instead.
+- **Schema v2 → v3** — `ALTER TABLE device_config ADD COLUMN fuelType TEXT DEFAULT NULL`. Add-column
+  only, so the transaction audit log, identity row and PIN hash are untouched. Existing rows migrate
+  to NULL rather than a back-filled guess. Unrecognised stored values decode to null (not a crash) so
+  a backend enum rename can't take a pump down mid-shift.
+- **First migration test in the project** (`SmartPumpMigrationTest`, 4 cases) — this carries out step
+  4 of the workflow documented at the top of `SmartPumpMigrations.kt`, which had never been done
+  because no migration existed to test; `room.testing` was already wired for it and had been sitting
+  unused. The v2 fixture is **literal SQL, not Room-built**: the entities now describe v3, so a
+  fixture derived from current classes would drift with them and stop representing what is actually
+  installed on a tablet. Covers a configured row surviving, an empty DB, the audit/identity tables
+  being left alone, and a fuelType write round-tripping.
+- **Guard** — `CanStartTransactionUseCase.Result.PriceNotSet` became `NotConfigured(missing: Set<Missing>)`.
+  The split is deliberate: the **operator** screen needs to know *which* field is absent to highlight
+  it (and an unconfigured pump reports *both*, not an empty set, which would read as "nothing
+  missing"); the **customer** gets one message for every case, since they can't act on the difference
+  and the fix path is identical. That single message is pinned by a test so the two cannot drift into
+  separate wording. Copy: *"Fuel parameters not set — please see attendant."*
+- **Entry point is a chip in the attendant panel's chrome row, not a fourth action card.** The three
+  cards are fixed by `flows.md` and the strict-design screens ("three actions, never more"), so the
+  settings control sits beside DISMISS, which is already a non-action control. **Deviation flagged:**
+  no operator/settings screen exists in `docs/Strict design screens/` — the screen is built from
+  `design-system.md` tokens and existing components.
+- **`seedDefaultConfigIfMissing()` gated to debug builds** — which is what `CustomerViewModel`'s
+  header comment has always claimed. It ran in every build type, so a fresh *release* install seeded
+  itself ₦870/L and "Total Lekki Ph2", the price guard could never fire in production, and the new
+  settings screen would have opened pre-filled with a plausible price.
+- **Test harness caught a trap:** `FakeDeviceConfigRepository`'s default config had no `fuelType`, so
+  adding the guard condition silently turned every existing flow test into a not-configured
+  assertion. Default now includes one.
+- **Verification.** JVM **125 tests / 17 classes**, 0 failures/errors/skips (114 → 125 across the
+  phase); `compileDebugRealHwKotlin` clean; **instrumented 12 tests green on the SM-T220** (Android
+  14) — 4 migration + 6 Keystore + 2 deviceId. Gradle pinned with `ANDROID_SERIAL` (the tablet
+  enumerates twice over USB + wireless adb).
+- **Accepted risk, recorded in OQ #19:** the settings screen is behind the *same* shared PIN as the
+  authorise actions, so any attendant who can authorise a sale can change the price. Accepted for V1
+  over inventing a second PIN outside the agreed model; revisit with role-based PINs in V2.
+
+**Next:**
+7b's second half (`GET /config` sync) stays blocked on the backend — it's item 1 of the message in
+`BOSS_CONFIRMATIONS_DRAFT.md`, still unsent and still the critical path by lead time. Unblocked
+alternatives: 7e backend sync (audit-log upload via WorkManager, self-contained), or #14/#15 once
+attendant error copy exists (OQ #17).

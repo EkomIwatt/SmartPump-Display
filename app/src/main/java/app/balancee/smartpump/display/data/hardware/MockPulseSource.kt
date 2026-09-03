@@ -7,6 +7,7 @@
 // `injectDisconnect()` / `injectParseError()`.
 package app.balancee.smartpump.display.data.hardware
 
+import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.PulseMessage
@@ -103,7 +104,6 @@ class MockPulseSource @Inject constructor(
         const val MAX_PPS = 200
         const val HEARTBEAT_INTERVAL_MS = 5_000L
         const val IDLE_POLL_MS = 100L
-        const val PULSES_PER_LITRE = 100      // mirrors the VM constant for hardware contract
         const val DEFAULT_TANK_CAPACITY_LITRES = 60.0
         const val MAX_TANK_CAPACITY_LITRES = 500.0
     }

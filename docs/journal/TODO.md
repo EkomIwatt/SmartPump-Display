@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-02_
+_Last updated: 2026-09-02 (7b)_
 
 ---
 
@@ -28,6 +28,35 @@ The boss watchdog safety summary + report shipped on top (`ceef973`, `8b72775`).
 
 Network-layer foundation (#1/#3/#4/#5) also landed in the merge. **Non-blocking post-merge follow-up:**
 spontaneous-disconnect robustness (tolerate-and-resume vs fail-safe) — validate on external 5 V.
+
+---
+
+## ✅ Phase 7b (first half) — device-local operator config — DONE 2026-09-02
+
+Branch `feature/phase-7b-operator-config` (`05556c1` schema+migration test / `37388c5` guard /
+`af43918` screen). PROJECT_LOG entry filed. **Merge-ready pending review.**
+
+- **Why it existed:** `/authorise` requires a `fuelType` and nothing in the Pump API supplies one
+  (audit §6 #4). Rather than wait on the backend, the pump is now told locally.
+- `DeviceConfig.fuelType: FuelType?` at **schema v3** — nullable on purpose, since defaulting to
+  PETROL would let a diesel pump authorise against the wrong fuel and price.
+- **First Room migration + first migration test** in the project — step 4 of the workflow documented
+  at the top of `SmartPumpMigrations.kt`, never previously carried out. `room.testing` was already
+  wired and unused.
+- Guard now blocks on a missing fuel type as on a missing price; `NotConfigured(missing:Set<Missing>)`
+  tells the operator screen *which* field, while the customer sees one message either way.
+- **Latent bug fixed:** `seedDefaultConfigIfMissing()` ran in **every** build type, so a fresh
+  *release* install seeded itself ₦870/L + "Total Lekki Ph2" and the price guard could never fire in
+  production. Now debug-only, which is what the file header always claimed.
+- **Deviation flagged:** no operator/settings screen exists in `docs/Strict design screens/`. Entry
+  is a chip in the attendant panel's chrome row, **not** a fourth action card (the three are fixed by
+  `flows.md`).
+- **Accepted risk (OQ #19):** same shared PIN, so any attendant who can authorise a sale can change
+  the price. Role-based PINs stay V2.
+- Verified: JVM **125 tests / 17 classes** green; `compileDebugRealHwKotlin` clean; **12 instrumented
+  green on the SM-T220** (4 migration + 6 Keystore + 2 deviceId).
+
+**Second half (`GET /config` sync) is BLOCKED** — it is item 1 of `BOSS_CONFIRMATIONS_DRAFT.md`.
 
 ---
 
@@ -155,6 +184,75 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
   (c) does `amount` accept decimals? (integer-only constrains pricing to whole naira/L — a business
   call); (d) full status set (`PAID` is real but missing from the §5 list); (e) what to sign for a
   GET. **Send today — their lead time is the critical path.**
+
+## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SCOPED, not started)
+
+Source: **Prototype Specification v1.0**, Hardware → "Pulse-tap adapter board" and Software →
+"Power-cut transaction recovery". Not in the original Phase 7 plan (7a–7f), so filed as **7g**.
+Spec lines that drive it: optically-isolated read-only tap, 5 V + 12 V pulse input (Gilbarco /
+Wayne / Tokheim), 2500 V galvanic isolation, STM32F103 or ATmega328P, raw pulse count in onboard
+EEPROM surviving power cuts and independently readable, K-factor sealed post-calibration.
+
+**Agreed constraints (settled 2026-09-02):** write **only at end-of-dispense** via `EEPROM.put`,
+never per pulse (AVR EEPROM is ~100k cycles — per-pulse writes at 50 pps destroy it within the
+hour); the totaliser is a **reporting figure**, with the app remaining system of record for litres
+sold.
+
+- [ ] **19. Blocked on Olonade.**
+  - ~~"stores last 10,000 pulse counts" — totaliser or ring buffer?~~ **ANSWERED 2026-09-02 by his
+    bench sketch: a single lifetime totaliser, wear-levelled over 100 slots.** So the session mark
+    is *not* free and must be added to the protocol (**OQ #24 stands**). The "10,000" figure in the
+    spec matches neither reading and is still unexplained.
+  - **🔴 BLOCKER FOR T-01 — the 150 ms ISR debounce must be removed before any calibration run.**
+    It caps counting at 6.67 pulses/s ~= **4 L/min** at the placeholder K-factor; a real dispenser
+    flows 30-50 L/min. The loss is flow-rate dependent, so a K-factor derived through it is not a
+    constant and the +/-0.5% tolerance is unreachable. The 150 ms figure is correct for the
+    *pushbutton* the bench uses and must not survive contact with a meter (real meters need
+    sub-millisecond debounce, ideally hardware RC + optocoupler per spec).
+  - **🔴 On a Mega the sketch counts nothing.** `attachInterrupt` is used on pins **7** and **5**;
+    verified against the installed AVR core 1.8.7 (`variants/mega/pins_arduino.h:110`) the Mega maps
+    only pins **2, 3, 18, 19, 20, 21**. Both calls resolve to `NOT_AN_INTERRUPT` (-1), which
+    `attachInterrupt`'s `uint8_t` parameter turns into 255, failing the
+    `< EXTERNAL_NUM_INTERRUPTS` guard (`WInterrupts.c`) — a **silent no-op**. No pulse counting, no
+    power-fail save. The sketch's own comment claims the opposite.
+  - **Torn-write bug in the power-fail save.** `PumpData` orders `sequence` before `pulseCount`, and
+    `EEPROM.put` writes ascending, so a cut *during* the save (the exact case it exists for) can
+    commit a new highest `sequence` against a **stale `pulseCount` from 100 cuts ago** — which
+    recovery then elects as the winner. Fix: write `pulseCount` first and `sequence` last as the
+    commit marker, plus a CRC over the slot.
+  - `CAL` frame for the sealed K-factor (**OQ #23**) — protocol change, must land before the
+    adapter firmware is written.
+  - `CAL` frame for the sealed K-factor (**OQ #23**) — protocol change, must land before the
+    adapter firmware is written.
+  - Whether `max()` gets a session mark (**OQ #24**), since the literal rule is not implementable.
+- [ ] **20. Recovery correctness — do first, independent of the board (OQ #25).** Pulses counted
+  while the tablet is down are silently absorbed into a new baseline
+  (`PulseAccumulator.kt:43-47`). **This is live on `main` today**, needs no EEPROM to fix, and is
+  the behaviour the spec's recovery rule exists to prevent. Decide: onto the live transaction, or
+  into a reconciliation log. Wants VM tests (Phase 8 harness exists).
+- [ ] **21. `CanStartTransactionUseCase` third `Missing` case** — no K-factor = no cutoff = refuse
+  the sale, exactly as for price and fuel type (**OQ #23a**). Small; rides on the 7b guard already
+  built.
+- [ ] **24. Merge the two sketches.** Olonade's bench sketch and
+  `smartpump_pulse_adapter.ino` are currently disjoint experiments and **cannot be swapped for one
+  another**: his emits bare `PULSE:<n>
+` with **no checksum**, so `SerialFrameParser` rejects every
+  line as `Invalid` ("missing checksum delimiter", `SerialFrameParser.kt:19`) — the app would count
+  zero litres — and it has **no `BOOT`/`HB` frames, no `RLY:1`/`RLY:0` relay control and no `PING`
+  handling**, so there is no fuel cut-off and none of the comms-loss watchdog that closed merge gate
+  #2. It also claims **D7** for the pulse input, which is our relay pin. The merge must keep the
+  checksummed framing, the fail-closed relay and the PING watchdog, and take the EEPROM/power-fail
+  half from his.
+- [ ] **22. Firmware:** `ENABLE_AUTO_PULSE = false` for real-meter runs; optocoupler + debounce
+  replaces the bench `INPUT_PULLUP` (spec decides this — bare pullup must not survive into the
+  adapter design). Bench meter output type + voltage incoming from Kelvin.
+- [ ] **23. Bench:** Mega is a drop-in — flash target `arduino:avr:mega` only; manifest filter
+  (vendor-only, `usb_device_filter.xml:6`) and the default CDC prober already cover Mega 2560 R3.
+  Only the `// INT0` comment at `.ino:43` goes stale (pin 2 is INT4 on Mega;
+  `digitalPinToInterrupt` handles it). If a clone gives the USB dialog but no `BOOT` frame, it
+  needs a custom `ProbeTable`.
+
+**Not blocked:** #20 and #21 can proceed now. #19 gates the firmware half.
 
 ## Now — unblocked, high value
 

@@ -13,11 +13,42 @@ Decisions still owed before V1 ships. Resolved questions are removed (not crosse
 ## Hardware / firmware contract
 
 1. **Pulses per litre.** Currently assumed at `100 pulses/L` (from prior mock). Is this confirmed against the production pulse-tap adapter, or is it per-station configurable? If per-station, where does it come from — operator push, on-device setup screen, both?
+
+    > **Partly settled 2026-09-02 by Prototype Specification v1.0 (Hardware → pulse-tap adapter
+    > board).** The "operator push / on-device setup screen" options above are **ruled out**: SON
+    > governs accuracy under **NIS 348**, and the spec requires the adapter to be read-only with the
+    > pulse-per-litre constant **loaded at commissioning and sealed post-calibration**. A K-factor a
+    > station manager can edit behind a PIN is a metrology tamper surface, so operator config holds
+    > **fuel type and price only** — it must never hold the K-factor. Agreed split: **the board holds
+    > the sealed constant and reports it; the app treats it as read-only and displays it.**
+    > **The number itself is still open** — no value yet, and it must not be guessed. Derivation is
+    > fixed by execution-tracker task **T-01**: five runs of exactly 10 L into a calibrated measuring
+    > jug, recording run number / actual / screen reading / variance, to **±0.5% tolerance**. Olonade
+    > owns identifying the meter from the dispenser service manual and tapping the pulse wire. Until
+    > then the app carries one named placeholder — `domain/hardware/MeterCalibration.kt`
+    > (`PULSES_PER_LITRE = 100`, collapsed from two copies 2026-09-02, commit `5866037`) — which is
+    > bench scaffolding expected to be deleted, not a default. See new #23 for the protocol change
+    > this implies.
 2. **Nozzle shutoff timeout.** Spec recommends 3s. Confirm 3s as production default. Should it be operator-pushable per-station, or device-local?
 3. **Relay open-on-boot.** Spec invariant says relay must default OPEN. Confirm the Android side actively asserts this on app start (vs. relying on hardware default).
 4. **USB serial protocol.** Existing mock assumes `PULSE:NNNN` strings. Confirm production framing (line-delimited? checksum? heartbeat?).
    - *Phase 7a proposal (built + bench-verified 2026-06-11, pending vendor/Olonade ratification):* line-delimited `TYPE:<cum>*<cs>`, `<cs>` = XOR-8 of the bytes before `*`. Device→app `PULSE`/`HB`/`BOOT`/`ERR`; app→device `RLY:1`/`RLY:0`. Cumulative counter (app takes deltas → dropped lines self-heal). The illustrative `PULSE:0042817*7C` in the framing note is wrong — real XOR-8 is `5D`. *7a-hardening (2026-06-30): added app→device `PING*<cs>` (liveness heartbeat, XOR-8 `10`, ≈1/s) and device→app `ERR:WDOG` (comms-loss watchdog trip). Standing requirement: the app sends `PING` while connected; the adapter fails the relay closed if it goes stale mid-dispense.*
 22. **Pre-pay permanent mid-dispense disconnect — UI recovery gap.** With the app-side pause/resume removed (#21, 2026-07-08) and only *fill-up* carrying a pulse-gap watchdog, a **permanent** mid-dispense link loss on a **fixed/pre-pay/cash-fixed** flow leaves the app showing `FixedDispensing`/`CashFixedDispensing` **indefinitely** at the last litre count — the collectors no-op `PulseMessage.Disconnected` and there is no fixed-flow timeout. **Fuel is physically OFF** (firmware watchdog on UPS power, or instant power loss on a bus-powered rig), so it is **safe-but-stuck**, not unsafe; it clears only on a power-cycle (boot-resume) or attendant action. This is a deliberate consequence of the **fixed-cable assumption** (a permanent yank shouldn't be reachable in the kiosk; only a power cut, which boot-resume covers). **Open decision:** is "safe-but-stuck" acceptable for V1, or do the fixed-flow collectors need a bounded recovery — e.g. an N-second no-pulse timeout → a "pump interrupted, see attendant" terminal state, or resume-else-refund? Bench-observed 2026-07-10 while confirming the 7a-hardening merge. Relates to #21 (link-loss handling) and #2 (shutoff timeout).
+
+23. **How does the sealed K-factor reach the app?** OQ #1 settles that the board owns the constant and the app reads it — but not the wire format, and the current framing cannot carry it. `SerialFrameParser` requires `TYPE:<single numeric payload>` and `BOOT` must parse as one Long (`SerialFrameParser.kt:44`), so a two-field `BOOT:<cum>:<ppl>` breaks the parser and its 19 tests. **Proposal: a separate `CAL:<ppl>*<cs>` frame** — keeps `BOOT` byte-compatible with the firmware already bench-verified in 7a, and lets the board re-report calibration on request without faking a reboot. Needs Olonade's agreement *before* the adapter firmware is written, since the protocol is otherwise settled. Two consequences on the app side, both real work rather than blockers: (a) no K-factor = no naira→litres cutoff = the pump **must refuse to sell**, so `CanStartTransactionUseCase` needs a third `Missing` case alongside price and fuel type; (b) `CAL` arrives asynchronously after USB attach, so there is a window where the app is up but uncalibrated — either a "waiting for adapter" hold, or cache the last-seen sealed value in `DeviceConfig` as **driver-writable / operator-read-only** (keeps the pump sellable across a USB re-enumeration without creating a tamper surface). Which of those is acceptable under NIS 348 is a question for Olonade, not a developer call.
+
+24. **`max(adapter_eeprom, android_persisted)` compares two different scales.** Prototype Specification v1.0 (Software → power-cut transaction recovery) says the system resumes the higher pulse count. As specified this is not implementable against the current data model: the app persists a **per-transaction** cumulative (`pulseBaseline` is zeroed at every transaction start — `CustomerViewModel.kt:380,649,757,864`), whereas the adapter's EEPROM count is a **lifetime free-running totaliser**. The lifetime value is always the larger, so a literal `max()` returns it and the app bills the customer for every litre the pump has ever sold. To make the comparison meaningful the adapter needs a **session mark**: the app signals session-zero at relay-open, the adapter records the lifetime value at that mark, and recovery reads `lifetime_now − lifetime_at_mark`. **This is linked to the open "totaliser vs 10k-entry ring buffer" reading** — if "stores last 10,000 pulse counts" turns out to mean per-dispense records rather than rollover headroom, that ring buffer *is* the session-scoped data and the mark comes for free. Worth putting both to Olonade as one question. See also #25.
+
+    > **Partly answered 2026-09-02 by Olonade's bench sketch.** The code implements a **single
+    > lifetime totaliser** (`{sequence, pulseCount}`) wear-levelled across `MAX_SLOTS = 100` slots,
+    > with recovery scanning for the highest sequence — i.e. **your reading, not the ring-buffer
+    > reading**: the 100 slots spread EEPROM wear, they are not 100 dispense records. Note it
+    > matches *neither* reading of the spec's "10,000" figure (100 slots x 8 bytes), so that number
+    > is still unexplained. **The session mark is therefore still needed** — the sketch offers no
+    > per-dispense scoping, so `max()` still compares a lifetime totaliser against a per-transaction
+    > count and this question stands as written.
+
+25. **Pulses counted while the tablet is down are silently discarded — live on `main` today.** Independent of any EEPROM work, and the sharper half of #24. In the production topology the adapter is **UPS-powered and the tablet may not be**, so the adapter can outlive a tablet restart. If the tablet dies mid-dispense the firmware watchdog closes the relay after `HEARTBEAT_TIMEOUT_MS` (3 s) — but fuel flows for those 3 s and the adapter counts it. Because the *adapter* never rebooted it sends no `BOOT`, so on the tablet's return `PulseAccumulator.onPulse` hits its uninitialised branch (`PulseAccumulator.kt:43-47`), adopts the running count as a baseline and contributes **0** — roughly 1.5 L at the placeholder K-factor, delivered to the customer and billed to nobody. A second, smaller leak exists on every recovery path: the app persists only every `PULSE_PERSIST_EVERY_N = 25` pulses, so up to 24 pulses before any cut are never written. Both always under-count, so the station absorbs the loss rather than the customer. **Decision needed:** do these pulses land on the live transaction, or in a reconciliation log? They must land somewhere explicit — absorbing them into a new baseline is the current behaviour and is what the spec's recovery rule exists to prevent.
 
 ## Payment integration
 
@@ -46,6 +77,15 @@ Decisions still owed before V1 ships. Resolved questions are removed (not crosse
 
 13. **DeviceConfig schema.** *Reshaped* by `phase7_blocker_resolution.md`: config now splits across `POST /api/pump/activate` (returns `deviceId`/`pumpId`/`apiKey`/`signingSecret` once, at onboarding) and `GET /api/pump/config` (current price per fuel type: `PETROL`/`KEROSENE`/`DIESEL`/`COOKING_GAS`). No virtual account (Paystack owns payments). Still open: is shutoff timeout (OQ #2) operator-pushable via `/config`, or device-local? Depends on the `/config` payload the backend finalises (their item 4).
 
+    > **Partly settled device-locally by Phase 7b (2026-09-02).** `fuelType` and price are now set on
+    > the tablet via the operator config screen, because the Reference documents no `/config`
+    > endpoint at all and `/authorise` requires a `fuelType` (`API_CONFORMANCE_AUDIT.md` §6 #4).
+    > `DeviceConfig` gained `fuelType: FuelType?` (schema v3); null blocks all transactions exactly
+    > as a null price does. This is **not** a decision against `/config` — when it ships, the screen
+    > becomes the manual override and the backend-unreachable fallback. `virtualAccountNumber`
+    > stays for now: obsolete by OQ #6, but still feeding `buildNipTransferQr` until 7c replaces
+    > that path with Paystack. Shutoff timeout (OQ #2) remains open.
+
 *(#14 receipt sharing resolved — see Resolved.)*
 
 ## UI / UX
@@ -65,3 +105,10 @@ Decisions still owed before V1 ships. Resolved questions are removed (not crosse
 - **#20 (Phase 7 scope)** — Resolved 2026-05-28. All six Phase 7 sub-phases (7a hardware, 7b operator config push, 7c digital payments, 7d USSD/SMS, 7e backend sync, 7f onboarding + receipts) are **V1**. None touch the spec's V1-out-of-scope set — ad/attract screen, loyalty/RFID, multi-station, ATG, fleet, multi-nozzle, shift management — which stays V2+. See `docs/journal/PHASE_7_PLAN.md`.
 - **Money precision & display** — Resolved 2026-05-27. Sub-naira fuel prices (e.g. ₦870.50/L) are expected, so prices and amounts are carried as **kobo (`Long`) end-to-end** through `TransactionState`, `CustomerViewModel`, and the audit row — no truncation to whole naira. Display uses **full precision (2 dp)** everywhere via `ui/util/formatNaira(kobo)` — e.g. price `₦870.50/L`, fill-up total `₦33,166.05`. **This deviates from the strict-design screens**, which only ever show whole naira (`₦53,147`, `₦870/L`); the screens predate the sub-naira requirement and don't represent a kobo case. Customer-typed entry (pre-pay amount tiles, cash keypad) stays whole-naira at the UI boundary and is multiplied to kobo in the VM. If the boss wants whole-naira amounts to render without a trailing `.00`, that's a `formatNaira` tweak, not a state change.
 - **#19 (Roles & PIN in V1)** — Resolved 2026-05-23. V1 ships with a single shared 4-digit PIN gating every attendant action (FILL UP AUTHORISE / AUTHORISE CASH / CASH RECEIVED). No roles. PIN set at install during onboarding, stored as PBKDF2-HMAC-SHA256 hash + per-device salt in SQLite. Cashier-tablet → pump PIN-push channel deferred to Phase 7. Role-based PINs (manager vs attendant) deferred to V2.
+  **Accepted risk recorded 2026-09-02 (Phase 7b):** the operator config screen — which sets fuel
+  type and price — sits behind that *same* shared PIN, so **any attendant who can authorise a sale
+  can also change the fuel price**. Accepted for V1 rather than inventing a second PIN outside the
+  agreed model; the alternative (leaving config debug-only) would leave production pumps with no way
+  to set a `fuelType` at all, which `/authorise` requires. Revisit with role-based PINs in V2. The
+  screen is not hidden from attendants, so a price change is at least performed deliberately rather
+  than through an undocumented gesture.

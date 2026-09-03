@@ -11,7 +11,19 @@ import androidx.compose.runtime.Immutable
  *                             `pumpId` to kill that collision (TODO #13).
  * @param stationName          Station name shown on receipts, e.g. "Total Lekki Ph2".
  * @param koboPerLitre         Current fuel price in kobo (100 kobo = ₦1). e.g. 87_000 = ₦870/L.
+ * @param fuelType             Which fuel this pump dispenses. **Null until an operator sets it** —
+ *                             `/authorise` requires it and nothing in the API supplies it
+ *                             (`API_CONFORMANCE_AUDIT.md` §6 #4), so 7b sets it device-locally.
+ *                             Null must block transactions exactly as a missing price does; see
+ *                             [app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase].
+ *                             Deliberately nullable rather than defaulted: guessing PETROL would
+ *                             let a diesel pump authorise against the wrong fuel and price.
  * @param virtualAccountNumber NIP bank-transfer account for post-fill-up QR generation. Null = not yet set.
+ *                             **Obsolete by decision** (OQ #6 — Paystack owns payments, so the
+ *                             post-fill-up QR becomes a checkout URL), but still load-bearing:
+ *                             `CustomerViewModel.onFillupPayDigital()` feeds it to
+ *                             `buildNipTransferQr`. Remove in 7c when the Paystack path replaces it
+ *                             — dropping it now would break a working flow with nothing to swap in.
  * @param updatedAt            Epoch millis when the operator last pushed this config.
  */
 @Immutable
@@ -19,6 +31,7 @@ data class DeviceConfig(
     val pumpLabel: String = "PUMP 1",
     val stationName: String = "SmartPump Station",
     val koboPerLitre: Long,
+    val fuelType: FuelType? = null,
     val virtualAccountNumber: String? = null,
     val updatedAt: Long = System.currentTimeMillis(),
 ) {
