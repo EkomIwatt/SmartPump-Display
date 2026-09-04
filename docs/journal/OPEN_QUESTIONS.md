@@ -2,6 +2,17 @@
 
 Decisions still owed before V1 ships. Resolved questions are removed (not crossed out — git keeps history).
 
+**Keeping this file true — the Index below is a second place that has to be updated.**
+
+- **Resolving an item:** move it to **Resolved** at the bottom, **delete its line from the Index**,
+  and retire its number — never reuse it. An index that still lists a resolved question is worse
+  than no index at all, because it sends the reader looking for something that is not there.
+- **Adding an item:** give it the next unused number, put it under a section, and **add its Index
+  line in the same edit**. Lead with a short bolded title — a name, not a claim — so it is
+  scannable; the argument goes after it.
+- **Both:** update the number range on the section header, and the holes note in the Index intro if
+  the resolved set changed.
+
 > **2026-07-03 reconciliation:** many payment/config questions below were answered (or reshaped)
 > by the Pump API Reference — see `docs/phase7_blocker_resolution.md`. That doc inverts the payment
 > model (pump is now the *initiator*, not a webhook receiver). Items resolved by it are moved to
