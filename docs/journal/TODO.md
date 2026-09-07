@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-02 (7b)_
+_Last updated: 2026-09-07 (7g docs/app split merged; firmware half held)_
 
 ---
 
@@ -187,7 +187,14 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
   call); (d) full status set (`PAID` is real but missing from the §5 list); (e) what to sign for a
   GET. **Send today — their lead time is the critical path.**
 
-## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SCOPED, not started)
+## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SPLIT — docs/app on `main`, firmware held)
+
+> **2026-09-07 — the branch was split, not merged whole.** The docs and the app-side
+> `PULSES_PER_LITRE` change are on `main`; the **five firmware commits stay on
+> `feature/phase-7g-eeprom-totaliser`** until the EEPROM totaliser is verified on hardware, per
+> the merge assessment in [`BRANCH_7G_SUMMARY.md`](BRANCH_7G_SUMMARY.md). So `hardware/*.ino` and
+> `hardware/README.md` on `main` are still the pre-7g versions — read them from the branch, not
+> from `main`. The gate is unchanged and Friday 2026-09-04 recorded no result in the repo.
 
 Source: **Prototype Specification v1.0**, Hardware → "Pulse-tap adapter board" and Software →
 "Power-cut transaction recovery". Not in the original Phase 7 plan (7a–7f), so filed as **7g**.
@@ -201,10 +208,16 @@ hour); the totaliser is a **reporting figure**, with the app remaining system of
 sold.
 
 - [ ] **19. Blocked on Olonade.**
-  - ~~"stores last 10,000 pulse counts" — totaliser or ring buffer?~~ **ANSWERED 2026-09-02 by his
-    bench sketch: a single lifetime totaliser, wear-levelled over 100 slots.** So the session mark
-    is *not* free and must be added to the protocol (**OQ #24 stands**). The "10,000" figure in the
-    spec matches neither reading and is still unexplained.
+  - ~~"stores last 10,000 pulse counts" — totaliser or ring buffer?~~ **SETTLED 2026-09-02, twice
+    over.** His bench sketch implements a single lifetime totaliser wear-levelled over 100 slots;
+    and independently, the ring-buffer reading is *physically impossible on the spec'd MCU* —
+    10,000 records need 40 KB at a 4-byte count (20 KB even as 2-byte deltas), while `HW-C-05`'s
+    ATmega328P has **1 KB** of EEPROM and the bench Mega 2560 only **4 KB** (verified by compiling
+    `E2END + 1` for both against AVR core 1.8.7). Short by 20-40x, and the STM32F103 has no true
+    EEPROM at all. So `HW-C-04` contradicts `HW-C-05` under that reading — send it to Olonade as a
+    **correction**, not a question. Worth still asking what "10,000" was meant to size, since it is
+    only ~100 L at the placeholder K-factor. **OQ #24 is unaffected: the session mark is not free
+    and must be added to the protocol.**
   - **🔴 BLOCKER FOR T-01 — the 150 ms ISR debounce must be removed before any calibration run.**
     It caps counting at 6.67 pulses/s ~= **4 L/min** at the placeholder K-factor; a real dispenser
     flows 30-50 L/min. The loss is flow-rate dependent, so a K-factor derived through it is not a
@@ -235,16 +248,34 @@ sold.
 - [ ] **21. `CanStartTransactionUseCase` third `Missing` case** — no K-factor = no cutoff = refuse
   the sale, exactly as for price and fuel type (**OQ #23a**). Small; rides on the 7b guard already
   built.
-- [ ] **24. Merge the two sketches.** Olonade's bench sketch and
-  `smartpump_pulse_adapter.ino` are currently disjoint experiments and **cannot be swapped for one
-  another**: his emits bare `PULSE:<n>
-` with **no checksum**, so `SerialFrameParser` rejects every
-  line as `Invalid` ("missing checksum delimiter", `SerialFrameParser.kt:19`) — the app would count
-  zero litres — and it has **no `BOOT`/`HB` frames, no `RLY:1`/`RLY:0` relay control and no `PING`
-  handling**, so there is no fuel cut-off and none of the comms-loss watchdog that closed merge gate
-  #2. It also claims **D7** for the pulse input, which is our relay pin. The merge must keep the
-  checksummed framing, the fail-closed relay and the PING watchdog, and take the EEPROM/power-fail
-  half from his.
+- [~] **24. Merge the two sketches — WRITTEN 2026-09-02, NOT YET FLASHED.** The two were disjoint
+  experiments and could not be swapped for one another: the bench sketch emitted bare `PULSE:<n>`
+  with **no checksum**, so `SerialFrameParser` rejected every line as `Invalid` ("missing checksum
+  delimiter", `SerialFrameParser.kt:19`) and the app would have counted zero litres; it also had
+  **no `BOOT`/`HB`, no `RLY:1`/`RLY:0` and no `PING`**, so no fuel cut-off and none of the
+  comms-loss watchdog that closed merge gate #2; and it claimed **D7**, our relay pin.
+  `smartpump_pulse_adapter.ino` now carries both halves — 7a framing/relay/watchdog kept intact,
+  7g EEPROM totaliser + power-fail save added. Four defects fixed in the merge:
+  - **Interrupt pins → `D2` (pulse) and `D3` (power sense).** Those are the only interrupt-capable
+    pair common to Uno and Mega, so the button moved to polled `D4`. Verified by compiling
+    `static_assert(digitalPinToInterrupt(p) != NOT_AN_INTERRUPT)` against AVR core 1.8.7: pins 2/3
+    pass on both boards, pins **7/5 fail on both** — so the bench sketch counted nothing on a Uno
+    either, not just a Mega.
+  - **Debounce 150 ms → `PULSE_DEBOUNCE_US = 250`** (µs, in the ISR), with the flow-ceiling
+    arithmetic documented at the constant and in `hardware/README.md`.
+  - **Torn-write fixed.** `PumpData` reordered to `{pulseCount, sequence, crc}` + CRC-16/CCITT;
+    `EEPROM.put()` writes ascending so the CRC lands last as a commit marker, and recovery rejects
+    any slot failing it.
+  - **Power-fail ISR drops the relay before the EEPROM commit**, and `Serial.flush()` after
+    `ERR:PWR` so the notice actually leaves before the halt loop.
+  - Also: totaliser commits on `RLY:0` **and on a watchdog trip** (a dispense ended, however
+    abruptly); `DEBUG_BANNERS` (default `false`) gates all unframed output; 64 slots × 10 B = 640 B
+    fits Uno and Mega, enforced by `static_assert`.
+  - **Verified:** compiles clean with `-Wall` for `atmega2560` and `atmega328p`. **Not flashed, not
+    bench-run** — see the new "EEPROM totaliser (7g)" checklist in `hardware/README.md`.
+  - **Deliberately NOT added:** the session mark (OQ #24) and the `CAL` frame (OQ #23). Both are
+    protocol changes and both are Olonade's to ratify; inventing them unilaterally is the mistake
+    this project already made once with the API summary.
 - [ ] **22. Firmware:** `ENABLE_AUTO_PULSE = false` for real-meter runs; optocoupler + debounce
   replaces the bench `INPUT_PULLUP` (spec decides this — bare pullup must not survive into the
   adapter design). Bench meter output type + voltage incoming from Kelvin.
