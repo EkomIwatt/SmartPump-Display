@@ -45,14 +45,16 @@ Short by design. Everything under it is for the backend team, not for him.
 Hi [Boss],
 
 The pump's payment side is built and tested. We audited it against the Pump API Reference, found nine
-issues, and have **fixed the four that were ours** — verified on the tablet, done last week.
+issues, and have **fixed the four that were ours** — verified on the tablet, done on Wednesday.
 
 The rest we can't fix in the app, because the information isn't there to fix it with. The main one:
-**the pump has no way to find out which fuel it's selling or what price to charge.** Ringing up a sale
-requires the fuel type, but nothing in the API ever tells the pump what it is. As things stand, the
-payment flow can't be completed. There's a second, smaller gap — if a payment confirmation doesn't
-reach the pump, it has no way to check whether the customer actually paid, so someone who has paid
-could be left standing at a pump that won't dispense.
+**nothing in the API ever tells a pump which fuel it sells or what to charge for it** — and ringing up
+a sale needs both. We've worked around it for now, so we're not stuck: a manager types the fuel type
+and price into each tablet by hand. But that means **every price change becomes a physical visit to
+every pump**, and a pump that gets missed doesn't sell slightly wrong — it stops selling until someone
+walks to it. That's workable for a pilot and not for a fleet. There's a second, smaller gap — if a
+payment confirmation doesn't reach the pump, it has no way to check whether the customer actually
+paid, so someone who has paid could be left standing at a pump that won't dispense.
 
 Both need small additions on the backend. **Their turnaround sets our date, not our work** — which is
 why I'm raising it now rather than when we get to that stage.
@@ -71,25 +73,38 @@ Context for whoever picks this up: the pump app's network layer is built and tes
 signing, the API client, encrypted credential storage, activation identity. We audited it
 line-by-line against the Pump API Reference, found nine issues, and **fixed the four that were on our
 side** (verified on the tablet). The five below aren't fixable in the app — they're gaps in the
-contract itself, and the first one means **the payment flow cannot be completed as it currently
-stands**. Ordered by how much each blocks us.
+contract itself, and the first one is currently held together by a manual workaround that will not
+survive a fleet. Ordered by how much each blocks us.
 
 ---
 
-### 1. The pump has no way to learn which fuel it dispenses. _(hard blocker)_
-
-This is the one that stops everything.
+### 1. Nothing in the API tells a pump what it sells or what to charge. _(highest — this sets the date)_
 
 `POST /authorise` **requires** a `fuelType`. But `POST /activate` returns only `deviceId`, `pumpId`,
 `apiKey` and `signingSecret` — nothing about the station or the pump's assignment. The Reference
 documents exactly three endpoints (its own §5 cheat sheet confirms this), so **there is no endpoint
-that tells the pump what it's selling.** As the contract stands we would have to hardcode the fuel
-type into each tablet's build, which is not something you want to be doing per-pump in the field.
+that tells a pump what it's selling, or for how much.**
 
-The same gap covers the price. We had assumed a `GET /api/pump/config`; that was **our proposal, not
-your endpoint** — my mistake for carrying it as though it existed.
+**We are not blocked on this — we built around it.** Rather than wait, we shipped a device-local
+config screen: a manager sets fuel type and price on the tablet itself, behind the attendant PIN, and
+the pump refuses to sell until both are set. That work isn't throwaway either — it doubles as the
+fallback for when the backend is unreachable, so it stays useful once `/config` ships.
 
-**The ask: add `GET /api/pump/config`.** Deliberately minimal — small asks get built:
+**But it can't be the answer, for three reasons:**
+
+- **Price changes weekly, and this turns every change into a physical visit to every pump.** This is
+  the one that will actually hurt. Your server rejects any sale where `amount ≠ expectedLitres ×
+  pricePerUnit` — so a pump whose price wasn't updated doesn't sell slightly wrong, it **stops selling
+  entirely** until someone walks to it. One missed pump is a dead pump, and nothing tells you which.
+- **It doesn't scale past a handful of units.** Per-pump manual entry is fine for a pilot and
+  unmanageable for a fleet.
+- **It puts the price behind an attendant's PIN.** V1 ships a single shared PIN, so anyone who can
+  authorise a sale can also change the price per litre. We accepted that as a temporary risk
+  specifically because it was meant to be temporary.
+
+**The ask: add `GET /api/pump/config`.** (We'd assumed this endpoint existed — it was **our proposal,
+not yours**, and my mistake for carrying it as though it were real.) Deliberately minimal, because
+small asks get built:
 
 ```json
 { "pumpId":       "7f108b57-…",
@@ -104,9 +119,7 @@ concern). `stationName` is there because receipts need it.
 
 **Why this can't just ride along on `/activate`:** activation fires once, and its secrets are emitted
 once. The static fields could live there — but **price changes weekly**, so it fundamentally cannot.
-The pump needs to fetch price on boot and before every sale, because your own server rejects any sale
-where `amount ≠ expectedLitres × pricePerUnit`. Without a fetch, our sales start failing the first
-time a price moves.
+The pump needs to fetch price on boot and before every sale.
 
 ---
 
@@ -192,9 +205,12 @@ Thanks,
 
 - **Lead time is the reason to send now.** Items 1 and 2 are new backend endpoints. Their build time
   is the critical path on TODO #8 (payment feature flows); every day unsent is a day added.
-- **Item 1 has an interim plan that isn't throwaway:** build the device-local operator config screen
-  as the first half of 7b, behind the existing `DeviceConfigRepository` seam. It doubles as the
-  backend-unreachable fallback, so it survives even once `/config` ships.
+- **Item 1's interim plan SHIPPED 2026-09-02** — Phase 7b (first half), merged to `main` (`0cfba90`):
+  device-local operator config behind the existing `DeviceConfigRepository` seam. It doubles as the
+  backend-unreachable fallback, so it survives even once `/config` ships. **This is why item 1 is no
+  longer worded as a hard blocker** (it was, until 7b landed): the ask now rests on price cadence,
+  fleet scale and OQ #19's shared-PIN pricing surface, not on impossibility. Do not let it drift back
+  to "we can't sell" — that is now checkably false and would cost us item 2's credibility.
 - **The stable-error-codes ask (item 3) is what unblocks TODO #14** on the API side. #14 is *also*
   blocked on attendant-facing error copy, which is ours — no error screen exists in
   `docs/Strict design screens/` and OQ #17 is open. Getting codes back doesn't finish #14 by itself.
