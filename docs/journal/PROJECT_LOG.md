@@ -2,7 +2,8 @@
 
 ## Current status — 2026-09-07 (7g split: docs/app merged, firmware held)
 
-**Phase 7g was split rather than merged whole** (merge commit `4dee113`, 2026-09-07). The docs and
+**Phase 7g was split rather than merged whole** (merge commit `4dee113`, 2026-09-07). Merged and
+**pushed** to `origin/main` on 2026-09-07. The docs and
 the app-side `PULSES_PER_LITRE` Double are on `main`; the **five firmware commits stay on
 `feature/phase-7g-eeprom-totaliser`** until the EEPROM totaliser is verified on hardware. ⚠️
 `hardware/*.ino` and `hardware/README.md` on `main` are therefore the **pre-7g** versions while the
