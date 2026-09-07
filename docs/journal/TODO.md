@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-02 (7b)_
+_Last updated: 2026-09-07 (7g docs/app split merged; firmware half held)_
 
 ---
 
@@ -187,7 +187,14 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
   call); (d) full status set (`PAID` is real but missing from the §5 list); (e) what to sign for a
   GET. **Send today — their lead time is the critical path.**
 
-## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SCOPED, not started)
+## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SPLIT — docs/app on `main`, firmware held)
+
+> **2026-09-07 — the branch was split, not merged whole.** The docs and the app-side
+> `PULSES_PER_LITRE` change are on `main`; the **five firmware commits stay on
+> `feature/phase-7g-eeprom-totaliser`** until the EEPROM totaliser is verified on hardware, per
+> the merge assessment in [`BRANCH_7G_SUMMARY.md`](BRANCH_7G_SUMMARY.md). So `hardware/*.ino` and
+> `hardware/README.md` on `main` are still the pre-7g versions — read them from the branch, not
+> from `main`. The gate is unchanged and Friday 2026-09-04 recorded no result in the repo.
 
 Source: **Prototype Specification v1.0**, Hardware → "Pulse-tap adapter board" and Software →
 "Power-cut transaction recovery". Not in the original Phase 7 plan (7a–7f), so filed as **7g**.

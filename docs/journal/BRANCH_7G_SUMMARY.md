@@ -1,6 +1,12 @@
 # Branch summary — `feature/phase-7g-eeprom-totaliser`
 
-**Written:** 2026-09-02 · **15 commits ahead of `origin/main`** · **nothing pushed yet**
+**Written:** 2026-09-02 · **Updated:** 2026-09-07
+
+> **Status 2026-09-07 — the split recommended below was carried out.** The docs and the app-side
+> `PULSES_PER_LITRE` change are now on `main`. The **five firmware commits are still on the branch**,
+> unmerged, exactly as the merge assessment argues. Everything is pushed. The gate has not moved:
+> the EEPROM totaliser remains unverified, and Friday 2026-09-04 left no result in the repo — no
+> run-sheet entries, no logcats, no PROJECT_LOG entry.
 
 Plain-language reference for what this branch contains and what is left. For the detailed
 version see `TODO.md` (7g section) and `OPEN_QUESTIONS.md` (#23, #24, #25).
@@ -240,17 +246,18 @@ pump's entire service life.
 
 ### Also worth doing
 
-**Nothing is pushed.** 15 commits exist only on this laptop, including the Friday run sheet. Push
-before Friday so the work is not sitting on a single machine going to a fuel station.
+~~**Nothing is pushed.**~~ **Done.** The branch is on `origin`, run sheet included, so it is no
+longer sitting on a single machine.
 
 ---
 
 ## Current state
 
 ```
-main                              = origin/main  (unchanged, pushed)
-feature/phase-7b-operator-config  = +7 commits   (verified, merge-ready)
-feature/phase-7g-eeprom-totaliser = +15 commits  (includes the 7 above)
+# 2026-09-07, after the 7b merge and the docs/app split
+main                              = 7b MERGED (0cfba90) + 7g docs/app split
+feature/phase-7g-eeprom-totaliser = +5 firmware commits still unmerged
+                                    (.ino, eeprom_erase, hardware/README.md)
 
 Build: 125 JVM tests / 17 classes green
        compileDebugKotlin + compileDebugRealHwKotlin clean
