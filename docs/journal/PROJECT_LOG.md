@@ -1,14 +1,21 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-03 (7b merged; 7g in flight)
+## Current status — 2026-09-07 (7g split: docs/app merged, firmware held)
+
+**Phase 7g was split rather than merged whole** (merge commit `4dee113`, 2026-09-07). The docs and
+the app-side `PULSES_PER_LITRE` Double are on `main`; the **five firmware commits stay on
+`feature/phase-7g-eeprom-totaliser`** until the EEPROM totaliser is verified on hardware. ⚠️
+`hardware/*.ino` and `hardware/README.md` on `main` are therefore the **pre-7g** versions while the
+docs beside them describe the merged sketch — flash from the branch, not from `main`. Friday
+2026-09-04 left no trial result in the repo, so the gate has not moved.
 
 **Phase 7b (first half) is MERGED to `main`** (merge commit `0cfba90`, 2026-09-03; `main` =
 `origin/main` = `0cfba90`). Verified before merge: 125 JVM tests / 17 classes, 12 instrumented on
 the SM-T220, both variants compiling.
 
 **Phase 7g (adapter EEPROM totaliser) is in flight on `feature/phase-7g-eeprom-totaliser`** —
-pushed, 13 commits past the merge point, **not merged**. It merges the previously separate bench
-sketch into `smartpump_pulse_adapter.ino`, fixing four firmware defects on the way (interrupts on
+pushed; its docs and app-side change merged 2026-09-07, **its five firmware commits not merged**.
+It merges the previously separate bench sketch into `smartpump_pulse_adapter.ino`, fixing four firmware defects on the way (interrupts on
 non-interrupt pins, a 150 ms debounce that capped counting at ~4 L/min, a torn-write ordering bug
 in the EEPROM save, and relay-after-commit in the power-fail path), and adds a format marker plus
 an erase utility. **The EEPROM totaliser has never been verified on hardware** — that is its merge
@@ -686,3 +693,56 @@ Friday 2026-09-04 live meter trial on `feature/phase-7g-eeprom-totaliser`. That 
 merge gate for 7g, whose EEPROM totaliser has never been verified on hardware. After it: OQ #25
 (pulses counted while the tablet is down are silently absorbed — live on `main`), then the spec's
 payment-direction conflict (`DELTA-04`/`DELTA-05`), which nobody has examined yet.
+
+---
+
+### Phase 7g (docs + app-side) — branch split, firmware half held back
+**Date:** 2026-09-07
+**Status:** partial (deliberately — the firmware half is unmerged by design, not unfinished)
+**Commit(s):** `4dee113` (merge); `6df3688`, `e66dfec`, `8c89239` on `merge/phase-7g-docs-and-app`
+
+**Summary (plain language):**
+The 7g branch had grown into two very different things: a pile of documentation and one small app
+change, sitting on top of new Arduino firmware that has never been run against real hardware. Rather
+than merge all of it or none of it, the branch was split. Everything that could be checked on this
+machine is now on the mainline — the specification extract, the calibration run sheet, the open
+questions, and the fix that lets the meter constant hold a decimal. The firmware stays on its branch
+until somebody power-cycles the board and confirms the pulse memory actually survives, which is the
+one claim no amount of compiling can support.
+
+This also corrected a stale belief: Phase 7b was recorded on the branch as "merge-ready", but it had
+already been merged four days earlier. The branch's copy of the work board was simply older than the
+mainline's.
+
+**Technical notes:**
+- **The split is path-scoped, not commit-scoped.** Two commits (`7d9113b`, `bfc7de9`) touch both
+  `MeterCalibration.kt` and the `.ino`, and the firmware commit `4072b7c` also edits `TODO.md`, so no
+  commit boundary separates the halves. Applied via `git merge --squash` then restoring
+  `hardware/**` to `main`'s state.
+- **Deliberately not a merge commit from the 7g branch.** Recording that merge would mark the five
+  firmware commits as already merged, and Git would silently skip them when the branch lands for
+  real. `feature/phase-7g-eeprom-totaliser` is untouched and still carries all 18 commits.
+- **App-side:** `PULSES_PER_LITRE` becomes `100.0` (Double). Held as an `Int`, rounding a measured
+  K-factor costs up to 0.5 pulses — at ~100 pulses/L that is 0.5% error before the meter is
+  involved, i.e. the entire TEST-01 tolerance spent on a type declaration.
+  `CustomerViewModelDispensingTest` no longer hardcodes pulse counts (380 for 3.8 L), which had
+  pinned `PULSES_PER_LITRE = 100` into assertions that are not about the K-factor.
+- **Docs landed:** Prototype Specification v1.0 extract, `FIELD_RUN_SHEET_2026-09-04`,
+  `BRANCH_7G_SUMMARY`, the OPEN_QUESTIONS index + #26, and the re-argued boss-draft item 1.
+- **Trap flagged in-repo:** `hardware/*.ino` and `hardware/README.md` on `main` are still the
+  pre-7g versions while the docs beside them describe the merged sketch. Anyone flashing from `main`
+  would get firmware predating the four defect fixes. Banners added to `BRANCH_7G_SUMMARY.md` and
+  the `TODO.md` 7g section.
+- **Verified before merge:** 125 JVM tests / 17 classes, 0 failures/errors/skips;
+  `compileDebugKotlin` + `compileDebugRealHwKotlin` clean.
+- **Friday 2026-09-04 left no result in the repo** — no run-sheet entries, no new logcats, no log
+  entry. The blocker recorded against it (meter output type and voltage, owed by Kelvin) was still
+  open at the last commit. The 7g merge gate has therefore not moved.
+
+**Next:**
+Close the 7g gate — either the live meter trial, or the five-minute bench check in
+`BRANCH_7G_SUMMARY.md` (note the `BOOT` count, run one dispense, power-cycle, confirm the count came
+back higher *and* that the next sale still starts from zero litres on the tablet). Then merge the
+firmware half. Independently of the board: OQ #25 (pulses counted while the tablet is down are
+silently absorbed — live on `main`) and the #18 backend asks, still unsent and still the critical
+path by lead time.
