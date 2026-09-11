@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-07 (7g docs/app split merged; firmware half held)_
+_Last updated: 2026-09-11 (Phase 7h built on a branch; bench run outstanding)_
 
 ---
 
@@ -240,11 +240,12 @@ sold.
   - `CAL` frame for the sealed K-factor (**OQ #23**) — protocol change, must land before the
     adapter firmware is written.
   - Whether `max()` gets a session mark (**OQ #24**), since the literal rule is not implementable.
-- [ ] **20. Recovery correctness — do first, independent of the board (OQ #25).** Pulses counted
-  while the tablet is down are silently absorbed into a new baseline
-  (`PulseAccumulator.kt:43-47`). **This is live on `main` today**, needs no EEPROM to fix, and is
-  the behaviour the spec's recovery rule exists to prevent. Decide: onto the live transaction, or
-  into a reconciliation log. Wants VM tests (Phase 8 harness exists).
+- [x] **20. Recovery correctness — BUILT 2026-09-11 as Phase 7h (OQ #25).** Was: pulses counted
+  while the tablet is down were silently absorbed into a new baseline. Now measured against a
+  persisted anchor and either put on the live sale or logged with a reason. **Still live on `main`**
+  — the fix is on `feature/phase-7h-pulse-continuity`, unmerged, gated on the bench run below.
+  See the 7h section further down.
+
 - [ ] **21. `CanStartTransactionUseCase` third `Missing` case** — no K-factor = no cutoff = refuse
   the sale, exactly as for price and fuel type (**OQ #23a**). Small; rides on the 7b guard already
   built.
@@ -286,6 +287,49 @@ sold.
   needs a custom `ProbeTable`.
 
 **Not blocked:** #20 and #21 can proceed now. #19 gates the firmware half.
+
+## 🟢 Phase 7h — pulse continuity across restarts (BUILT, unmerged, one gate open)
+
+Branch `feature/phase-7h-pulse-continuity`, five commits, off `main` at `3aea28c`. Closes the live
+under-billing in OQ #25. **Needed nothing from Olonade, the backend, the boss or the meter** — the
+adapter already broadcasts its cumulative in the ~2 s `HB` keep-alive, so the count is readable
+while idle with no protocol change.
+
+| step | commit | what |
+|---|---|---|
+| 1 | `66fd353` | schema **v4** — `pulse_state.adapterCount`, `transactions.recoveredLitres`, new `events` table + migration |
+| 2 | `30872d3` | `PulseSource.adapterCount` / `awaitAdapterCount()`; anchor written on every persist |
+| 3 | `d9da72f` | `ReconcilePulseGapUseCase` — pure classification, 16 tests |
+| 4 | `d60483f` | boot resume applies it; `EventRepository`; the over-target safety branch |
+| 5 | `51f0ce0` | "Fuel log" card on the operator screen, behind the attendant PIN |
+
+**Verified:** JVM **162 tests / 21 classes** green (125 → 162); **16 instrumented green on the
+SM-T220** (12 → 16, the 4 new migration tests incl. a chained v2→v4); `compileDebugKotlin`,
+`compileDebugRealHwKotlin`, `lintDebug` clean.
+
+- [ ] **27. MERGE GATE — bench run with the Arduino. Never executed.** Everything above is proved
+  against fakes and a migration helper; **no part of the recovery path has met a real board.** On
+  the 7a-hardening / 7b precedent this is what merging waits on. Checklist:
+  1. Flash `debugRealHw`, start a **pre-pay** dispense, let it run past a few persists.
+  2. Mid-dispense `adb shell am force-stop app.balancee.smartpump.display.realhw` — relay must drop
+     within ~3 s (that part is already proven, gate #2, 2026-07-10).
+  3. **Relaunch.** The resumed screen must show MORE litres than it did at the kill, by roughly the
+     fuel that flowed in the watchdog window. That single observation is the whole phase.
+  4. Let it finish. The sale's `recoveredLitres` must be non-zero and the operator screen's **Fuel
+     log** must carry a `PULSE_GAP_RECOVERED` row against that transaction ref.
+  5. Repeat with the **Uno unplugged** before relaunch → must log `PULSE_GAP_UNEXPLAINED` /
+     "adapter did not respond", add nothing, and resume from the observed figure.
+  6. Repeat with the **Uno power-cycled** (counter restarts) → must log unexplained / "lost power
+     too", **not** attribute its post-boot reading.
+  7. **Look at the Fuel log card.** It has compiled and linted but has never been rendered.
+  8. Kill mid-dispense **very close to the paid target** → relay must NOT reopen; sale completes
+     recording more litres than were charged.
+- [ ] **28. `MAX_PLAUSIBLE_GAP_PULSES = 400` is derived from the placeholder K-factor.** Recompute
+  at T-01 calibration — it is written in pulses precisely so it cannot silently change meaning, but
+  it still needs re-deriving once the real pulses-per-litre is known (OQ #1).
+- [ ] **29. The `events` table has no backend home.** Nothing on the server accepts these rows.
+  **A fifth ask for #18**, currently not on that list. The upload job (7e) can carry them once an
+  endpoint exists.
 
 ## Now — unblocked, high value
 

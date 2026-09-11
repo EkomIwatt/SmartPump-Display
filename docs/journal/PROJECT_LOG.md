@@ -1,6 +1,33 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-07 (7g split: docs/app merged, firmware held)
+## Current status — 2026-09-11 (7h built on a branch; bench run outstanding)
+
+**Phase 7h — pulse continuity across restarts — is BUILT on `feature/phase-7h-pulse-continuity`**
+(five commits off `main` at `3aea28c`, unmerged). It closes the live under-billing described in
+OPEN_QUESTIONS #25: fuel the adapter counted while the app was not running is now measured against
+a persisted anchor and either put on the customer’s sale or written to a new operator-visible log
+with a reason. **Its merge gate is a bench run with the Arduino, which has never happened** — no
+part of the recovery path has met a real board (TODO #27). On the 7a-hardening / 7b precedent,
+that gate is what merging waits on.
+
+Verified so far: JVM **162 tests / 21 classes** green (125 → 162); **16 instrumented green on the
+SM-T220** (12 → 16); `compileDebugKotlin`, `compileDebugRealHwKotlin` and `lintDebug` clean.
+
+**Phase 7g was split rather than merged whole** (merge commit `4dee113`, 2026-09-07), pushed to
+`origin/main`. The docs and the app-side `PULSES_PER_LITRE` Double are on `main`; the **five
+firmware commits stay on `feature/phase-7g-eeprom-totaliser`** until the EEPROM totaliser is
+verified on hardware. ⚠️ `hardware/*.ino` and `hardware/README.md` on `main` are therefore the
+**pre-7g** versions while the docs beside them describe the merged sketch — flash from the branch,
+not from `main`. Friday 2026-09-04 left no trial result in the repo, so that gate has not moved.
+
+**Still the critical path, and still unsent: the #18 backend asks.** Nothing there moved this
+week. 7h was chosen deliberately as work that depends on nobody — not the backend, not Olonade,
+not the meter — and it is now done bar the bench. A **fifth ask** has been added to the list: the
+new `events` rows have no endpoint to sync to (TODO #29).
+
+---
+
+## Previous status — 2026-09-07 (7g split: docs/app merged, firmware held)
 
 **Phase 7g was split rather than merged whole** (merge commit `4dee113`, 2026-09-07). Merged and
 **pushed** to `origin/main` on 2026-09-07. The docs and
@@ -747,3 +774,87 @@ back higher *and* that the next sale still starts from zero litres on the tablet
 firmware half. Independently of the board: OQ #25 (pulses counted while the tablet is down are
 silently absorbed — live on `main`) and the #18 backend asks, still unsent and still the critical
 path by lead time.
+
+---
+
+### Phase 7h — Pulse continuity across restarts (fuel counted while the app was down)
+**Date:** 2026-09-11
+**Status:** partial — built and merge-ready bar one gate; never run against a real board
+**Commit(s):** `66fd353` (schema v4), `30872d3` (adapter-count seam), `d9da72f` (reconciler),
+`d60483f` (boot resume), `51f0ce0` (operator fuel log); branch
+`feature/phase-7h-pulse-continuity`, **unmerged**
+
+**Summary (plain language):**
+Until now, if the tablet ever stopped — a crash, an Android update, a flat battery — while fuel was
+flowing, the app came back and quietly forgot the fuel that went into the customer’s tank in the
+meantime. Roughly a litre and a half, every time, delivered and charged to nobody. The pump’s little
+adapter board kept counting it the whole while; the app just threw the number away.
+
+It no longer does. The app now remembers where the board’s counter stood, and on restart works out
+exactly how much fuel went past while it was blind. Where it can prove the figure, those litres go
+onto the customer’s sale. Where it cannot — because the board lost power too, or the cable is out,
+or the amount is too large to have come from one interrupted sale — it refuses to guess and writes
+an entry to a new **Fuel log** on the operator screen, in plain language, behind the attendant PIN.
+
+One safety case is worth spelling out. If the recovered fuel turns out to have already exceeded what
+the customer paid for, the pump does **not** start again. It closes the sale then and there, and the
+record shows more litres delivered than were charged. The station absorbs that, which is the right
+way round: every error in this path runs in the customer’s favour, which is also why a refund was
+considered and rejected as the wrong tool here.
+
+**Technical notes:**
+- **The enabler was already on the wire.** The adapter puts its free-running cumulative in the
+  **~2 s `HB` keep-alive**, not only in `PULSE`. `SerialFrameParser` has parsed it since 7a;
+  `UsbSerialPulseSource` discarded it when mapping `HB` → `PulseMessage.Heartbeat`. So the count is
+  readable **while the pump is idle, without opening the relay and with no protocol change** — this
+  phase needed nothing ratified by Olonade, which is why it could proceed at all.
+- **Schema v4** (`66fd353`): `pulse_state.adapterCount` (the anchor), `transactions.recoveredLitres`,
+  and a typed `events` table. The anchor is **nullable and null is never zero** — zero is a real
+  reading from a board that just booted, so a back-filled zero would invite the reconciler to
+  attribute the adapter’s entire lifetime count to one customer. `recoveredLitres` is the opposite
+  call (NOT NULL DEFAULT 0) because "no recovery was applied" is simply true of every prior sale.
+  `events` is typed rather than gap-specific so `PWR-03` power events need no second migration.
+- **Tracking lives in the hot read loop** (`30872d3`), not the cold per-dispense flow — the count is
+  needed precisely when nothing is dispensing. `BOOT` updates it too, so a reader can see the count
+  go backwards and conclude "restarted" rather than subtracting from a stale high-water mark.
+  `handleDetach()` clears it to null: after a dropped link, the last value seen is not evidence.
+- **`ReconcilePulseGapUseCase`** (`d9da72f`) is pure — no Android, no coroutines — with 16 tests
+  covering the decision table **and the precedence between refusals**. Silence outranks a missing
+  anchor, because sending someone to inspect a database column when the fault is an unplugged cable
+  wastes the one person who could fix it.
+- **The ceiling is in pulses, not litres** (`MAX_PLAUSIBLE_GAP_PULSES = 400`). Litres run through the
+  unmeasured `PULSES_PER_LITRE`; written in litres the bound would silently change meaning at
+  calibration, in the direction of accepting larger gaps. Its derivation has **two** terms and the
+  easy one to miss is the first: up to `PULSE_PERSIST_EVERY_N` (25) pulses of ordinary in-sale flow,
+  because the anchor is only written every 25th pulse — so **the same subtraction also recovers the
+  second, smaller leak OQ #25 describes**, for free. Cross-referenced at both constants.
+- **A real defect surfaced in testing** (`d60483f`): correcting `pulseBaseline` was not enough, since
+  the dispatched state still carried the stale `litresSoFar`, so a resumed screen briefly showed the
+  pre-outage figure. `resumedLitres()` overrides it **only** when recovery added pulses — the two
+  sources are stale in opposite directions, and a recovered gap spans exactly the pulse-count write
+  lag as well as the outage, making it authoritative precisely when it exists.
+- **An idle boot is silent**: no anchor and no sale in flight means nothing could have been missed,
+  so there is no adapter wait on a cold start and no event on every launch burying the real ones.
+- **Deviation flagged:** the Fuel log card has no counterpart in `docs/Strict design screens/`, same
+  as the operator form it sits on. Built from design-system tokens and existing components.
+- **Verified:** JVM **162 tests / 21 classes**, 0 failures/errors/skips (125 → 162); **16
+  instrumented green on the SM-T220** (12 → 16 — four new migration tests, including a chained
+  v2→v4 that proves a tablet which skipped a release keeps its config, PIN hash and audit log);
+  `compileDebugKotlin`, `compileDebugRealHwKotlin`, `lintDebug` clean.
+
+**Not verified — the merge gate (TODO #27):**
+No part of this has met a real Arduino. Everything is proved against fakes and a migration helper.
+The Fuel log card has compiled and linted but **has never been rendered on a device**. The bench
+checklist is in `TODO.md`; its decisive step is one observation — kill the app mid-dispense, relaunch,
+and see the resumed screen show *more* litres than it did at the kill.
+
+**Also left open:**
+- The **adapter-down** case stays unrecoverable and is reported honestly as unexplained. Closing it
+  needs the **7g EEPROM totaliser** (written, never flashed, held off `main`); the reconciler’s
+  refusal branch is the seam it plugs into.
+- `MAX_PLAUSIBLE_GAP_PULSES` wants re-deriving at T-01 (TODO #28).
+- The `events` rows have **no backend endpoint** — a fifth #18 ask, not previously on that list
+  (TODO #29).
+
+**Next:**
+The bench run. Then merge, and back to the #18 asks, which remain the critical path by lead time.
