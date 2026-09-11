@@ -243,7 +243,7 @@ class CustomerViewModel @Inject constructor(
         setState(TransactionState.Idle)
         if (clearPulses) {
             viewModelScope.launch {
-                runCatching { pulseRepository.savePulseCount(0, 0L) }
+                runCatching { pulseRepository.savePulseCount(0, 0L, null) }
             }
         }
         pulseBaseline = 0
@@ -421,7 +421,9 @@ class CustomerViewModel @Inject constructor(
                     if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                         lastPersistAtPulses = cumulativePulses
                         runCatching {
-                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                            // Anchor is null until the adapter-count seam lands (7h step 2); the
+                            // reconciler reads null as "no anchor" and declines to attribute.
+                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs, null)
                         }
                     }
                 }
@@ -695,7 +697,9 @@ class CustomerViewModel @Inject constructor(
                             if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                                 lastPersistAtPulses = cumulativePulses
                                 runCatching {
-                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                                    // Anchor is null until the adapter-count seam lands (7h step 2); the
+                                    // reconciler reads null as "no anchor" and declines to attribute.
+                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs, null)
                                 }
                             }
                         }
@@ -933,7 +937,9 @@ class CustomerViewModel @Inject constructor(
                             if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                                 lastPersistAtPulses = cumulativePulses
                                 runCatching {
-                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                                    // Anchor is null until the adapter-count seam lands (7h step 2); the
+                                    // reconciler reads null as "no anchor" and declines to attribute.
+                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs, null)
                                 }
                             }
                         }

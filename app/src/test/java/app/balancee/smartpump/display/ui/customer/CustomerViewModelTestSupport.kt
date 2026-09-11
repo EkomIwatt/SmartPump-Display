@@ -135,19 +135,23 @@ class FakePulseRepository : PulseRepository {
     /** Seed before building the VM to drive a boot-resume path. */
     var stateToRestore: TransactionState = TransactionState.Idle
     var pulsesToRestore: Int = 0
+    var anchorToRestore: Long? = null
     var activeRef: String? = null
 
     val savedStates = mutableListOf<Pair<TransactionState, String?>>()
     val savedPulseCounts = mutableListOf<Pair<Int, Long>>()
+    val savedAnchors = mutableListOf<Long?>()
 
     override suspend fun saveTransactionState(state: TransactionState, transactionRef: String?) {
         savedStates += state to transactionRef
     }
     override suspend fun restoreTransactionState(): TransactionState = stateToRestore
-    override suspend fun savePulseCount(count: Int, lastPulseTimeMs: Long) {
+    override suspend fun savePulseCount(count: Int, lastPulseTimeMs: Long, adapterCount: Long?) {
         savedPulseCounts += count to lastPulseTimeMs
+        savedAnchors += adapterCount
     }
     override suspend fun restorePulseCount(): Int = pulsesToRestore
+    override suspend fun restoreAdapterAnchor(): Long? = anchorToRestore
     override suspend fun getActiveTransactionRef(): String? = activeRef
 
     val lastSavedPulseCount: Pair<Int, Long>? get() = savedPulseCounts.lastOrNull()

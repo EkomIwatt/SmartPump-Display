@@ -29,6 +29,9 @@ class PulseRepositoryImpl @Inject constructor(
                 currentTransactionRef = transactionRef ?: existing?.currentTransactionRef,
                 pulseCount = existing?.pulseCount ?: 0,
                 lastPulseTimeMs = existing?.lastPulseTimeMs ?: 0L,
+                // A state transition is not a pulse observation: carry the anchor forward
+                // untouched rather than clearing it.
+                adapterCount = existing?.adapterCount,
                 updatedAt = System.currentTimeMillis(),
             )
         )
@@ -41,7 +44,7 @@ class PulseRepositoryImpl @Inject constructor(
         }.getOrDefault(TransactionState.Idle)
     }
 
-    override suspend fun savePulseCount(count: Int, lastPulseTimeMs: Long) {
+    override suspend fun savePulseCount(count: Int, lastPulseTimeMs: Long, adapterCount: Long?) {
         val existing = dao.get()
         dao.save(
             PulseStateEntity(
@@ -50,12 +53,15 @@ class PulseRepositoryImpl @Inject constructor(
                 currentTransactionRef = existing?.currentTransactionRef,
                 pulseCount = count,
                 lastPulseTimeMs = lastPulseTimeMs,
+                adapterCount = adapterCount,
                 updatedAt = System.currentTimeMillis(),
             )
         )
     }
 
     override suspend fun restorePulseCount(): Int = dao.get()?.pulseCount ?: 0
+
+    override suspend fun restoreAdapterAnchor(): Long? = dao.get()?.adapterCount
 
     override suspend fun getActiveTransactionRef(): String? = dao.get()?.currentTransactionRef
 }

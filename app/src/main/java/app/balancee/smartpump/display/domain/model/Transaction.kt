@@ -15,6 +15,8 @@ import androidx.compose.runtime.Immutable
  * @param attendantNote      Optional free-text annotation (cash variance, manual override, etc.).
  * @param createdAt          Epoch millis when the transaction completed.
  * @param syncedAt           Epoch millis when synced to backend; null if pending sync.
+ * @param recoveredLitres    Litres of [litresDispensed] added by Phase 7h pulse-gap recovery
+ *                           rather than observed pulse-by-pulse. Normally 0.0.
  */
 @Immutable
 data class Transaction(
@@ -29,4 +31,5 @@ data class Transaction(
     val attendantNote: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val syncedAt: Long? = null,
+    val recoveredLitres: Double = 0.0,
 )

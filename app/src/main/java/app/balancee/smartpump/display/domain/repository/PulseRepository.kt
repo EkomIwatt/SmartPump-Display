@@ -21,14 +21,27 @@ interface PulseRepository {
     /**
      * Persist the running pulse count and the timestamp of the last received pulse.
      * Used to detect nozzle shutoff (3 s with no new pulse) after a power-cut recovery.
+     *
+     * [adapterCount] is the adapter's own free-running count at this instant, stored as the
+     * anchor the Phase 7h reconciler subtracts from after a restart. It is a REQUIRED parameter
+     * rather than a defaulted one so that no call site can quietly stop maintaining the anchor;
+     * pass null only when the adapter's count is genuinely unknown, which stores null and makes
+     * the reconciler decline to attribute rather than guess.
      */
-    suspend fun savePulseCount(count: Int, lastPulseTimeMs: Long)
+    suspend fun savePulseCount(count: Int, lastPulseTimeMs: Long, adapterCount: Long?)
 
     /**
      * Restore the pulse count from before the power cut.
      * Returns 0 if nothing was saved.
      */
     suspend fun restorePulseCount(): Int
+
+    /**
+     * The adapter's free-running count as of the last persisted write, or null if none was
+     * recorded (a pump updated from before Phase 7h, or a row written while the adapter was
+     * silent). Null is not zero — see PulseStateEntity.adapterCount.
+     */
+    suspend fun restoreAdapterAnchor(): Long?
 
     /** The transaction reference stored alongside the last saved state, or null. */
     suspend fun getActiveTransactionRef(): String?

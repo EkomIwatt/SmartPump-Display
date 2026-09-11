@@ -40,8 +40,54 @@ object SmartPumpMigrations {
         }
     }
 
+    /**
+     * v3 -> v4 (Phase 7h): pulse-gap reconciliation.
+     *
+     * Three additions, one migration, because they only mean anything together: the anchor that
+     * makes a gap measurable, the place an unattributable gap is recorded, and the field that lets
+     * an affected sale explain itself. See OPEN_QUESTIONS #25.
+     *
+     * 1. `pulse_state.adapterCount` — the adapter's free-running count at the last write.
+     *    Added NULLABLE with no default. Zero is a real adapter reading (a board that just booted),
+     *    so back-filling zero would tell the reconciler that a pre-update pump had an anchor of
+     *    zero and invite it to attribute the adapter's whole lifetime count as one gap. NULL means
+     *    "no anchor recorded", which the reconciler refuses to guess from. Same reasoning as the
+     *    nullable fuelType at v3: the honest state beats a plausible-looking guess.
+     *
+     * 2. `transactions.recoveredLitres` — NOT NULL DEFAULT 0. The opposite call to (1), and for a
+     *    reason: "no recovery was applied to this sale" is simply TRUE of every row written before
+     *    this phase existed, so zero is a fact rather than a guess.
+     *
+     * 3. `events` — new table, created empty. Typed via a `type` column rather than being
+     *    pulse-gap-specific, so `PWR-03` power events land here later without another migration.
+     *
+     * Two ADDed columns and a CREATE, so no table rebuild: the audit log, identity row and PIN
+     * hash are untouched.
+     */
+    private val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE pulse_state ADD COLUMN adapterCount INTEGER DEFAULT NULL")
+            db.execSQL("ALTER TABLE transactions ADD COLUMN recoveredLitres REAL NOT NULL DEFAULT 0.0")
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `events` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `type` TEXT NOT NULL,
+                    `createdAtMs` INTEGER NOT NULL,
+                    `transactionRef` TEXT,
+                    `pulses` INTEGER,
+                    `pulsesPerLitre` REAL,
+                    `detail` TEXT,
+                    `syncedAt` INTEGER
+                )
+                """.trimIndent(),
+            )
+        }
+    }
+
     /** All migrations, in order. */
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_2_3,
+        MIGRATION_3_4,
     )
 }
