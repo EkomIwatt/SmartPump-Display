@@ -10,12 +10,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.FuelType
+import app.balancee.smartpump.display.domain.model.OperationalEvent
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
+import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -46,10 +50,25 @@ data class OperatorConfigUiState(
 class OperatorConfigViewModel @Inject constructor(
     private val configRepo: DeviceConfigRepository,
     private val canStartTransaction: CanStartTransactionUseCase,
+    events: EventRepository,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(OperatorConfigUiState())
     val ui: StateFlow<OperatorConfigUiState> = _ui.asStateFlow()
+
+    /**
+     * The fuel log (Phase 7h). Kept separate from [ui] rather than folded into it because it is a
+     * live query, not edited form state — mixing them would make every keystroke in the price field
+     * re-emit the whole list.
+     *
+     * Recovered entries are shown alongside unexplained ones on purpose. An operator reconciling
+     * the day's litres against the dispenser's totaliser needs both halves: the fuel that WAS put
+     * on a customer's bill after an interruption explains a sale whose count jumped, and without it
+     * the log looks like it is hiding the successful cases.
+     */
+    val fuelLog: StateFlow<List<OperationalEvent>> =
+        events.observeRecent(FUEL_LOG_LIMIT)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -126,5 +145,10 @@ class OperatorConfigViewModel @Inject constructor(
             is CanStartTransactionUseCase.Result.NotConfigured -> result.missing
         }
         _ui.update { it.copy(missing = missing) }
+    }
+
+    private companion object {
+        /** Enough for an operator to see the recent past without turning the screen into a report. */
+        const val FUEL_LOG_LIMIT = 20
     }
 }
