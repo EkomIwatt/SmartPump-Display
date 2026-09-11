@@ -83,6 +83,10 @@ private const val FILLUP_WATCHDOG_POLL_MS = 500L
  * kiosk. NOTE the resulting resolution is in *pulses*, so the litre precision it buys
  * moves with PULSES_PER_LITRE — at the current placeholder 100 pulses/L it is one write
  * per 0.25L (~25 writes for a full 10L pre-pay); a higher K-factor makes it finer.
+ *
+ * ALSO a term in ReconcilePulseGapUseCase.MAX_PLAUSIBLE_GAP_PULSES: the anchor written here is
+ * stale by up to this many pulses before anything goes wrong, so the gap ceiling includes it.
+ * Change one and change the other.
  */
 private const val PULSE_PERSIST_EVERY_N = 25
 
