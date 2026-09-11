@@ -13,6 +13,8 @@ package app.balancee.smartpump.display.ui.customer
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.EventType
+import app.balancee.smartpump.display.domain.model.OperationalEvent
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentResult
@@ -21,9 +23,11 @@ import app.balancee.smartpump.display.domain.model.Transaction
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
+import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
+import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -175,6 +179,30 @@ class FakePulseRepository : PulseRepository {
     val lastSavedPulseCount: Pair<Int, Long>? get() = savedPulseCounts.lastOrNull()
 }
 
+class FakeEventRepository : EventRepository {
+    data class Recorded(
+        val type: EventType,
+        val pulses: Int?,
+        val transactionRef: String?,
+        val detail: String?,
+    )
+
+    val recorded = mutableListOf<Recorded>()
+
+    override suspend fun record(
+        type: EventType,
+        pulses: Int?,
+        transactionRef: String?,
+        detail: String?,
+    ) {
+        recorded += Recorded(type, pulses, transactionRef, detail)
+    }
+
+    override fun observeRecent(limit: Int): Flow<List<OperationalEvent>> = MutableStateFlow(emptyList())
+
+    val last: Recorded? get() = recorded.lastOrNull()
+}
+
 class FakeTransactionRepository : TransactionRepository {
     val saved = mutableListOf<Transaction>()
     override suspend fun saveTransaction(transaction: Transaction) { saved += transaction }
@@ -195,13 +223,17 @@ class VmHarness {
     val deviceConfig = FakeDeviceConfigRepository()
     val pulseRepo = FakePulseRepository()
     val transactions = FakeTransactionRepository()
+    val events = FakeEventRepository()
 
+    /** The real use case, not a fake — it is pure, and stubbing it would test nothing. */
     fun build(): CustomerViewModel = CustomerViewModel(
         canStartTransaction = CanStartTransactionUseCase(deviceConfig),
         deviceConfigRepository = deviceConfig,
+        events = events,
         paymentProcessor = payment,
         pulseSource = pulseSource,
         pulseRepository = pulseRepo,
+        reconcilePulseGap = ReconcilePulseGapUseCase(),
         relay = relay,
         transactions = transactions,
     )
