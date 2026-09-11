@@ -243,6 +243,9 @@ class CustomerViewModel @Inject constructor(
         setState(TransactionState.Idle)
         if (clearPulses) {
             viewModelScope.launch {
+                // Null anchor is deliberate: with no transaction in flight there is nothing to
+                // anchor, and a stale one would let the next start invent a gap out of fuel that
+                // was never part of a sale.
                 runCatching { pulseRepository.savePulseCount(0, 0L, null) }
             }
         }
@@ -421,9 +424,12 @@ class CustomerViewModel @Inject constructor(
                     if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                         lastPersistAtPulses = cumulativePulses
                         runCatching {
-                            // Anchor is null until the adapter-count seam lands (7h step 2); the
-                            // reconciler reads null as "no anchor" and declines to attribute.
-                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs, null)
+                            // Anchor the adapter's own free-running count to this write. A restart then
+                            // measures the gap as (count now - count then); null here means the link was
+                            // down, which reads as "unknown" rather than zero.
+                            pulseRepository.savePulseCount(
+                                cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                            )
                         }
                     }
                 }
@@ -697,9 +703,12 @@ class CustomerViewModel @Inject constructor(
                             if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                                 lastPersistAtPulses = cumulativePulses
                                 runCatching {
-                                    // Anchor is null until the adapter-count seam lands (7h step 2); the
-                                    // reconciler reads null as "no anchor" and declines to attribute.
-                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs, null)
+                                    // Anchor the adapter's own free-running count to this write. A restart then
+                                    // measures the gap as (count now - count then); null here means the link was
+                                    // down, which reads as "unknown" rather than zero.
+                                    pulseRepository.savePulseCount(
+                                        cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                                    )
                                 }
                             }
                         }
@@ -937,9 +946,12 @@ class CustomerViewModel @Inject constructor(
                             if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                                 lastPersistAtPulses = cumulativePulses
                                 runCatching {
-                                    // Anchor is null until the adapter-count seam lands (7h step 2); the
-                                    // reconciler reads null as "no anchor" and declines to attribute.
-                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs, null)
+                                    // Anchor the adapter's own free-running count to this write. A restart then
+                                    // measures the gap as (count now - count then); null here means the link was
+                                    // down, which reads as "unknown" rather than zero.
+                                    pulseRepository.savePulseCount(
+                                        cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                                    )
                                 }
                             }
                         }

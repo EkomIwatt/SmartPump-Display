@@ -43,6 +43,21 @@ class MockPulseSource @Inject constructor(
     // Out-of-band injection channel for debug-only failure simulation.
     private val injections = Channel<PulseMessage>(capacity = Channel.UNLIMITED)
 
+    private val _adapterCount = MutableStateFlow<Long?>(0L)
+    /**
+     * Stands in for the real board's free-running lifetime counter: it advances with every
+     * synthetic pulse and, unlike the per-transaction count, never resets on relay-open.
+     *
+     * Starts at 0 rather than null because the simulated adapter is always "attached" — there is
+     * no cable to be missing. One faithful consequence worth knowing when testing recovery in the
+     * simulator: this object is rebuilt on every app start, so the count returns to 0, which a
+     * reader correctly interprets as "the adapter restarted too" and therefore declines to
+     * attribute. To exercise the attributable path in a debug build, use [injectAdapterGap].
+     */
+    override val adapterCount: StateFlow<Long?> = _adapterCount.asStateFlow()
+
+    override suspend fun awaitAdapterCount(timeoutMs: Long): Long? = _adapterCount.value
+
     fun setPulsesPerSecond(value: Int) {
         _pulsesPerSecond.value = value.coerceIn(MIN_PPS, MAX_PPS)
     }
@@ -59,6 +74,16 @@ class MockPulseSource @Inject constructor(
     /** Debug-only: inject a parse error so the state machine can exercise its error path. */
     fun injectParseError(raw: String = "GARBAGE") {
         injections.trySend(PulseMessage.ParseError(raw))
+    }
+
+    /**
+     * Debug-only: advance the simulated adapter's lifetime counter WITHOUT emitting pulses —
+     * i.e. fuel that flowed while the app was not watching. This is the one thing the simulator
+     * cannot produce on its own (killing the app also resets this fake board), so it is how the
+     * pulse-gap recovery path gets exercised without an Arduino on the bench.
+     */
+    fun injectAdapterGap(pulses: Int) {
+        _adapterCount.value = (_adapterCount.value ?: 0L) + pulses.coerceAtLeast(0)
     }
 
     override fun observe(): Flow<PulseMessage> = flow {
@@ -90,6 +115,8 @@ class MockPulseSource @Inject constructor(
             val tankFull = capacityPulses > 0 && count >= capacityPulses
             if (isDispensing && rate > 0 && !tankFull) {
                 count++
+                // The session count resets per transaction; the adapter's does not.
+                _adapterCount.value = (_adapterCount.value ?: 0L) + 1
                 emit(PulseMessage.Pulse(count, now))
                 delay(1_000L / rate)
             } else {

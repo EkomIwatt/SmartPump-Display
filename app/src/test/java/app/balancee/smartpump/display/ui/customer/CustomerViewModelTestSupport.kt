@@ -61,6 +61,24 @@ class FakePulseSource : PulseSource {
     private val flow = MutableSharedFlow<PulseMessage>(replay = 0, extraBufferCapacity = 64)
     override fun observe(): Flow<PulseMessage> = flow
 
+    /**
+     * Stand-in for the adapter's free-running lifetime count. Set it before or during a test to
+     * control what the VM anchors its writes to. Null models a down link — the adapter's count is
+     * unknown, which is NOT the same as zero.
+     */
+    private val _adapterCount = MutableStateFlow<Long?>(null)
+    override val adapterCount: StateFlow<Long?> = _adapterCount.asStateFlow()
+
+    /** How many times awaitAdapterCount() was called, and with what timeout. */
+    val awaitCalls = mutableListOf<Long>()
+
+    override suspend fun awaitAdapterCount(timeoutMs: Long): Long? {
+        awaitCalls += timeoutMs
+        return _adapterCount.value
+    }
+
+    fun setAdapterCount(value: Long?) { _adapterCount.value = value }
+
     /** Emit a cumulative session pulse count. Litres = count / 100. */
     fun emitPulse(count: Int, timestampMs: Long = count.toLong()) {
         flow.tryEmit(PulseMessage.Pulse(count, timestampMs))

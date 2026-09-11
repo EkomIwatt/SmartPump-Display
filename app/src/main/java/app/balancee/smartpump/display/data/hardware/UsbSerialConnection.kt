@@ -64,6 +64,20 @@ class UsbSerialConnection @Inject constructor(
     /** True while a port is open. Pulse source maps true→false to PulseMessage.Disconnected. */
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
+    private val _adapterCount = MutableStateFlow<Long?>(null)
+    /**
+     * The adapter's free-running count from the most recent frame that carried one — PULSE, the
+     * ~2 s HB keep-alive, or BOOT. Tracked HERE, in the always-running read loop, rather than in
+     * the cold per-dispense flow, precisely so it stays current while the pump sits idle: boot
+     * resume needs this number before any dispense is collecting, and the keep-alive is what
+     * supplies it without opening the relay.
+     *
+     * Cleared to null on detach. After a dropped link we cannot know whether the board stayed up
+     * or rebooted, so the last value we saw is not evidence of anything — "unknown" is the honest
+     * state and it stops the reconciler computing a gap against a stale anchor.
+     */
+    val adapterCount: StateFlow<Long?> = _adapterCount.asStateFlow()
+
     @Volatile private var port: UsbSerialPort? = null
     @Volatile private var ioManager: SerialInputOutputManager? = null
     @Volatile private var running = false
@@ -150,6 +164,7 @@ class UsbSerialConnection @Inject constructor(
         }
         running = false
         _connected.value = false
+        _adapterCount.value = null
         heartbeatJob?.cancel()
         heartbeatJob = null
         runCatching { ioManager?.stop() }
@@ -183,10 +198,28 @@ class UsbSerialConnection @Inject constructor(
                 if (nl < 0) break
                 val line = lineBuffer.substring(0, nl)
                 lineBuffer.delete(0, nl + 1)
-                if (line.isNotBlank()) _frames.tryEmit(SerialFrameParser.parse(line))
+                if (line.isNotBlank()) {
+                    val frame = SerialFrameParser.parse(line)
+                    trackAdapterCount(frame)
+                    _frames.tryEmit(frame)
+                }
             }
             // Guard against an endless line (garbage stream with no '\n').
             if (lineBuffer.length > MAX_LINE) lineBuffer.setLength(0)
+        }
+
+        private fun trackAdapterCount(frame: SerialFrame) {
+            // Every frame type that carries a cumulative updates the anchor source, BOOT included:
+            // a boot resets the board's counter, and recording the reset promptly is what lets a
+            // reader see the count go backwards and conclude "the adapter restarted" rather than
+            // subtracting against a stale high-water mark.
+            val count = when (frame) {
+                is SerialFrame.Pulse -> frame.cumulative
+                is SerialFrame.Heartbeat -> frame.cumulative
+                is SerialFrame.Boot -> frame.cumulative
+                is SerialFrame.Error, is SerialFrame.Invalid -> null
+            }
+            if (count != null) _adapterCount.value = count
         }
 
         override fun onRunError(e: Exception) {
