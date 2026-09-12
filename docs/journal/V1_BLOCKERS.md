@@ -18,28 +18,29 @@ work sorted by a different question: **who is holding it up, and what can move t
 | | |
 |---|---|
 | Built and merged | all 5 flows, real Arduino pulse + relay, operator config, persistence/boot-resume, signed network layer, encrypted credentials, device identity |
-| Built, unmerged | 7h pulse continuity (bench gate), 7g firmware (bench gate), Phase 9 API work (no gate) |
-| Not built | receipt sharing, transaction upload job, release signing, the payment feature flows |
+| Built, unmerged | 7h pulse continuity (bench gate), 7g firmware (bench gate), Phase 9 API work + the activation step (no gate) |
+| Not built | transaction upload job, release signing, the payment feature flows |
 | Never measured | the meter K-factor — every litre figure runs on a placeholder |
 
 ---
 
 ## 0. Pick one of these next
 
-Three candidates that need no rig, no reply and no decision. Sized roughly.
+Two candidates that need no rig, no reply and no decision. Sized roughly.
 
-1. **Activation step in onboarding** — *recommended, and on the critical path.*
-   `PumpActivationRepository` (built 2026-09-12, `5a378fe`) **has no caller**. Onboarding has three
-   steps — identity, logo, PIN — and none of them redeems an activation code, so when the code
-   arrives an operator has no way to use it and **#32**'s "drive it through `PumpApiClient`, not
-   curl" has nothing to drive it from. Same design caveat as the error screen: no activation screen
-   exists in `docs/Strict design screens/`.
-2. **Transaction upload job (7e)** — the plan calls it self-contained and it is. Two things are
+- [x] ~~**Activation step in onboarding**~~ — **DONE 2026-09-12** (`ce4a0b8`). **#33**.
+  `PumpActivationRepository` now has two callers: **onboarding step 4** and a panel on the
+  **operator settings screen**. The second is what makes **#32** runnable at all — a debug build
+  auto-provisions a demo identity and never shows onboarding, so an onboarding-only entry would
+  have been unreachable in exactly the build that points at the dev backend. Activation is
+  **optional**: cash sales do not need it, and a pump is often installed before its code exists.
+  Design caveat stands — no activation screen exists in `docs/Strict design screens/`.
+1. **Transaction upload job (7e)** — the plan calls it self-contained and it is. Two things are
    missing under it: `workmanager` was removed in the cleanup and is **not in
    `gradle/libs.versions.toml`**, and **nothing marks a transaction synced**, so
    `getPendingSync()` would return the same rows forever. Fails safe before activation, since the
    call is signed and returns `NotActivated`.
-3. **Draft the OQ #22 options** — the last open decision (see section 5). Writing out the two or
+2. **Draft the OQ #22 options** — the last open decision (see section 5). Writing out the two or
    three concrete recovery behaviours would let it be settled by picking, which is what worked for
    OQ #17.
 
@@ -123,7 +124,8 @@ prerequisite *of the run*, which is why it is deferred rather than dropped.
 
 - [ ] **The activation code.** Now the single gate on the whole API line — see **#31** (two questions
   that shrink the one-way door) and **#32** (the full sequence to run in one sitting once a code
-  exists). Everything in the probe's "cannot reach" list is behind it: the `/config` payload shape,
+  exists). **#32 is now runnable the moment a code lands** — since `ce4a0b8` the operator settings
+  screen can redeem one, which is the only entry a debug build has. Everything in the probe's "cannot reach" list is behind it: the `/config` payload shape,
   GET signing, clock skew (**#15**), the decimals question and the real status set (**#18c–e**).
 - [ ] **Transaction upload job (7e).** Not built; the `workmanager` dependency is not even in the
   project. Needs the ingest endpoint confirmed.
@@ -180,6 +182,7 @@ Sorted by value per hour, given that section 4 is waiting on a reply either way.
    remains is the key itself, and it is not needed until there is a production-shaped build to
    install.
 
-Done and off this list: **receipt sharing (#35)**, 2026-09-12. **#21**, the third `Missing` case,
+Done and off this list: **receipt sharing (#35)** and the **activation step (#33)**, both
+2026-09-12. **#21**, the third `Missing` case,
 turned out **not** to be movable and has gone to section 3 — the K-factor is a compile-time
 constant, not a configurable field, so there is no absent state for a guard to detect.

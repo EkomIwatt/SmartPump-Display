@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-12 (Phase 9: first real requests to the dev backend)_
+_Last updated: 2026-09-12 (Phase 9c: the activation step)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -225,6 +225,37 @@ Branch `feature/api-live-probe`, three commits off `main` at `3aea28c`. `f77cfb3
 `4970c4e` error-envelope parsing (#14 half), `5a378fe` activation persistence. Verified: JVM **155
 tests / 19 classes** green (125 → 155); `compileDebugRealHwKotlin` + `lintDebug` clean. Nothing
 device-specific, so no instrumented run needed — **no bench gate on this one.**
+
+**Phase 9c** continues on `feature/onboarding-activation`, branched off the above because it builds
+directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 classes** green (170 →
+184); `compileDebugRealHwKotlin` + `lintDebug` clean, no new lint findings. Also no bench gate.
+
+- [x] **33. The activation code now has a way in.** `PumpActivationRepository` shipped with **no
+  caller**, so an arriving code could not be redeemed by an operator. Two entries now share one
+  panel and one `ActivationViewModel`:
+  - **Onboarding step 4.** Provisioning moved from the PIN match to the end of the new step, because
+    writing the identity row *is* what ends onboarding — the gate observes that row — so saving at
+    step 3 would have made step 4 unreachable. Activation is **optional**: a pump is often installed
+    before its code exists, and cash sales do not need one. The exit reads "Finish without
+    activating", not a hidden skip.
+  - **The operator settings screen**, behind the attendant PIN — and for most units the *only*
+    reachable entry. A pump installed before its code was issued finished onboarding long ago, and a
+    debug build auto-provisions a demo identity and never shows onboarding at all. Without this,
+    **#32** could not have been driven from the one build that points at the dev backend.
+  - `ActivationReport` turns each outcome into operator-facing words **plus what may be done next**.
+    The two flags exist for one case: after `Unreachable` the *same* code is safe to resend, while a
+    *different* code may burn a spare on a pump the server has already registered. Typing a
+    different code there **warns rather than blocks** — support may have confirmed the first never
+    landed, and an operator who did the right thing must not be stuck.
+  - The **device ID is on screen from the first frame**, because the recovery for an ambiguous
+    activation is an operator reading it out to support. `PumpActivationRepository` gains `pumpId`
+    so the panel can also say what the unit is registered *as*.
+  - ⚠️ **Design-authority flag:** no activation screen exists in `docs/Strict design screens/`, so
+    the layout is invention — the same deviation already on record for the error screen. Tokens and
+    components are the existing ones.
+  - **Not covered by tests:** `OnboardingViewModel`'s step sequencing. It takes an Android `Context`
+    for logo decoding and the project has no Robolectric or mocking library, so there is no cheap
+    JVM fake. The outcome-to-next-move logic, which is the part worth protecting, has 13 tests.
 
 - [x] **30. Activation now keeps what it is given.** `PumpApiClient.activate()` existed and **nothing
   called it**: it returned the once-only `apiKey`/`signingSecret` and no caller saved them, so

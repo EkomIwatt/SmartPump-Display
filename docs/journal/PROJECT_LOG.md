@@ -1,15 +1,68 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-12 (first real backend contact; two untracked V1 gaps closed)
+## Current status — 2026-09-12 (Phase 9c: the activation code finally has a way in)
+
+**Phase 9c is on `feature/onboarding-activation`, one commit (`ce4a0b8`) off
+`feature/api-live-probe`** — branched from there rather than from `main` because it builds directly
+on `5a378fe`, which is not merged. No bench gate: nothing here is device-specific. Verified: JVM
+**184 tests / 22 classes** green (170 → 184); `compileDebugRealHwKotlin` and `lintDebug` clean, with
+no new lint findings.
+
+**What was wrong.** `PumpActivationRepository` was built the same morning with **no caller**. The
+call, the save and the read-back were all correct and completely unreachable: nothing in the app
+asked an operator for an activation code, so a code arriving from Balanceè could not be redeemed,
+and **#32** — the one-sitting sequence that unblocks the rest of the API line, and that insists on
+being driven through `PumpApiClient` rather than curl — had nothing to drive it from.
+
+**What was built.** Two entry points sharing one panel and one `ActivationViewModel`:
+
+- **Onboarding step 4.** Provisioning moved from the PIN confirm-match to the end of the new step.
+  That reordering is the substance of the change, not housekeeping: writing the identity row *is*
+  what ends onboarding, because `IdentityGateViewModel` observes that row and swaps the screen out,
+  so provisioning at step 3 would have made step 4 unreachable. The PIN is held in memory across
+  the activation step, which is no worse than it already was across the confirm entry.
+- **The operator settings screen**, behind the attendant PIN. This one was not in the original
+  suggestion and turns out to matter more: a pump installed before its code was issued finished
+  onboarding long ago and will never see it again, and **every debug build auto-provisions a demo
+  identity and never shows onboarding at all**. An onboarding-only entry would therefore have been
+  unreachable in exactly the build that points at the dev backend — #32 would still have been
+  blocked, for a new reason.
+
+**Activation is optional, deliberately.** A pump is routinely installed before its code exists, and
+cash sales do not need one. The exit reads "Finish without activating" rather than hiding as a skip
+link, and the panel says plainly that cash works and card does not.
+
+**The outcome copy carries a decision, not just words.** `ActivationReport` maps each of the six
+outcomes to operator-facing text **plus what may be done next**, as two separate flags. They diverge
+on exactly one case, which is the case an installer will get wrong: after `Unreachable` the *same*
+code is safe to resend, while a *different* code may burn a spare on a pump the server has already
+registered. Typing a different code there **warns rather than blocks** — support may have confirmed
+the first code never landed, and an operator who did the right thing must not be stuck behind a
+guard with no key. The device ID is on screen from the first frame, because that recovery is a phone
+call about this specific unit; `PumpActivationRepository` gained `pumpId` so the panel can also say
+what the unit is registered *as*.
+
+⚠️ **Design-authority flag (CLAUDE.md).** There is **no activation screen in `docs/Strict design
+screens/`**, so this layout is invention — the same deviation already on record for the error
+screen. Tokens and components are the existing ones; only the arrangement is new.
+
+**Not covered by tests:** `OnboardingViewModel`'s step sequencing. It takes an Android `Context` for
+logo decoding, and the project has no Robolectric and no mocking library, so there is no cheap JVM
+fake for it. The outcome-to-next-move logic, which is the part worth protecting, has 13 tests.
+
+**Still the gate:** the activation code itself. #32 is now runnable the moment one lands.
+
+---
+
+## Previous status — 2026-09-12 (first real backend contact; two untracked V1 gaps closed)
 
 **Everything below is on `feature/api-live-probe`, 15 commits off `main` at `3aea28c`, unmerged and
 with no bench gate** — nothing here is device-specific. Verified at the last commit: JVM **170 tests
 / 21 classes** green, `compileDebugRealHwKotlin` + `lintDebug` + `assembleRelease` clean.
 
 **Start here next session:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) sorts the remaining work by *who is
-holding it up*. Three candidates need nobody: an **activation step in onboarding**
-(`PumpActivationRepository` has no caller, so an arriving code cannot be redeemed by an operator),
-the **transaction upload job** (7e — `workmanager` is not in the catalogue and nothing marks a row
+holding it up*. Three candidates need nobody: an **activation step in onboarding** (done 2026-09-12,
+see the status above), the **transaction upload job** (7e — `workmanager` is not in the catalogue and nothing marks a row
 synced), and a **draft of the OQ #22 options** (the last open decision). Everything else waits on
 the bench rig, Kelvin, Olonade, or the activation code.
 
