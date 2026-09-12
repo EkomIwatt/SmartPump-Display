@@ -1,6 +1,39 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-07 (7g split: docs/app merged, firmware held)
+## Current status — 2026-09-12 (first contact with the real backend)
+
+**Phase 9 is BUILT on `feature/api-live-probe`** (three commits off `main` at `3aea28c`, unmerged).
+The project has now made real requests to a real Balancee server for the first time — every prior
+test ran against fixtures we wrote ourselves, which is the arrangement that let the response-envelope
+defect through in August.
+
+**What the probe settled** (evidence in `docs/api-probes/2026-09-12/`, no credentials sent, nothing
+spendable touched): **both endpoints from `BOSS_CONFIRMATIONS_DRAFT.md` items 1 and 2 are deployed on
+dev**; **our four signing header names are correct**; the **literal failure envelope** is captured for
+the first time; and a **top-level `code` exists on the 400 from `/activate` but on none of the 401s**,
+so the stable-error-code ask is half built. The server checks the API key *before* the timestamp and
+signature, so **GET signing and clock skew cannot be tested from outside** — they now sit behind
+activation with the `/config` payload, the decimals question and the status set.
+
+**Two fixes rode on that.** TODO #14's parsing half is done — 4xx refusals now arrive as
+`ApiError.Business` with the server's own message and code, on observed bytes rather than inference
+(its *mapping* half is still blocked on attendant copy, OQ #17). And **activation is now safe to
+spend**: `PumpApiClient.activate()` had no caller, so redeeming the single-use code would have
+marked the pump activated server-side and thrown the once-only keys away. Call, save and read-back
+are now one operation with outcomes that distinguish "refused" from "unknown" from "the code is
+spent and the answer is lost".
+
+**The activation code is now the gate on everything remaining.** Two questions to the backend shrink
+the risk before it is used: are dev codes re-issuable, and can a dev pump be reset and re-activated.
+Unchanged and independent of all of it: the **7h bench gate** and the **7g firmware gate**, both of
+which need only the Arduino.
+
+Verified: JVM **155 tests / 19 classes** green (125 → 155); `compileDebugRealHwKotlin` and
+`lintDebug` clean.
+
+---
+
+## Previous status — 2026-09-07 (7g split: docs/app merged, firmware held)
 
 **Phase 7g was split rather than merged whole** (merge commit `4dee113`, 2026-09-07). Merged and
 **pushed** to `origin/main` on 2026-09-07. The docs and
@@ -747,3 +780,88 @@ back higher *and* that the next sale still starts from zero litres on the tablet
 firmware half. Independently of the board: OQ #25 (pulses counted while the tablet is down are
 silently absorbed — live on `main`) and the #18 backend asks, still unsent and still the critical
 path by lead time.
+
+---
+
+### Phase 9 — first contact with the real backend
+**Date:** 2026-09-12
+**Status:** done
+**Commit(s):** `f77cfb3` (probe evidence) / `4970c4e` (error-envelope parsing, TODO #14 half) /
+`5a378fe` (activation persistence) — branch `feature/api-live-probe`, off `main` at `3aea28c`
+
+**Summary (plain language):**
+Until today nothing in this project had ever spoken to a real Balancee server. Every test passed
+against a pretend server we built ourselves from the API document, which is exactly the arrangement
+that let a serious bug through in August. We sent five real requests to the development server —
+carrying no passwords and unable to spend anything — and learned three useful things. Both of the
+new endpoints we asked the backend team for are built and running. The names we use to identify
+ourselves in every request are correct. And we captured what a real error from the server actually
+looks like, which the document describes but never shows.
+
+We then fixed the two things that finding out made possible. The app now understands the server's
+refusals ("out of stock", "amount mismatch") instead of treating them as an unreadable blob. And the
+one step that can never be repeated — redeeming the pump's activation code — now actually keeps what
+it is given. Before today it would have thrown the pump's permanent keys away and left the code
+spent.
+
+**Technical notes:**
+- **The probe.** Five unauthenticated requests against `api.dev.balancee.app`, captured verbatim in
+  `docs/api-probes/2026-09-12/` with a re-runnable `probe.sh`. No credentials exist to send and
+  none were sent; the `/activate` probe carries `{}`, so it cannot redeem a code.
+  - **Both new endpoints are deployed** — items 1 and 2 of `BOSS_CONFIRMATIONS_DRAFT.md`.
+    `X-Matched-Path` settles it past the status code: `/api/pump/config` and
+    `/api/pump/transactions/[id]`. The control request proves the inference: an undeployed route
+    returns an HTML 404 with `X-Matched-Path: /404`, so a JSON envelope is a real handler answering.
+  - **Our four signing header names are correct.** Sending `X-Api-Key` / `X-Device-Id` /
+    `X-Timestamp` / `X-Signature` moves the server off `Missing pump authentication headers` and
+    onto `Invalid API key`. Previously this was only our reading of Reference §3.
+  - **The literal failure envelope, first sight.** `{"status":false,"message":…}`, `data` absent.
+    §1 describes it; the document never prints one.
+  - **A top-level `code` exists on one path.** The 400 from `/activate` returns
+    `"code":"INVALID_REQUEST"` as a sibling of `message`, **not** inside `data`. That is the stable
+    error code asked for in draft item 3 — so the ask was partly built, and the remaining gap is now
+    specific rather than general.
+  - **What the probe cannot reach.** The server validates the API key *first*: a two-hour-stale
+    `X-Timestamp` and a request with `X-Signature` removed entirely both return `Invalid API key`.
+    So GET signing and the 5-minute freshness window (#15) are untestable from outside, and sit
+    behind activation along with the `/config` payload shape, the decimals question and the full
+    status set.
+- **TODO #14, parsing half (`4970c4e`).** `safeApiCall` now reads the envelope back out of a non-2xx
+  body and returns `ApiError.Business(message, code, httpCode)`. Parsing is conservative: only a
+  JSON object with a real boolean `status:false` counts, so an HTML 404, a plain-text 502 and a 4xx
+  whose envelope claims success all stay `ApiError.Http` with the bytes intact — a deployment
+  mistake must not read as the server declining a sale. Retryability is unchanged. Every fixture is
+  a byte-for-byte copy from `docs/api-probes/`. One existing test *changed* rather than being added
+  to: it asserted the old opaque-blob behaviour.
+  - **The mapping half is still blocked**, on copy rather than code: no error screen exists in
+    `docs/Strict design screens/` and OQ #17 is open.
+- **Activation persistence (`5a378fe`).** `PumpActivationRepository` + impl. `PumpApiClient.activate()`
+  existed and **nothing called it** — it returned the credentials and no caller saved them, so
+  running it would have spent the single-use code, marked the pump activated server-side and dropped
+  the once-only `apiKey`/`signingSecret`. The call, the save and a **read-back** are now one
+  operation.
+  - **The read-back is the point.** `save()` returning without throwing proves only that nothing
+    escaped, and the Keystore store deliberately discards an undecryptable blob — so a write that
+    produced one would look exactly like success. Write retried once: giving up on a transient
+    failure costs a revoke-and-reissue.
+  - **Outcomes separate three things a caller must not confuse.** `Refused` = nothing issued, try a
+    fresh code. `Unreachable` = **unknown, not "no"** (a timeout or 5xx can land after the server
+    committed) → ask the backend whether this deviceId activated before burning a second code.
+    `CredentialsLost` = the server activated us and the answer did not survive, *including* a
+    success body we could not parse — deliberately not softened into "retry".
+  - **Two guards.** Activating an already-activated device is refused locally and never sent (a
+    valid second code would succeed and overwrite, abandoning the `pumpId` the backend holds). And
+    the `deviceId` echo is checked — a mismatch **keeps** the credentials (they are the
+    irreplaceable half, and the server's own id is what it authenticates) but reports the
+    disagreement, which nothing downstream could otherwise detect.
+  - No secret appears in any outcome message.
+- **Verified:** JVM **155 tests / 19 classes** green (125 → 155); `compileDebugRealHwKotlin` and
+  `lintDebug` clean. Nothing device-specific here, so no instrumented run was needed.
+
+**Next:**
+The activation code is the gate on everything left. With it: redeem once on dev, capture `/config`'s
+literal payload and build its fixture from those bytes, then settle GET signing, clock skew, the
+decimals question and the full status set in the same sitting. Ask the backend two things first —
+are dev codes re-issuable, and can a dev pump be reset and re-activated — since that decides whether
+this stays a one-way door. Independently: the 7h bench gate and the 7g firmware gate, both of which
+need only the Arduino.
