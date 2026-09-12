@@ -206,20 +206,10 @@ private fun StatusBanner(
     if (!loaded) return
     val configured = missing.isEmpty()
     val accent = if (configured) SuccessGreen else WarningRed
-    val text = when {
-        configured -> "This pump is configured and can take sales."
-        missing.containsAll(
-            setOf(
-                CanStartTransactionUseCase.Missing.PRICE,
-                CanStartTransactionUseCase.Missing.FUEL_TYPE,
-            ),
-        ) -> "Not configured — set a fuel type and a price. The pump cannot sell until both are set."
-
-        missing.contains(CanStartTransactionUseCase.Missing.FUEL_TYPE) ->
-            "No fuel type set — the pump cannot sell until you choose one."
-
-        else -> "No price set — the pump cannot sell until you enter one."
-    }
+    // Shared with the attendant panel via the use case, so one condition keeps one wording.
+    val text =
+        if (configured) "This pump is configured and can take sales."
+        else CanStartTransactionUseCase.attendantDetail(missing)
 
     Box(
         modifier = Modifier

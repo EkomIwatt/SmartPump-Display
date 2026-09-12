@@ -169,9 +169,24 @@ sealed class TransactionState {
         val attendantId: String? = null,     // null in V1 (no roles)
     ) : TransactionState()
 
+    /**
+     * @param message   What the CUSTOMER sees. One plain line they can act on, which for most
+     *                  failures means "see attendant" — a customer cannot act on a clock skew or a
+     *                  station's stock level (OQ #17, approved 2026-09-12).
+     * @param recoverable Whether trying again could work. Read by the error screen, which presents
+     *                  a retryable failure differently from a dead end.
+     * @param attendantDetail The diagnostic half, shown only in the swipe-up attendant panel —
+     *                  behind the PIN, never on the customer-facing card. Null when there is
+     *                  nothing an attendant could do that the customer line does not already say.
+     *
+     * Adding [attendantDetail] needed no Room migration: the whole state is persisted as
+     * kotlinx JSON in one column (`pulse_state.transactionStateJson`), and a new field with a
+     * default decodes cleanly from rows written before it existed.
+     */
     @Serializable @SerialName("error")
     data class Error(
         val message: String,
         val recoverable: Boolean,
+        val attendantDetail: String? = null,
     ) : TransactionState()
 }

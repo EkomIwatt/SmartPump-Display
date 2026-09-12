@@ -60,6 +60,7 @@ import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.ui.util.buildReceiptText
+import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -302,6 +303,7 @@ class CustomerViewModel @Inject constructor(
                         TransactionState.Error(
                             message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
+                            attendantDetail = CanStartTransactionUseCase.attendantDetail(result.missing),
                         )
                     )
                 }
@@ -404,6 +406,7 @@ class CustomerViewModel @Inject constructor(
                         TransactionState.Error(
                             message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
+                            attendantDetail = CanStartTransactionUseCase.attendantDetail(result.missing),
                         )
                     )
                 }
@@ -626,6 +629,7 @@ class CustomerViewModel @Inject constructor(
                         TransactionState.Error(
                             message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
+                            attendantDetail = CanStartTransactionUseCase.attendantDetail(result.missing),
                         )
                     )
                 }
@@ -643,6 +647,9 @@ class CustomerViewModel @Inject constructor(
                 TransactionState.Error(
                     message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                     recoverable = true,
+                    attendantDetail = CanStartTransactionUseCase.attendantDetail(
+                        setOf(CanStartTransactionUseCase.Missing.PRICE),
+                    ),
                 )
             )
             return
@@ -653,12 +660,13 @@ class CustomerViewModel @Inject constructor(
             if (cutoff <= 0.0) {
                 // Smallest dispensable step is 0.01 L, i.e. priceKoboPerLitre / 100 kobo.
                 setState(
-                    // The attendant types this amount, so the actionable number belongs on their
-                    // side of the split, not on the customer card. Until there is somewhere to
-                    // show attendant detail (OQ #17 item 3), the customer line has to stand alone.
+                    // The attendant typed this amount, so the actionable number is theirs: it goes
+                    // to the panel, not onto the customer card (OQ #17).
                     TransactionState.Error(
                         message = "Amount is too small — please see attendant.",
                         recoverable = true,
+                        attendantDetail = "Below the smallest dispensable step — the minimum at " +
+                            "this price is ${formatNaira(priceKoboPerLitre / 100)} for 0.01 L.",
                     )
                 )
                 return@launch
@@ -791,9 +799,12 @@ class CustomerViewModel @Inject constructor(
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
         setState(
+            // The reason comes from the bank SMS parser and means nothing to a customer standing
+            // at the pump; it is exactly what an attendant needs. Split per OQ #17.
             TransactionState.Error(
-                message = "USSD payment failed — $reason.",
+                message = "Payment was not completed.",
                 recoverable = true,
+                attendantDetail = "USSD payment failed — $reason.",
             )
         )
     }
@@ -898,8 +909,9 @@ class CustomerViewModel @Inject constructor(
         cancelInFlightJobs()
         setState(
             TransactionState.Error(
-                message = "Payment failed — ${failed.reason}.",
+                message = "Payment was not completed.",
                 recoverable = true,
+                attendantDetail = "Payment failed — ${failed.reason}.",
             )
         )
     }

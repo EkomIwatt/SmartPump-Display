@@ -46,5 +46,22 @@ class CanStartTransactionUseCase @Inject constructor(
     companion object {
         /** Shown on the customer screen for every NotConfigured case. */
         const val CUSTOMER_MESSAGE = "Fuel parameters not set — please see attendant."
+
+        /**
+         * The same condition said to whoever can fix it. One sentence, no location, so it reads
+         * correctly both on the operator screen (already in settings) and in the attendant panel
+         * (which has a Pump settings button beside it). Kept here rather than at each surface so
+         * the two cannot drift apart — the defect OQ #17 found was exactly that, two wordings for
+         * one condition.
+         */
+        fun attendantDetail(missing: Set<Missing>): String = when {
+            missing.containsAll(setOf(Missing.PRICE, Missing.FUEL_TYPE)) ->
+                "Not configured — set a fuel type and a price. The pump cannot sell until both are set."
+
+            missing.contains(Missing.FUEL_TYPE) ->
+                "No fuel type set — the pump cannot sell until you choose one."
+
+            else -> "No price set — the pump cannot sell until you enter one."
+        }
     }
 }
