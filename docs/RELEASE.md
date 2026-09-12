@@ -7,10 +7,29 @@ an unsigned APK that Android will not install. This is how it works now.
 
 ### 1. Create the keystore
 
-Run this once, ever. Keep the file **outside the repo**.
+Run this once, ever. **Run it from the repo root**, because the `../` in the path is what puts the
+keystore *outside* the repo — one directory up, beside the project folder rather than inside it. Use
+an absolute path instead if you would rather keep it somewhere else entirely; the build accepts
+either.
 
+`keytool` ships with the JDK and is normally **not on `PATH`** on this machine. It is in the Android
+Studio JBR.
+
+**PowerShell** (backtick continuations, and the call operator because the path has a space):
+
+```powershell
+& "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -genkeypair -v `
+  -keystore ..\smartpump-release.jks `
+  -alias smartpump `
+  -keyalg RSA -keysize 4096 `
+  -validity 10000 `
+  -storetype PKCS12
 ```
-keytool -genkeypair -v \
+
+**Git Bash** (backslash continuations):
+
+```bash
+"/c/Program Files/Android/Android Studio/jbr/bin/keytool" -genkeypair -v \
   -keystore ../smartpump-release.jks \
   -alias smartpump \
   -keyalg RSA -keysize 4096 \
@@ -18,18 +37,30 @@ keytool -genkeypair -v \
   -storetype PKCS12
 ```
 
-`-validity 10000` is roughly 27 years, which is the convention: an Android app's signing key cannot
-be rotated for an existing install base, so a key that expires is a key that strands every tablet in
-the field. `keytool` ships with the JDK — the Android Studio JBR at
-`C:\Program Files\Android\Android Studio\jbr\bin` has it.
+It then **prompts interactively**, which is why it cannot be scripted here:
+
+- **Keystore password**, twice. This is one of the two values that go into `keystore.properties`.
+- **First and last name, organisational unit, organisation, city, state, country code.** These end
+  up in the certificate. Nothing verifies them and Android does not show them to users, so put
+  something truthful and move on — "Balancee" as the organisation, "NG" as the country code. Blank
+  is accepted for the rest.
+- **Confirm**, then a **key password**. Press Enter to reuse the keystore password, which is the
+  normal choice; if you set a different one, that is the `keyPassword` entry.
+
+`-validity 10000` is roughly 27 years, and that is the convention rather than caution. An Android
+app's signing key cannot be rotated for an existing install base, so a key that expires is a key
+that strands every tablet in the field.
 
 ### 2. Point the build at it
+
+From the repo root:
 
 ```
 cp keystore.properties.example keystore.properties
 ```
 
-Fill in the four values. `keystore.properties`, `*.jks` and `*.keystore` are all gitignored.
+Fill in the four values — `storeFile` already matches the command above, so in the usual case only
+the two passwords need typing. `keystore.properties`, `*.jks` and `*.keystore` are all gitignored.
 
 For CI, set the same four as environment variables instead and leave the file absent:
 `SMARTPUMP_STORE_FILE`, `SMARTPUMP_STORE_PASSWORD`, `SMARTPUMP_KEY_ALIAS`,
