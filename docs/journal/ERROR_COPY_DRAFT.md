@@ -5,8 +5,14 @@ an abstract question._
 
 **Approved 2026-09-12 — items 1 and 2.** "See attendant" is accepted as the customer's universal
 fallback, and with it the principle it rests on: the customer gets one plain line, the diagnostic
-detail goes behind the PIN. **Items 3, 4 and 5 are still open** and are the remaining blockers on
-showing attendants anything.
+detail goes behind the PIN. **Item 5 is done** (`c2c62f9`) — the local messages that contradicted
+the principle had live call sites and are fixed. **Items 3 and 4 remain**, and item 3 is what blocks
+showing an attendant anything at all.
+
+**Catalogue A is not wired and cannot be yet**: no code path receives an `ApiError` and sets
+`TransactionState.Error`, because the payment feature flows (**TODO #8**) do not exist. The mapping
+is the unit #8 will consume — building it before there is a call site would repeat the mistake this
+file already flags, namely carrying data nothing reads.
 
 Blocks: **TODO #14**'s mapping half (parsing landed 2026-09-12) and the attendant-facing half of
 **TODO #15**. Both are otherwise ready.
@@ -105,8 +111,9 @@ swallowed.
 4. **Whether `recoverable` should change the card.** It is carried on every error and read by
    nothing. Making a non-recoverable error look different is the sort of thing a design screen would
    normally settle.
-5. **The two-wordings fix** — collapse "Price not set — contact operator." into the guard's
-   customer message. This one is small enough to do without a design review if approved in passing.
+5. ~~**The two-wordings fix**~~ — **DONE 2026-09-12** (`c2c62f9`), along with the below-minimum
+   message, since both had live call sites and both contradicted the approved principle. The
+   below-minimum figure comes back once item 3 gives it somewhere to live.
 
 ## Not in scope here
 
