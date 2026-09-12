@@ -1,8 +1,28 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-12 (first contact with the real backend)
+## Current status — 2026-09-12 (first real backend contact; two untracked V1 gaps closed)
 
-**Phase 9 is BUILT on `feature/api-live-probe`** (three commits off `main` at `3aea28c`, unmerged).
+**Everything below is on `feature/api-live-probe`, 15 commits off `main` at `3aea28c`, unmerged and
+with no bench gate** — nothing here is device-specific. Verified at the last commit: JVM **170 tests
+/ 21 classes** green, `compileDebugRealHwKotlin` + `lintDebug` + `assembleRelease` clean.
+
+**Start here next session:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) sorts the remaining work by *who is
+holding it up*. Three candidates need nobody: an **activation step in onboarding**
+(`PumpActivationRepository` has no caller, so an arriving code cannot be redeemed by an operator),
+the **transaction upload job** (7e — `workmanager` is not in the catalogue and nothing marks a row
+synced), and a **draft of the OQ #22 options** (the last open decision). Everything else waits on
+the bench rig, Kelvin, Olonade, or the activation code.
+
+**Phase 9b (same day) closed two V1 gaps that were tracked nowhere at all.** Release builds could
+not be signed — no `signingConfig` existed, so `assembleRelease` produced an uninstallable APK, and
+nothing would have caught it until someone tried to put a build on a tablet. The build side is now
+in; **the keystore itself is deferred to last by decision**, since signing gates the parallel run
+(which waits on the K-factor) and key custody is the boss's call. Separately, **receipt sharing was
+an empty function** behind a live button, and now works. **OQ #17 is settled**: customer gets one
+plain line, diagnostics go to the swipe-up attendant panel, and the long-dead `recoverable` flag now
+changes what the card looks like.
+
+**Phase 9 — first contact with the real backend.**
 The project has now made real requests to a real Balancee server for the first time — every prior
 test ran against fixtures we wrote ourselves, which is the arrangement that let the response-envelope
 defect through in August.
@@ -865,3 +885,76 @@ decimals question and the full status set in the same sitting. Ask the backend t
 are dev codes re-issuable, and can a dev pump be reset and re-activated — since that decides whether
 this stays a one-way door. Independently: the 7h bench gate and the 7g firmware gate, both of which
 need only the Arduino.
+
+---
+
+### Phase 9b — the V1 gaps that were tracked nowhere, plus error copy
+**Date:** 2026-09-12
+**Status:** done (signing partial by decision)
+**Commit(s):** `68c7107` blocker inventory / `9ab8f58` release signing / `5e92572` release doc /
+`e250849` receipt sharing / `d23db1a` + `94bda66` board / `b65cd5c` + `c2c62f9` + `16d4495` +
+`99f6e66` + `6a055e1` error copy — all on `feature/api-live-probe`
+
+**Summary (plain language):**
+Asked what was still standing between the app and V1, and two answers turned out to be written down
+nowhere. The app could not produce an installable release build at all, because it had no signing
+setup — that would have been discovered on the day someone tried to put it on a station tablet. And
+the Share button on the receipt screen did nothing; it had been an empty function since Phase 3.
+Both are now fixed. We also settled how the pump talks to people when something goes wrong: the
+customer gets one plain sentence they can act on, and the technical explanation goes to the
+attendant panel behind the PIN, where somebody can actually use it.
+
+**Technical notes:**
+- **`V1_BLOCKERS.md`** — a new view of the same work the board tracks, sorted by *who is holding it
+  up* rather than by phase. Points at TODO/OQ numbers and deliberately does not restate them.
+- **TODO #34 release signing — build side done, keystore DEFERRED TO LAST by decision.** There was
+  no `signingConfig` at all and `release` still carried the scaffold's `versionCode = 1` /
+  `versionName = "1.0"`. Credentials now come from a gitignored `keystore.properties` or four
+  `SMARTPUMP_*` env vars; absent credentials leave release **unsigned rather than failing
+  configuration**, so a fresh clone and CI still work, with a loud warning and `docs/RELEASE.md`
+  making `apksigner verify` mandatory. Verified: `assembleRelease` emits `app-release-unsigned.apk`.
+  - **Deferred because it is not on the critical path** — signing gates the *parallel run*, which
+    gates on the K-factor, which waits on Kelvin. And **key custody is the boss's call**, with a
+    prior question worth asking: does Balancee already have an Android signing key?
+  - **Recorded: a debug build cannot stand in for the parallel run.** It seeds its own price/fuel
+    via `seedDefaultConfigIfMissing()` (true for `debugRealHw` too — it is `initWith(debug)`),
+    exposes the long-press debug hotspot with live price editing and payment force-resolve, points
+    at the dev backend, and installs under a different application id. Later demonstrated
+    accidentally: a unit test could not simulate an unconfigured pump with a null config, because
+    `BuildConfig.DEBUG` is true under test and the seed fired.
+- **TODO #35 receipt sharing — DONE.** `onShareReceipt()` was empty while the button was live.
+  Plain text through the Android system share sheet (OQ #14). The record is **re-read from the audit
+  log**, not rendered from screen state, so a receipt shared after a power-cut resume is not dated
+  "now" — needed a new `TransactionRepository.getTransaction(id)` + DAO query, falling back to
+  screen state because `saveTransaction` is best-effort. Month names are **pinned in code**: `MMM`
+  under `Locale.UK` renders "Sept" on a modern JVM and "Sep" elsewhere, and the JVM's CLDR data is
+  not Android's ICU data.
+- **OQ #17 error copy — SETTLED, all five review items.** Drafted as
+  [`ERROR_COPY_DRAFT.md`](ERROR_COPY_DRAFT.md) so it could be decided by reviewing words rather than
+  answering an abstract question. **Design-authority flag stands on record: there is no error screen
+  in `docs/Strict design screens/`**, so both the words and the layout are a deviation.
+  - **The split:** customer gets one plain line ("…please see attendant"), diagnostics go to the
+    **swipe-up attendant panel** — already behind the PIN, already what an attendant opens, and the
+    PUMP SETTINGS button that fixes most cases is in the same chrome row.
+  - `TransactionState.Error` gains `attendantDetail`. **No Room migration**: state persists as
+    kotlinx JSON in one column, and a new field with a default decodes from older rows.
+  - **`recoverable` is finally read.** It was carried on every error and used by nothing, so a dead
+    end looked identical to a retry. Gold vs red, reusing the app's existing colour vocabulary; the
+    button's *action* is unchanged, since there is no retry in the state machine.
+  - Fixed two leaks onto the customer display: the payment processor's raw reason and the USSD SMS
+    parser string. Fixed two wordings for one condition — the missing-field copy now lives on
+    `CanStartTransactionUseCase` and is shared with the operator screen.
+  - 6 new tests assert **the split, not the prose**: no naira figure, no gateway error on the
+    customer line.
+  - **Catalogue A (server errors) is written but NOT wired** — nothing receives an `ApiError` until
+    the payment flows (#8) exist. Wiring it now would carry text nothing reads.
+- **Verified:** JVM **170 tests / 21 classes** green (155 → 170); `compileDebugRealHwKotlin`,
+  `lintDebug` and `assembleRelease` clean. No instrumented run needed — nothing device-specific.
+
+**Next:**
+Three unblocked candidates, none needing the rig, the backend or the boss: an **activation step in
+onboarding** (the `PumpActivationRepository` built earlier today has no caller, so an arriving code
+could not actually be redeemed by an operator); the **transaction upload job** (7e — needs
+`workmanager` re-added and a `markSynced` path, neither of which exists); and a **draft of the
+OQ #22 options**, the last open decision. Everything else waits on the bench rig, Kelvin, Olonade or
+the activation code.

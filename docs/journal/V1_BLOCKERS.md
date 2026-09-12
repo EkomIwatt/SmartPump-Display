@@ -24,6 +24,25 @@ work sorted by a different question: **who is holding it up, and what can move t
 
 ---
 
+## 0. Pick one of these next
+
+Three candidates that need no rig, no reply and no decision. Sized roughly.
+
+1. **Activation step in onboarding** — *recommended, and on the critical path.*
+   `PumpActivationRepository` (built 2026-09-12, `5a378fe`) **has no caller**. Onboarding has three
+   steps — identity, logo, PIN — and none of them redeems an activation code, so when the code
+   arrives an operator has no way to use it and **#32**'s "drive it through `PumpApiClient`, not
+   curl" has nothing to drive it from. Same design caveat as the error screen: no activation screen
+   exists in `docs/Strict design screens/`.
+2. **Transaction upload job (7e)** — the plan calls it self-contained and it is. Two things are
+   missing under it: `workmanager` was removed in the cleanup and is **not in
+   `gradle/libs.versions.toml`**, and **nothing marks a transaction synced**, so
+   `getPendingSync()` would return the same rows forever. Fails safe before activation, since the
+   call is signed and returns `NotActivated`.
+3. **Draft the OQ #22 options** — the last open decision (see section 5). Writing out the two or
+   three concrete recovery behaviours would let it be settled by picking, which is what worked for
+   OQ #17.
+
 ## 1. Blocked on nobody — movable today
 
 The highest value per hour on the whole project, because none of it waits on a reply.
