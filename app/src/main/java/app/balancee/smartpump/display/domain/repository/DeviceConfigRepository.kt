@@ -8,7 +8,9 @@ interface DeviceConfigRepository {
 
     /**
      * Returns the stored [DeviceConfig], or null if the operator hasn't pushed one yet.
-     * A null config must block all transactions with "Price not set — contact operator".
+     * A null config must block all transactions — the customer sees
+     * [app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase.CUSTOMER_MESSAGE],
+     * which is the single wording for this condition (OQ #17).
      */
     suspend fun getConfig(): DeviceConfig?
 

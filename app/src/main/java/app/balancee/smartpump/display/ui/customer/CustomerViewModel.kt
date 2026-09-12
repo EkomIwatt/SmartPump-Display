@@ -60,7 +60,6 @@ import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.ui.util.buildReceiptText
-import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -638,8 +637,11 @@ class CustomerViewModel @Inject constructor(
         if (currentState() !is TransactionState.CashFixedAmountEntry) return
         if (priceKoboPerLitre <= 0L) {
             setState(
+                // Was "Price not set — contact operator." — operator language on a
+                // customer-facing display, and a second wording for the condition the guard
+                // already has copy for. One condition, one sentence (OQ #17, approved 2026-09-12).
                 TransactionState.Error(
-                    message = "Price not set — contact operator.",
+                    message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                     recoverable = true,
                 )
             )
@@ -651,8 +653,11 @@ class CustomerViewModel @Inject constructor(
             if (cutoff <= 0.0) {
                 // Smallest dispensable step is 0.01 L, i.e. priceKoboPerLitre / 100 kobo.
                 setState(
+                    // The attendant types this amount, so the actionable number belongs on their
+                    // side of the split, not on the customer card. Until there is somewhere to
+                    // show attendant detail (OQ #17 item 3), the customer line has to stand alone.
                     TransactionState.Error(
-                        message = "Amount is below the minimum dispense (${formatNaira(priceKoboPerLitre / 100)}).",
+                        message = "Amount is too small — please see attendant.",
                         recoverable = true,
                     )
                 )

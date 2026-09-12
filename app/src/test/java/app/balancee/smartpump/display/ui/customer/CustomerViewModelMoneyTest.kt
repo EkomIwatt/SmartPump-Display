@@ -51,7 +51,11 @@ class CustomerViewModelMoneyTest {
 
         val s = state(vm) as TransactionState.Error
         assertTrue(s.recoverable)
-        assertTrue(s.message.contains("minimum", ignoreCase = true))
+        // Customer-facing wording, not the diagnostic number. The attendant typed this amount, so
+        // the actionable detail is theirs and belongs behind the PIN once there is somewhere to put
+        // it (OQ #17 item 3). Asserted loosely on purpose — the exact prose is the copy draft's
+        // business, but it must stay pointed at a person rather than at the arithmetic.
+        assertTrue(s.message.contains("attendant", ignoreCase = true))
         // No dispense should have started.
         assertEquals(0, harness.relay.startCount)
     }

@@ -1,7 +1,12 @@
 # Error copy — draft for approval (OQ #17)
 
-_Drafted 2026-09-12. **Nothing here is decided.** It exists so OQ #17 can be settled by reviewing
-concrete words rather than by answering an abstract question._
+_Drafted 2026-09-12 so OQ #17 could be settled by reviewing concrete words rather than by answering
+an abstract question._
+
+**Approved 2026-09-12 — items 1 and 2.** "See attendant" is accepted as the customer's universal
+fallback, and with it the principle it rests on: the customer gets one plain line, the diagnostic
+detail goes behind the PIN. **Items 3, 4 and 5 are still open** and are the remaining blockers on
+showing attendants anything.
 
 Blocks: **TODO #14**'s mapping half (parsing landed 2026-09-12) and the attendant-facing half of
 **TODO #15**. Both are otherwise ready.
@@ -89,11 +94,11 @@ swallowed.
 
 ## What this needs from a reviewer
 
-1. **The principle** — customer gets one plain line, attendant gets the detail behind the PIN. Yes
-   or no. Everything else follows from it.
-2. **"see attendant" as the customer's universal fallback.** It repeats a lot. That is deliberate
-   (it is always the true next step) but it is a tone decision, and the boss may want the brand's
-   own wording.
+1. ~~**The principle**~~ — **APPROVED 2026-09-12**, implicitly, by accepting the fallback that only
+   exists because of it.
+2. ~~**"see attendant" as the customer's universal fallback.**~~ — **APPROVED 2026-09-12.** It
+   repeats a lot, and that is deliberate: it is always the true next step. Still worth showing the
+   boss, since customer-facing wording is ultimately brand.
 3. **Where the attendant detail is shown.** Candidates: the existing attendant swipe-up panel, the
    operator settings screen, or a new line on the error card visible only after PIN entry. No
    design exists for any of them.
