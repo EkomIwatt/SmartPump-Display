@@ -361,19 +361,34 @@ sold.
 
 ## Now — unblocked, high value
 
-- [ ] **34. 🔴 Release builds cannot be signed.** `app/build.gradle.kts` has **no `signingConfig`
-  at all**, and `release` still carries the scaffold's `versionCode = 1` / `versionName = "1.0"`.
-  A release APK today is **unsigned and cannot be installed** on a station tablet. Surfaced
-  2026-09-12 while inventorying V1 blockers; it had been on no list anywhere, which is the part that
-  matters. Needs: a keystore, a `signingConfigs` block reading credentials from somewhere that is
-  **not** committed (`local.properties` or env), `release` wired to it, and a real version scheme.
-  **Do this before R8** (see the deferred minify item) — signing first, shrinking second, so a
-  broken release can only have one cause at a time.
-- [ ] **35. Receipt sharing is a no-op stub.** `CustomerViewModel.onShareReceipt()` (~line 971) is an
-  empty function whose comment promises Phase 7, while the Share button is **live** on the
-  completion screen — a customer taps it and gets silence. The decision is already made
-  (**OQ #14, resolved**: the Android system share sheet, no bespoke print-to-cashier channel), so
-  this is implementation, not a question. Part of sub-phase 7f.
+- [~] **34. Release signing — BUILD SIDE DONE 2026-09-12, keystore still owed.** Was: no
+  `signingConfig` at all and the scaffold's `versionCode = 1` / `versionName = "1.0"`, so a release
+  APK was **unsigned and could not be installed** on a station tablet. It had been on no list
+  anywhere, which was the dangerous part.
+  - `signingConfigs` now reads `keystore.properties` (gitignored, template committed as
+    `keystore.properties.example`) or the four `SMARTPUMP_*` environment variables for CI. Version
+    is declared once at the top of the build file with the bump rule stated.
+  - **Absent credentials leave release UNSIGNED rather than failing configuration** — a fresh clone,
+    a CI lint run and every debug build must work without the station's private key. The build logs
+    a loud warning instead, and `docs/RELEASE.md` makes `apksigner verify` a required step.
+  - **Still owed by a human:** create the keystore (`keytool` command in `docs/RELEASE.md`), fill in
+    `keystore.properties`, and **back the file up off this laptop** — losing it ends the app's
+    upgrade path, because a field tablet will refuse an APK signed by a different key and
+    reinstalling wipes local history *and* the activation identity.
+  - **Do R8 after this, not before** (see the deferred minify item), so a broken release build can
+    only have one cause at a time.
+- [x] **35. Receipt sharing — DONE 2026-09-12.** Was a no-op: `CustomerViewModel.onShareReceipt()`
+  was an empty function while the Share button was **live** on the completion screen, so a customer
+  tapped it and got silence. Now builds a plain-text receipt and sends it to the Android system
+  share sheet (**OQ #14**, already resolved — no bespoke print-to-cashier channel). Part of 7f.
+  - **Plain text deliberately:** the OS offers WhatsApp / SMS / email, and the receipt has to
+    survive being pasted into any of them. A PDF or image renders in some and is useless in others.
+  - **The record is re-read from the audit log**, not rendered from screen state: the state carries
+    no completion time, so a screen restored after a power cut would otherwise be dated "now".
+    Needed a new `TransactionRepository.getTransaction(id)` + DAO query. Falls back to screen state
+    if the row is missing, which is possible because `saveTransaction` is best-effort.
+  - `buildReceiptText` is a pure function with an injectable zone, so the exact characters a
+    customer receives are asserted in tests rather than eyeballed.
 - [x] **10. Verify `KeystorePumpCredentialsStore` crypto** (instrumented test) — **merge gate CLOSED
   2026-07-08.** `app/src/androidTest/.../data/network/KeystorePumpCredentialsStoreTest.kt` (first
   androidTest in the project; commit `91fa772`) — covers not-activated, save→current round-trip,

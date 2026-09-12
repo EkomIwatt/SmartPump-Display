@@ -28,22 +28,23 @@ work sorted by a different question: **who is holding it up, and what can move t
 
 The highest value per hour on the whole project, because none of it waits on a reply.
 
-- [ ] **Release builds cannot be signed.** `app/build.gradle.kts` has **no `signingConfig` at all**,
-  and `release` still carries the scaffold's `versionCode = 1` / `versionName = "1.0"`. A release
-  APK today is unsigned and cannot be installed on a station tablet. Tracked as **#34** — it was on
-  no list anywhere until now, which is the dangerous part.
-- [ ] **Receipt sharing does nothing.** `CustomerViewModel.onShareReceipt()` is an empty function
-  with a comment promising Phase 7; the button is live on the completion screen. The decision was
-  already made (**OQ #14, resolved** — Android system share sheet), so this is implementation, not a
-  question. Tracked as **#35**. Part of sub-phase 7f.
+- [~] **Release signing — build side done 2026-09-12, keystore still owed by a human.** The signing
+  config, the gitignored credentials file, the version scheme and `docs/RELEASE.md` are in. What is
+  left is not code: create the keystore, fill in `keystore.properties`, and **back it up off the
+  laptop** — losing it ends the app's upgrade path. **#34**.
+- [x] **Receipt sharing — done 2026-09-12.** Plain-text receipt through the Android system share
+  sheet, built from the saved audit row so a screen restored after a power cut is not dated "now".
+  **#35**.
 - [ ] **7h bench gate** — eight-step checklist, Arduino + tablet, ~1 h. Closes a live under-billing
   bug (**OQ #25**). **#27**.
 - [ ] **7g firmware gate** — worse than merely pending: `hardware/*.ino` on `main` is the **pre-7g**
   sketch while the docs beside it describe the post-7g one, so anyone flashing from `main` gets
   firmware predating four defect fixes. **#19** / `BRANCH_7G_SUMMARY.md`.
-- [ ] **Third `Missing` case.** No K-factor means no cutoff can be computed, so the guard should
-  refuse the sale exactly as it does for a missing price or fuel type. It does not. **#21**,
-  **OQ #23a**. Small, and rides on the 7b guard already built.
+- [·] **Third `Missing` case — NOT movable, corrected 2026-09-12.** Listed here first as small and
+  unblocked; it is neither. `PULSES_PER_LITRE` is a **compile-time constant** in
+  `MeterCalibration.kt`, not a field on `DeviceConfig`, so there is no absent state for a guard to
+  detect — the guard can only exist once the sealed value arrives from the adapter (**OQ #23**).
+  Moves to section 3. **#21**, **OQ #23a**.
 
 ## 2. Blocked on measurement — gates live money
 
@@ -110,10 +111,14 @@ Listed so they are not rediscovered as surprises.
 
 Sorted by value per hour, given that section 4 is waiting on a reply either way.
 
-1. **Release signing (#34).** Nothing else matters if the artefact cannot be installed.
+1. ~~**Release signing (#34).**~~ Build side landed 2026-09-12; the keystore itself is yours to
+   create and back up (`docs/RELEASE.md`).
 2. **The two bench gates (#27, #19).** Both need only the rig, and #19 removes a live trap on `main`.
 3. **Chase Kelvin for the meter output type and voltage (#22)** — it is the long pole in front of the
    K-factor, which is in front of the parallel run, which is in front of live money.
-4. **Receipt sharing (#35)** and the **third `Missing` case (#21)** — small, decided, self-contained.
+4. ~~**Receipt sharing (#35)**~~ — done 2026-09-12. (**#21**, the third `Missing` case, turned out
+   **not** to be movable: the K-factor is a compile-time constant, not a configurable field, so
+   there is no absent state for a guard to detect. It waits on **OQ #23**, the sealed value arriving
+   from the adapter.)
 5. **Send Olonade the three protocol questions** as one message.
 6. **Decide OQ #17 and OQ #22** — both unblock code that is already written.
