@@ -164,6 +164,9 @@ class FakePulseRepository : PulseRepository {
     val savedPulseCounts = mutableListOf<Pair<Int, Long>>()
     val savedAnchors = mutableListOf<Long?>()
 
+    /** Count-and-anchor pairs committed by boot resume, in order. */
+    val reconciledWrites = mutableListOf<Pair<Int, Long>>()
+
     override suspend fun saveTransactionState(state: TransactionState, transactionRef: String?) {
         savedStates += state to transactionRef
     }
@@ -172,6 +175,16 @@ class FakePulseRepository : PulseRepository {
         savedPulseCounts += count to lastPulseTimeMs
         savedAnchors += adapterCount
     }
+    /**
+     * Mirrors the real store: the reconciled write lands in the same single row the next restart
+     * reads back, so a test can restart twice and the second resume sees what the first committed.
+     */
+    override suspend fun saveReconciledCount(count: Int, adapterCount: Long) {
+        reconciledWrites += count to adapterCount
+        pulsesToRestore = count
+        anchorToRestore = adapterCount
+    }
+
     override suspend fun restorePulseCount(): Int = pulsesToRestore
     override suspend fun restoreAdapterAnchor(): Long? = anchorToRestore
     override suspend fun getActiveTransactionRef(): String? = activeRef

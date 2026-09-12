@@ -187,7 +187,7 @@ class CustomerViewModel @Inject constructor(
     private suspend fun bootResume() {
         val restored = pulseRepository.restoreTransactionState()
         val persistedPulses = pulseRepository.restorePulseCount()
-        val restoredPulses = persistedPulses + reconcileGapOnResume(restored)
+        val restoredPulses = persistedPulses + reconcileGapOnResume(restored, persistedPulses)
         when (restored) {
             is TransactionState.Idle,
             is TransactionState.ModeSelect,
@@ -307,7 +307,7 @@ class CustomerViewModel @Inject constructor(
      *
      * Everything unattributable is recorded rather than discarded. See OPEN_QUESTIONS #25.
      */
-    private suspend fun reconcileGapOnResume(restored: TransactionState): Int {
+    private suspend fun reconcileGapOnResume(restored: TransactionState, persistedPulses: Int): Int {
         val dispensing = restored is TransactionState.FixedDispensing ||
             restored is TransactionState.CashFixedDispensing ||
             restored is TransactionState.FillupDispensing
@@ -326,6 +326,18 @@ class CustomerViewModel @Inject constructor(
 
             is ReconcilePulseGapUseCase.Result.Recovered -> {
                 recoveredLitres = gap.pulses / PULSES_PER_LITRE
+                // Commit the corrected count and re-anchor to the reading it was measured from,
+                // BEFORE the event is written and before dispensing restarts. Until this lands,
+                // the recovered pulses exist only in memory and the stored anchor still points at
+                // the last checkpoint, so a second death inside the next 25 pulses would recover
+                // this same fuel again and log a second, overlapping row. adapterCountNow is
+                // non-null here: Recovered is unreachable when it is not.
+                runCatching {
+                    pulseRepository.saveReconciledCount(
+                        count = persistedPulses + gap.pulses,
+                        adapterCount = adapterCountNow!!,
+                    )
+                }
                 runCatching {
                     events.record(
                         type = EventType.PULSE_GAP_RECOVERED,

@@ -223,4 +223,63 @@ class CustomerViewModelPulseGapResumeTest {
         assertEquals(EventType.PULSE_GAP_UNEXPLAINED, logged.type)
         assertEquals(150, logged.pulses)
     }
+
+    // ---- two restarts inside one dispense (found on the bench, 2026-09-12) ----------------
+
+    /**
+     * The defect the merge-gate bench run turned up. Restart once, recover 1.5 L, then die again
+     * before the dispensing loop's next 25-pulse checkpoint. The recovered pulses were still only
+     * in memory and the stored anchor still pointed at the old checkpoint, so the second resume
+     * measured from it and re-reported the *same* fuel: two log rows of 1.5 and 2.9 that overlap,
+     * where the truth is 1.5 then 1.4.
+     *
+     * The sale's total was never wrong — count and anchor are read as a pair — so this is about
+     * the operator-facing record of what went missing, which is the whole reason the card exists.
+     */
+    @Test
+    fun `a second restart before the next checkpoint recovers only its own outage`() {
+        seedInterruptedPrepay(litresSeen = 4.0)
+        harness.pulseRepo.anchorToRestore = 41_000L
+        harness.pulseSource.setAdapterCount(41_150L) // outage 1: +1.5 L
+        harness.build()
+
+        // No pulses since: the second death lands inside the 25-pulse persist window.
+        harness.pulseSource.setAdapterCount(41_290L) // outage 2: a further +1.4 L
+        val vm = harness.build()
+
+        val recoveries = harness.events.recorded.filter { it.type == EventType.PULSE_GAP_RECOVERED }
+        assertEquals(2, recoveries.size)
+        assertEquals(150, recoveries[0].pulses)
+        assertEquals("the second row must not re-report the first outage", 140, recoveries[1].pulses)
+        // Disjoint, so summing the card gives what actually went missing.
+        assertEquals(290, recoveries.sumOf { it.pulses!! })
+
+        val resumed = state(vm) as TransactionState.FixedDispensing
+        assertEquals(6.9, resumed.litresSoFar, 0.0001)
+    }
+
+    /** The write-back is what makes the row above disjoint, so assert it directly. */
+    @Test
+    fun `resume commits the corrected count and re-anchors to the reading it used`() {
+        seedInterruptedPrepay(litresSeen = 4.0)
+        harness.pulseRepo.anchorToRestore = 41_000L
+        harness.pulseSource.setAdapterCount(41_150L)
+
+        harness.build()
+
+        assertEquals(listOf(550 to 41_150L), harness.pulseRepo.reconciledWrites)
+    }
+
+    /** Nothing was attributed, so nothing may be committed — the anchor must stay put. */
+    @Test
+    fun `an unexplained gap writes no new anchor`() {
+        seedInterruptedPrepay(litresSeen = 4.0)
+        harness.pulseRepo.anchorToRestore = 41_000L
+        harness.pulseSource.setAdapterCount(null) // adapter silent
+
+        harness.build()
+
+        assertTrue(harness.pulseRepo.reconciledWrites.isEmpty())
+        assertEquals(41_000L, harness.pulseRepo.anchorToRestore)
+    }
 }
