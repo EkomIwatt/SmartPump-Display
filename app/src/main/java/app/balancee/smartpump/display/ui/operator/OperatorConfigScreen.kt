@@ -43,6 +43,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
+import app.balancee.smartpump.display.ui.activation.ActivationPanel
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.LabelText
@@ -194,6 +195,12 @@ fun OperatorConfigScreen(
             onClick = vm::onSave,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        // The second home of the activation panel, and for most pumps the only reachable one: a
+        // unit installed before its code was issued has long since finished onboarding, and a
+        // debug build never shows onboarding at all. Behind the attendant PIN, like everything
+        // else on this screen. It saves through its own repository, so it ignores "Save settings".
+        ActivationPanel()
         Spacer(Modifier.height(Dimensions.sectionSpacing))
     }
 }

@@ -18,6 +18,15 @@ interface PumpActivationRepository {
     val isActivated: Boolean
 
     /**
+     * The backend's id for this pump, or null before activation. Cheap — no network.
+     *
+     * Exposed because it is the one identifier a support call turns on: it is what the station's
+     * records key against, and an operator screen that can only say "activated" cannot tell anyone
+     * *as what*. Never carries the apiKey or the signingSecret.
+     */
+    val pumpId: String?
+
+    /**
      * Redeem [activationCode] and persist the credentials it returns.
      *
      * Never throws: every failure is an [ActivationOutcome] the caller can act on, because the

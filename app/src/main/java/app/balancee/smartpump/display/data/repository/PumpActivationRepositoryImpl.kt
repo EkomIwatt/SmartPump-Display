@@ -24,6 +24,8 @@ class PumpActivationRepositoryImpl @Inject constructor(
 
     override val isActivated: Boolean get() = store.isActivated
 
+    override val pumpId: String? get() = store.current()?.pumpId
+
     override suspend fun activate(activationCode: String): ActivationOutcome {
         if (store.isActivated) return ActivationOutcome.AlreadyActivated
 
