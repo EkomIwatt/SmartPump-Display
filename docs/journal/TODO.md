@@ -7,6 +7,10 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 _Last updated: 2026-09-12 (Phase 9: first real requests to the dev backend)_
 
+> **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
+> blocker rather than by phase — useful for "what can move today". It points back here; it does not
+> restate detail, so this file stays the source of truth for work items.
+
 ---
 
 ## ✅ `feature/phase-7a-hardening` — MERGED to `main`
@@ -357,6 +361,19 @@ sold.
 
 ## Now — unblocked, high value
 
+- [ ] **34. 🔴 Release builds cannot be signed.** `app/build.gradle.kts` has **no `signingConfig`
+  at all**, and `release` still carries the scaffold's `versionCode = 1` / `versionName = "1.0"`.
+  A release APK today is **unsigned and cannot be installed** on a station tablet. Surfaced
+  2026-09-12 while inventorying V1 blockers; it had been on no list anywhere, which is the part that
+  matters. Needs: a keystore, a `signingConfigs` block reading credentials from somewhere that is
+  **not** committed (`local.properties` or env), `release` wired to it, and a real version scheme.
+  **Do this before R8** (see the deferred minify item) — signing first, shrinking second, so a
+  broken release can only have one cause at a time.
+- [ ] **35. Receipt sharing is a no-op stub.** `CustomerViewModel.onShareReceipt()` (~line 971) is an
+  empty function whose comment promises Phase 7, while the Share button is **live** on the
+  completion screen — a customer taps it and gets silence. The decision is already made
+  (**OQ #14, resolved**: the Android system share sheet, no bespoke print-to-cashier channel), so
+  this is implementation, not a question. Part of sub-phase 7f.
 - [x] **10. Verify `KeystorePumpCredentialsStore` crypto** (instrumented test) — **merge gate CLOSED
   2026-07-08.** `app/src/androidTest/.../data/network/KeystorePumpCredentialsStoreTest.kt` (first
   androidTest in the project; commit `91fa772`) — covers not-activated, save→current round-trip,
