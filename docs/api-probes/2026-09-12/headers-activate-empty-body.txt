@@ -1,0 +1,11 @@
+HTTP/1.1 400 Bad Request
+Cache-Control: public, max-age=0, must-revalidate
+Content-Type: application/json
+Date: Sat, 12 Sep 2026 11:21:36 GMT
+Server: Vercel
+Strict-Transport-Security: max-age=63072000
+X-Matched-Path: /api/pump/activate
+X-Vercel-Cache: MISS
+X-Vercel-Id: cpt1::iad1::q5l5z-1789212096513-4ec7c970f311
+Transfer-Encoding: chunked
+
