@@ -144,8 +144,12 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
     HTML 404 (what an undeployed route actually returns), a plain-text 502 and a 4xx whose envelope
     claims success all stay `ApiError.Http` with the bytes intact — a deployment mistake must not
     read as the server declining a sale. Retryability unchanged.
-  - **STILL OPEN — the mapping half.** Turning those messages into attendant-facing copy is blocked
-    on copy that does not exist: no error screen in `docs/Strict design screens/`, OQ #17 open.
+  - **The mapping half is UNBLOCKED — OQ #17 settled 2026-09-12.** The copy now exists
+    ([`ERROR_COPY_DRAFT.md`](ERROR_COPY_DRAFT.md), Catalogue A), the customer/attendant split is
+    decided and built for local errors, and the attendant surface is the swipe-up panel. What is
+    left is wiring, and it **waits on #8**: nothing receives an `ApiError` and sets
+    `TransactionState.Error` until the payment feature flows exist, so building the mapping now
+    would carry text nothing reads.
   - **The Reference's full error catalogue is now extracted** (2026-09-01, same Flate/ToUnicode
     decode as #11 — the audit had only sampled it): global codes 400 / 401 / 404, eight literal 401
     auth messages, and per-endpoint tables for §4.2 and §4.3. §1 states the failure envelope

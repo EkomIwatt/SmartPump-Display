@@ -119,9 +119,13 @@ prerequisite *of the run*, which is why it is deferred rather than dropped.
 
 Both are quietly holding up built code.
 
-- [ ] **OQ #17 — error recovery copy.** No error screen exists in `docs/Strict design screens/`.
-  This blocks the **mapping half of #14** (the parsing half landed 2026-09-12) and the
-  attendant-facing half of **#15**.
+- [x] **OQ #17 — error recovery copy — SETTLED 2026-09-12** (`c2c62f9`, `16d4495`). Customer gets
+  one plain line, diagnostic detail goes to the **swipe-up attendant panel**, and a retryable
+  failure now looks different from a terminal one. Copy in
+  [`ERROR_COPY_DRAFT.md`](ERROR_COPY_DRAFT.md). Still flagged: **no error screen exists in
+  `docs/Strict design screens/`**, so the layout is a deviation on record.
+  - It no longer blocks **#14**'s mapping half or **#15**'s attendant half — both now wait only on
+    **#8**, since nothing receives an `ApiError` until the payment flows exist.
 - [ ] **OQ #22 — "safe-but-stuck".** A permanent mid-dispense link loss on the fixed / pre-pay /
   cash-fixed flows leaves the screen at the last litre count **indefinitely**. Fuel is physically
   off, so it is safe rather than dangerous, but it clears only on a power cycle or attendant action.
@@ -149,7 +153,8 @@ Sorted by value per hour, given that section 4 is waiting on a reply either way.
 2. **Chase Kelvin for the meter output type and voltage (#22)** — it is the long pole in front of the
    K-factor, which is in front of the parallel run, which is in front of live money.
 3. **Send Olonade the three protocol questions** as one message.
-4. **Decide OQ #17 and OQ #22** — both unblock code that is already written.
+4. **Decide OQ #22** — the last of the two decisions that were holding up written code. ~~OQ #17~~
+   settled 2026-09-12.
 5. **Ask the boss about the signing key** — does Balancee already have one, and who holds it. A
    question, not a task; it only needs answering before the parallel run.
 6. **Release signing, last (#34).** By decision, 2026-09-12. The build side is already done; what

@@ -3,11 +3,10 @@
 _Drafted 2026-09-12 so OQ #17 could be settled by reviewing concrete words rather than by answering
 an abstract question._
 
-**Approved 2026-09-12 — items 1 and 2.** "See attendant" is accepted as the customer's universal
-fallback, and with it the principle it rests on: the customer gets one plain line, the diagnostic
-detail goes behind the PIN. **Item 5 is done** (`c2c62f9`) — the local messages that contradicted
-the principle had live call sites and are fixed. **Items 3 and 4 remain**, and item 3 is what blocks
-showing an attendant anything at all.
+**OQ #17 is settled — all five items, 2026-09-12.** The principle and the "see attendant" fallback
+were approved; the diagnostic half goes to the **swipe-up attendant panel**; a retryable failure now
+looks different from a terminal one; and the local messages that contradicted any of it are fixed.
+Built across `c2c62f9` and `16d4495`. **Catalogue B is live. Catalogue A is not — see below.**
 
 **Catalogue A is not wired and cannot be yet**: no code path receives an `ApiError` and sets
 `TransactionState.Error`, because the payment feature flows (**TODO #8**) do not exist. The mapping
@@ -105,12 +104,15 @@ swallowed.
 2. ~~**"see attendant" as the customer's universal fallback.**~~ — **APPROVED 2026-09-12.** It
    repeats a lot, and that is deliberate: it is always the true next step. Still worth showing the
    boss, since customer-facing wording is ultimately brand.
-3. **Where the attendant detail is shown.** Candidates: the existing attendant swipe-up panel, the
-   operator settings screen, or a new line on the error card visible only after PIN entry. No
-   design exists for any of them.
-4. **Whether `recoverable` should change the card.** It is carried on every error and read by
-   nothing. Making a non-recoverable error look different is the sort of thing a design screen would
-   normally settle.
+3. ~~**Where the attendant detail is shown.**~~ — **DECIDED 2026-09-12: the swipe-up attendant
+   panel**, and built (`16d4495`). It is already behind the PIN, it is what an attendant opens when
+   a customer waves them over, and the Pump settings button that fixes most of these sits in the
+   same chrome row. Rendered as a flat full-width banner, not a card, so the three action cards stay
+   the only tappable-looking things.
+4. ~~**Whether `recoverable` should change the card.**~~ — **DECIDED 2026-09-12: yes**, and built
+   (`16d4495`). Gold for retryable, red for terminal, reusing the colour vocabulary the app already
+   has. The button's *action* is unchanged in both cases: there is no retry in the state machine and
+   adding one would be behaviour, not copy.
 5. ~~**The two-wordings fix**~~ — **DONE 2026-09-12** (`c2c62f9`), along with the below-minimum
    message, since both had live call sites and both contradicted the approved principle. The
    below-minimum figure comes back once item 3 gives it somewhere to live.
