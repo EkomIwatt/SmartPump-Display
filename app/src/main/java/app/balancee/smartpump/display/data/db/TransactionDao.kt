@@ -14,6 +14,9 @@ interface TransactionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(transaction: TransactionEntity)
 
+    @Query("SELECT * FROM transactions WHERE id = :id")
+    suspend fun getById(id: String): TransactionEntity?
+
     @Query("SELECT * FROM transactions ORDER BY createdAt DESC LIMIT :limit")
     fun getRecent(limit: Int): Flow<List<TransactionEntity>>
 

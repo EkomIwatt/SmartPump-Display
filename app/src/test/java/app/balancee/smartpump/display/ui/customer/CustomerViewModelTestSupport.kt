@@ -156,6 +156,7 @@ class FakePulseRepository : PulseRepository {
 class FakeTransactionRepository : TransactionRepository {
     val saved = mutableListOf<Transaction>()
     override suspend fun saveTransaction(transaction: Transaction) { saved += transaction }
+    override suspend fun getTransaction(id: String): Transaction? = saved.lastOrNull { it.id == id }
     override fun getRecentTransactions(limit: Int): Flow<List<Transaction>> = MutableStateFlow(saved.toList())
     override suspend fun getPendingSync(): List<Transaction> = saved.toList()
 

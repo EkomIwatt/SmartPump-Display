@@ -21,6 +21,9 @@ class TransactionRepositoryImpl @Inject constructor(
     override suspend fun saveTransaction(transaction: Transaction) =
         dao.insert(transaction.toEntity())
 
+    override suspend fun getTransaction(id: String): Transaction? =
+        dao.getById(id)?.toDomain()
+
     override fun getRecentTransactions(limit: Int): Flow<List<Transaction>> =
         dao.getRecent(limit).map { list -> list.map { it.toDomain() } }
 
