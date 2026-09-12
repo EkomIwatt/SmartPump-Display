@@ -371,12 +371,22 @@ sold.
   - **Absent credentials leave release UNSIGNED rather than failing configuration** — a fresh clone,
     a CI lint run and every debug build must work without the station's private key. The build logs
     a loud warning instead, and `docs/RELEASE.md` makes `apksigner verify` a required step.
-  - **Still owed by a human:** create the keystore (`keytool` command in `docs/RELEASE.md`), fill in
-    `keystore.properties`, and **back the file up off this laptop** — losing it ends the app's
-    upgrade path, because a field tablet will refuse an APK signed by a different key and
-    reinstalling wipes local history *and* the activation identity.
+  - **The keystore itself is DEFERRED TO LAST — decided 2026-09-12.** It is not on the critical
+    path: signing is a prerequisite of the **parallel run**, which waits on the K-factor, which
+    waits on Kelvin. And key **custody is the boss's decision** (who holds it, where the backup
+    lives, whether it survives people moving on) — with a prior question worth asking, namely
+    whether **Balancee already has an Android signing key**, since generating a second would be
+    wrong. Creating a key is *not* irreversible: it only binds once a build signed with it is
+    installed on a tablet expected to receive updates.
+  - When it happens: `keytool` command in `docs/RELEASE.md`, fill in `keystore.properties`, and
+    **back the file up off the laptop** — losing it ends the app's upgrade path, because a field
+    tablet will refuse an APK signed by a different key and reinstalling wipes local history *and*
+    the activation identity.
   - **Do R8 after this, not before** (see the deferred minify item), so a broken release build can
     only have one cause at a time.
+  - ⚠️ **A debug build cannot stand in for the parallel run** — it seeds its own price, exposes the
+    debug hotspot, points at the dev backend, and installs under a different application id. Full
+    reasoning in [`V1_BLOCKERS.md`](V1_BLOCKERS.md).
 - [x] **35. Receipt sharing — DONE 2026-09-12.** Was a no-op: `CustomerViewModel.onShareReceipt()`
   was an empty function while the Share button was **live** on the completion screen, so a customer
   tapped it and got silence. Now builds a plain-text receipt and sends it to the Android system

@@ -28,10 +28,19 @@ work sorted by a different question: **who is holding it up, and what can move t
 
 The highest value per hour on the whole project, because none of it waits on a reply.
 
-- [~] **Release signing — build side done 2026-09-12, keystore still owed by a human.** The signing
-  config, the gitignored credentials file, the version scheme and `docs/RELEASE.md` are in. What is
-  left is not code: create the keystore, fill in `keystore.properties`, and **back it up off the
-  laptop** — losing it ends the app's upgrade path. **#34**.
+- [·] **Release signing — build side done 2026-09-12; the keystore itself is DEFERRED TO LAST by
+  decision (2026-09-12).** The signing config, the gitignored credentials file, the version scheme
+  and `docs/RELEASE.md` are in, so the pipeline is ready whenever the key is. **#34**.
+  - **Why last:** it is not on the critical path. Signing is a prerequisite of the **parallel run**,
+    which cannot start until the K-factor is measured, which waits on Kelvin. Nothing this week
+    needs it.
+  - **Why not sooner:** key **custody is the boss's call**, not an engineering one — who holds the
+    key and its password, where the backup lives, and whether it survives people moving on. Worth
+    asking first whether **Balancee already has an Android signing key**; generating a second one
+    would be the wrong move.
+  - Generating a key is **not** irreversible the way the activation code is. It only binds once a
+    build signed with it is installed on a tablet expected to receive updates. A disposable local
+    key can prove the pipeline any time.
 - [x] **Receipt sharing — done 2026-09-12.** Plain-text receipt through the Android system share
   sheet, built from the saved audit row so a screen restored after a power cut is not dated "now".
   **#35**.
@@ -45,6 +54,31 @@ The highest value per hour on the whole project, because none of it waits on a r
   `MeterCalibration.kt`, not a field on `DeviceConfig`, so there is no absent state for a guard to
   detect — the guard can only exist once the sealed value arrives from the adapter (**OQ #23**).
   Moves to section 3. **#21**, **OQ #23a**.
+
+### A debug build cannot stand in for the parallel run
+
+Recorded 2026-09-12, because it looks like it should work and it does not. Debug builds are right
+for development and for both bench gates; they are wrong for the fourteen-day run, for four reasons
+that are all in the code today.
+
+- **It configures itself.** `seedDefaultConfigIfMissing()` runs whenever `BuildConfig.DEBUG` is
+  true — which includes `debugRealHw`, since it is `initWith(debug)` and therefore debuggable — and
+  silently writes a placeholder price, station name, fuel type and virtual account. That seed was
+  made debug-only in 7b **precisely** because a release install doing it meant the price guard
+  could never fire. A run that exists to prove litres match stock records must not happen on a
+  build that invents its own price.
+- **The debug hotspot is live.** A long press top-left opens live price editing and payment
+  force-resolve (`MainActivity`, gated on `BuildConfig.DEBUG`). Correct on a bench, an unlocked till
+  on a forecourt for two weeks.
+- **It points at the dev backend.** `debug`/`debugRealHw` use `api.dev.balancee.app`; only `release`
+  uses production.
+- **It is a different app.** `debugRealHw` carries the `.realhw` application-id suffix, so whatever
+  history the run accumulates lives in an app that is later discarded — along with that install's
+  activation identity.
+
+**Consequence:** the parallel run needs a production-shaped build (no self-seeding, no hotspot, right
+backend), and such a build cannot be installed at all unless it is signed. Signing is therefore a
+prerequisite *of the run*, which is why it is deferred rather than dropped.
 
 ## 2. Blocked on measurement — gates live money
 
@@ -111,14 +145,17 @@ Listed so they are not rediscovered as surprises.
 
 Sorted by value per hour, given that section 4 is waiting on a reply either way.
 
-1. ~~**Release signing (#34).**~~ Build side landed 2026-09-12; the keystore itself is yours to
-   create and back up (`docs/RELEASE.md`).
-2. **The two bench gates (#27, #19).** Both need only the rig, and #19 removes a live trap on `main`.
-3. **Chase Kelvin for the meter output type and voltage (#22)** — it is the long pole in front of the
+1. **The two bench gates (#27, #19).** Both need only the rig, and #19 removes a live trap on `main`.
+2. **Chase Kelvin for the meter output type and voltage (#22)** — it is the long pole in front of the
    K-factor, which is in front of the parallel run, which is in front of live money.
-4. ~~**Receipt sharing (#35)**~~ — done 2026-09-12. (**#21**, the third `Missing` case, turned out
-   **not** to be movable: the K-factor is a compile-time constant, not a configurable field, so
-   there is no absent state for a guard to detect. It waits on **OQ #23**, the sealed value arriving
-   from the adapter.)
-5. **Send Olonade the three protocol questions** as one message.
-6. **Decide OQ #17 and OQ #22** — both unblock code that is already written.
+3. **Send Olonade the three protocol questions** as one message.
+4. **Decide OQ #17 and OQ #22** — both unblock code that is already written.
+5. **Ask the boss about the signing key** — does Balancee already have one, and who holds it. A
+   question, not a task; it only needs answering before the parallel run.
+6. **Release signing, last (#34).** By decision, 2026-09-12. The build side is already done; what
+   remains is the key itself, and it is not needed until there is a production-shaped build to
+   install.
+
+Done and off this list: **receipt sharing (#35)**, 2026-09-12. **#21**, the third `Missing` case,
+turned out **not** to be movable and has gone to section 3 — the K-factor is a compile-time
+constant, not a configurable field, so there is no absent state for a guard to detect.
