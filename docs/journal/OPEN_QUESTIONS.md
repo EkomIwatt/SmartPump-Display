@@ -165,6 +165,23 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
 
     **Scope.** The flows with a cutoff known before fuel moves: **Flow 1 (Fixed Pre-pay Digital)** and **Flow 4 (Cash Fixed Amount)**. The open-ended fill-ups — **Flow 2 (Fill-up Cash)** and **Flow 3 (Fill-up Digital)** — have no target to cut at and keep the current nozzle-idle shutoff; the ceiling suggested above would be a runaway backstop for them, not a cutoff. **Decision needed from Olonade:** is the relay-open frame allowed to grow a payload (it is app→device, so it does not touch the device→app framing that 7a bench-verified), and is a firmware-owned cutoff acceptable under NIS 348 given the adapter is specified read-only on the *pulse* path — the relay is a separate output, but "the board decides when to stop selling" is a metrology-adjacent claim worth confirming rather than assuming. Relates to #2 (shutoff timeout), #23 and #24.
 
+    **Bench evidence, 2026-09-13 (Phase 7h merge gate, step 8).** The latency budget above is the
+    *small* half of this question, and the gate measured the large one. When the app **dies**
+    mid-dispense there is no round trip at all: the only thing left is the firmware's comms-loss
+    watchdog, which by design keeps the relay closed for `HEARTBEAT_TIMEOUT_MS` = 3 s. At the bench
+    rate (50 pps, 100 pulses/L = 30 L/min) that is **~1.5 L per app death**, and a real forecourt
+    pump runs faster, so it hands over more. On the ₦2,000 pre-pay used for step 8 — about 2.3 L
+    paid for — the overshoot was **more than half the sale again**. The app behaved correctly
+    throughout: the relay did not reopen on resume and the sale completed recording more litres
+    than were charged. There is simply nothing in the current design that can stop fuel while the
+    app is dead, because the cutoff is the app's decision to make.
+    - So the case for `RLY:1:<pulses>` is no longer only about milliseconds of latency. It is the
+      only mechanism that bounds an **app crash** mid-sale, which is the failure Phase 7h exists
+      because of.
+    - Partial mitigation while this is open: **TODO #38**, shortening the watchdog from 3 s to 2 s.
+      The app PINGs at 1 Hz, so that is still two missed pings of tolerance, and it halves the
+      give-away. It is a mitigation, not a fix — 1 L given away instead of 1.5 L.
+
 ## Payment integration
 
 *(#5 webhook signing and #6 station virtual account are resolved — see Resolved. Numbers left as gaps; they're stable identifiers.)*
