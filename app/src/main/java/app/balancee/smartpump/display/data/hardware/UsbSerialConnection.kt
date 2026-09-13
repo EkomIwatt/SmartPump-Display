@@ -27,6 +27,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import app.balancee.smartpump.display.data.hardware.serial.SerialFrame
+import app.balancee.smartpump.display.domain.hardware.pulseTrace
 import app.balancee.smartpump.display.data.hardware.serial.SerialFrameParser
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
@@ -220,6 +221,14 @@ class UsbSerialConnection @Inject constructor(
                 is SerialFrame.Error, is SerialFrame.Invalid -> null
             }
             if (count != null) _adapterCount.value = count
+            // TEMPORARY BENCH TRACE — remove before merge. Keep-alives and boots only: PULSE
+            // arrives ~33 times a second during a dispense and would drown the log. The idle
+            // keep-alive is the one that answers "is the counter moving with the relay shut?".
+            when (frame) {
+                is SerialFrame.Heartbeat -> pulseTrace { "HB cumulative=${frame.cumulative}" }
+                is SerialFrame.Boot -> pulseTrace { "BOOT cumulative=${frame.cumulative}" }
+                else -> Unit
+            }
         }
 
         override fun onRunError(e: Exception) {

@@ -5,6 +5,7 @@ package app.balancee.smartpump.display.data.repository
 import app.balancee.smartpump.display.data.db.PulseStateDao
 import app.balancee.smartpump.display.data.db.entities.PulseStateEntity
 import app.balancee.smartpump.display.domain.model.TransactionState
+import app.balancee.smartpump.display.domain.hardware.pulseTrace
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -45,6 +46,9 @@ class PulseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun savePulseCount(count: Int, lastPulseTimeMs: Long, adapterCount: Long?) {
+        // TEMPORARY BENCH TRACE — remove before merge. Shows the checkpoint cadence, and whether
+        // the count and the anchor written together actually describe the same instant.
+        pulseTrace { "checkpoint: count=$count anchor=$adapterCount" }
         val existing = dao.get()
         dao.save(
             PulseStateEntity(
@@ -60,6 +64,8 @@ class PulseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun saveReconciledCount(count: Int, adapterCount: Long) {
+        // TEMPORARY BENCH TRACE — remove before merge.
+        pulseTrace { "committed on resume: count=$count anchor=$adapterCount" }
         val existing = dao.get()
         dao.save(
             PulseStateEntity(

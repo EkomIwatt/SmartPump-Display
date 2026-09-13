@@ -43,6 +43,7 @@ import androidx.lifecycle.viewModelScope
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
+import app.balancee.smartpump.display.domain.hardware.pulseTrace
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.EventType
@@ -318,8 +319,16 @@ class CustomerViewModel @Inject constructor(
         // both the adapter wait and a meaningless "no anchor" event on every single launch.
         if (anchor == null && !dispensing) return 0
 
+        val waitStartedMs = System.currentTimeMillis()
         val adapterCountNow = pulseSource.awaitAdapterCount(ADAPTER_COUNT_TIMEOUT_MS)
         val ref = pulseRepository.getActiveTransactionRef()
+
+        // TEMPORARY BENCH TRACE — remove before merge. See PULSE_TRACE.
+        pulseTrace {
+            "resume: persisted=$persistedPulses anchor=$anchor now=$adapterCountNow " +
+                "delta=${if (anchor != null && adapterCountNow != null) adapterCountNow - anchor else null} " +
+                "dispensing=$dispensing waitedMs=${System.currentTimeMillis() - waitStartedMs}"
+        }
 
         return when (val gap = reconcilePulseGap(anchor, adapterCountNow, dispensing)) {
             is ReconcilePulseGapUseCase.Result.NoGap -> 0
