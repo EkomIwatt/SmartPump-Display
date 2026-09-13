@@ -43,7 +43,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,7 +54,6 @@ import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.SelectableTile
-import app.balancee.smartpump.display.ui.theme.ActiveCyan
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
@@ -255,25 +253,6 @@ private fun FuelLogSection(entries: List<OperationalEvent>) {
 
 @Composable
 private fun FuelLogRow(entry: OperationalEvent) {
-    // TEMPORARY BENCH TRACE — remove before merge. A trace row carries no litres, only the
-    // reconciliation's operands, so it is rendered as the raw line rather than as an amount.
-    if (entry.type == EventType.TRACE) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = formatLogTimestamp(entry.createdAtMs),
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary,
-            )
-            Text(
-                text = entry.detail.orEmpty(),
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = ActiveCyan,
-            )
-        }
-        return
-    }
-
     val unexplained = entry.type == EventType.PULSE_GAP_UNEXPLAINED
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(

@@ -18,7 +18,6 @@ package app.balancee.smartpump.display.data.hardware
 import android.util.Log
 import app.balancee.smartpump.display.data.hardware.serial.SerialFrameParser
 import app.balancee.smartpump.display.domain.hardware.RelayController
-import app.balancee.smartpump.display.domain.hardware.pulseTrace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,9 +59,6 @@ class UsbSerialRelayController @Inject constructor(
         if (_isDispensing.value) return
         connection.ensureStarted()
         val ok = writeRelay(on = true)
-        // TEMPORARY BENCH TRACE — remove before merge. Brackets the window in which fuel can
-        // physically move, so a recovered gap can be checked against it.
-        pulseTrace { "relay ON (ok=$ok) adapterCount=${connection.adapterCount.value}" }
         if (ok) {
             _isDispensing.value = true
             Log.i(TAG, "RELAY ON — fuel flowing")
@@ -77,8 +73,6 @@ class UsbSerialRelayController @Inject constructor(
         val wasDispensing = _isDispensing.value
         _isDispensing.value = false
         val ok = writeRelay(on = false)
-        // TEMPORARY BENCH TRACE — remove before merge.
-        pulseTrace { "relay OFF (ok=$ok, wasDispensing=$wasDispensing) adapterCount=${connection.adapterCount.value}" }
         if (wasDispensing) {
             Log.i(TAG, if (ok) "RELAY OFF — fuel stopped" else "RELAY OFF write failed (link down)")
         }

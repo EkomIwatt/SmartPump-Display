@@ -18,13 +18,4 @@ enum class EventType {
      * the station has lost them. Needs a human.
      */
     PULSE_GAP_UNEXPLAINED,
-
-    /**
-     * TEMPORARY BENCH INSTRUMENTATION — remove with PulseTrace.kt before the 7h merge.
-     *
-     * Carries the reconciliation's own operands to a screen, because the bench tablet's adb link
-     * is too unstable to stream a log through and the trace has to survive on the device until
-     * someone can read it. Nothing operational depends on these rows.
-     */
-    TRACE,
 }

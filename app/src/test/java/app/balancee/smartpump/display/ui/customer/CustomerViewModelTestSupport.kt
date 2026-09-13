@@ -208,10 +208,6 @@ class FakeEventRepository : EventRepository {
         transactionRef: String?,
         detail: String?,
     ) {
-        // TEMPORARY BENCH TRACE — remove with PulseTrace.kt. Trace rows are dropped here so the
-        // assertions in these tests keep describing operational events only. They are diagnostic
-        // output on a bench build, not behaviour anything should be pinned to.
-        if (type == EventType.TRACE) return
         recorded += Recorded(type, pulses, transactionRef, detail)
     }
 
