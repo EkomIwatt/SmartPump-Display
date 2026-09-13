@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-07 (7g docs/app split merged; firmware half held)_
+_Last updated: 2026-09-13 (Phase 7h bench gate PASSED; three findings logged)_
 
 ---
 
@@ -240,11 +240,12 @@ sold.
   - `CAL` frame for the sealed K-factor (**OQ #23**) — protocol change, must land before the
     adapter firmware is written.
   - Whether `max()` gets a session mark (**OQ #24**), since the literal rule is not implementable.
-- [ ] **20. Recovery correctness — do first, independent of the board (OQ #25).** Pulses counted
-  while the tablet is down are silently absorbed into a new baseline
-  (`PulseAccumulator.kt:43-47`). **This is live on `main` today**, needs no EEPROM to fix, and is
-  the behaviour the spec's recovery rule exists to prevent. Decide: onto the live transaction, or
-  into a reconciliation log. Wants VM tests (Phase 8 harness exists).
+- [x] **20. Recovery correctness — BUILT 2026-09-11 as Phase 7h (OQ #25).** Was: pulses counted
+  while the tablet is down were silently absorbed into a new baseline. Now measured against a
+  persisted anchor and either put on the live sale or logged with a reason. **Still live on `main`**
+  — the fix is on `feature/phase-7h-pulse-continuity`, unmerged, gated on the bench run below.
+  See the 7h section further down.
+
 - [ ] **21. `CanStartTransactionUseCase` third `Missing` case** — no K-factor = no cutoff = refuse
   the sale, exactly as for price and fuel type (**OQ #23a**). Small; rides on the 7b guard already
   built.
@@ -286,6 +287,93 @@ sold.
   needs a custom `ProbeTable`.
 
 **Not blocked:** #20 and #21 can proceed now. #19 gates the firmware half.
+
+## 🟢 Phase 7h — pulse continuity across restarts (BUILT, gate PASSED 2026-09-13, ready to merge)
+
+Branch `feature/phase-7h-pulse-continuity`, five commits, off `main` at `3aea28c`. Closes the live
+under-billing in OQ #25. **Needed nothing from Olonade, the backend, the boss or the meter** — the
+adapter already broadcasts its cumulative in the ~2 s `HB` keep-alive, so the count is readable
+while idle with no protocol change.
+
+| step | commit | what |
+|---|---|---|
+| 1 | `66fd353` | schema **v4** — `pulse_state.adapterCount`, `transactions.recoveredLitres`, new `events` table + migration |
+| 2 | `30872d3` | `PulseSource.adapterCount` / `awaitAdapterCount()`; anchor written on every persist |
+| 3 | `d9da72f` | `ReconcilePulseGapUseCase` — pure classification, 16 tests |
+| 4 | `d60483f` | boot resume applies it; `EventRepository`; the over-target safety branch |
+| 5 | `51f0ce0` | "Fuel log" card on the operator screen, behind the attendant PIN |
+
+**Verified:** JVM **165 tests / 21 classes** green (125 → 162 at build, → 165 with the gate fix);
+**16 instrumented green on the SM-T220** (12 → 16, the 4 new migration tests incl. a chained
+v2→v4); `compileDebugKotlin`, `compileDebugRealHwKotlin`, `lintDebug` clean. Six commits now: the
+original five, plus `15dee70` from the bench gate.
+
+- [x] **27. MERGE GATE — bench run with the Arduino. PASSED 2026-09-13**, all eight steps, on an
+  Arduino Uno with the sketch from `main` and no flow meter (`ENABLE_AUTO_PULSE` supplies the
+  pulses, ~50 pps = 30 L/min at the placeholder K). The recovery path has now met a real board.
+  - **Steps 3, 4, 5, 7 passed.** A resumed sale shows more litres than it did at the kill, by the
+    fuel that moved while the app was blind; `recoveredLitres` lands on the sale; an unplugged
+    adapter logs "did not respond" and adds nothing; the Fuel log card renders.
+  - **Step 8 passed.** Killed two seconds into a ₦2,000 pre-pay, the relay did **not** reopen on
+    resume and the sale completed recording more litres than were charged. See **#37** — the
+    *size* of that overshoot is the finding, not the behaviour.
+  - **Step 6 passed, three times.** The board was reset mid-sale and the app refused to attribute
+    anything, said so in red, and **kept its own count** rather than adopting the post-boot zero
+    (e.g. the board fell 5805 → 0 and the app carried on from 0.51 L). The count regressed by
+    0.01 / 0.09 / 0.12 L across the three, all inside the quarter-litre the 25-pulse save interval
+    allows.
+  - **A defect was found and fixed during the gate** (`15dee70`): boot resume added the recovered
+    pulses to memory and left the database alone, so a second restart inside the next 25 pulses
+    re-reported the same fuel. Two fuel-log rows that overlapped instead of two that added up. The
+    sale's arithmetic was never wrong — count and anchor are read as a pair — but the operator's
+    record of what went missing was. Three tests, two of which fail without the fix.
+  - **How it was diagnosed:** a temporary trace (`53fa746`, `ec9399c`, reverted in `3631b38`)
+    printed the reconciliation's own operands. It had to render **on screen**, not to logcat,
+    because the tablet's USB-C port cannot be an adb link and an Arduino host at once and the
+    wireless link would not hold for more than a few seconds. Revert `3631b38` to get it back.
+  - **Bench-rig note for whoever repeats this:** the meter input (pin 2) is a bare `INPUT_PULLUP`
+    with nothing attached, and a floating pin counts noise as pulses. Tie it to 5 V for any run
+    where the synthetic generator is the pulse source. Untied, gaps ranged 1.11–4.48 L; tied, the
+    spread closed to 1.09–3.07 L and a kill from idle recorded **nothing**. This is the same bare
+    pullup **#22** already says must not survive into production.
+
+- [ ] **28. `MAX_PLAUSIBLE_GAP_PULSES = 400` needs a THIRD term, not just re-deriving.** Still true
+  that it must be recomputed once the real pulses-per-litre is known (OQ #1) — but the 2026-09-13
+  bench run showed the derivation is also **structurally short**. It assumes the anchor is at most
+  `PULSE_PERSIST_EVERY_N` (25) pulses stale. The anchor is written every 25 pulses **as processed by
+  the app's collector**, and on the SM-T220 that collector falls behind the board: measured gaps
+  reached **307 pulses** where the three-second watchdog window alone allows ~150. So the real
+  staleness is bounded by collector lag, not by the save interval, and 400 is tight enough to refuse
+  genuine fuel — a **4.48 L gap was rejected on the bench and was almost certainly real**. Rejecting
+  under-bills, so it fails safe, but the station absorbs it. Add a lag term when recomputing.
+- [ ] **29. The `events` table has no backend home.** Nothing on the server accepts these rows.
+  **A fifth ask for #18**, currently not on that list. The upload job (7e) can carry them once an
+  endpoint exists.
+- [ ] **36. The app loses ~20 pulses per restart.** New, and only visible once the trace was on
+  screen. Tracking the offset between the board's count and the app's transaction count across one
+  sale with three restarts: 2389 → 2391 → 2414 → 2436 → 2456, so the app ends each cycle ~22 pulses
+  (~0.22 L) behind the board, 67 across the run. It **under**-counts, so the customer is never
+  overcharged and the station absorbs it — the same direction as OQ #25's original defect, two
+  orders of magnitude smaller. Suspected cause: the pulses between the resume's adapter reading and
+  the collector attaching, which `PulseAccumulator` swallows in its uninitialised branch. Not fixed:
+  it is small, it fails safe, and it wants its own change with its own test.
+- [ ] **37. The receipt COMPUTES price/litre instead of carrying it.** `CustomerStateHost`'s
+  `priceKoboPerLitreFromState` prints `round(amountKobo / litres)`, so the "Price / L" line moves
+  whenever litres and money come apart — which pulse-gap recovery and the step-8 overshoot now make
+  routine. After the gate's ₦2,000 overshoot the receipt understated the unit price by nearly half:
+  **it states a price the station has never charged, and it reads cheapest exactly when the customer
+  got fuel for free.** The right number already exists — `Transaction.priceKoboPerLitre` is on the
+  audit row — but `TransactionState.Complete` does not carry it, which is why the screen resorts to
+  arithmetic. Fix by carrying the price through to the screen.
+  - **Check when merging forward:** receipt *sharing* (**#35**, on the Phase 9 line) builds its text
+    from the saved audit row. If so, the shared receipt and the on-screen one disagree about the
+    same sale, which is worse than either being wrong alone.
+  - Found during the 7h gate, but **not a 7h defect** — recovery only made it visible. Fix
+    separately.
+- [ ] **38. Shorten the firmware watchdog from 3 s to 2 s?** The app PINGs at 1 Hz, so three seconds
+  is three missed pings; two would still tolerate a hiccup and would **halve** the give-away
+  measured in step 8. One-line firmware change, so it belongs with **#19**'s firmware work rather
+  than on its own. Not a substitute for **OQ #26** — see there.
 
 ## Now — unblocked, high value
 

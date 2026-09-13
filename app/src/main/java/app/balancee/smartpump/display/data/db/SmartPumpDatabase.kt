@@ -1,11 +1,13 @@
 // Room database — single instance provided by Hilt.
-// Four tables: transactions (audit log), device_config (operator settings),
-// pulse_state (recovery), station_identity (install-time identity + PIN, Phase 5c).
+// Five tables: transactions (audit log), device_config (operator settings),
+// pulse_state (recovery), station_identity (install-time identity + PIN, Phase 5c),
+// events (operational log — pulse-gap reconciliation, Phase 7h).
 package app.balancee.smartpump.display.data.db
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import app.balancee.smartpump.display.data.db.entities.DeviceConfigEntity
+import app.balancee.smartpump.display.data.db.entities.EventEntity
 import app.balancee.smartpump.display.data.db.entities.PulseStateEntity
 import app.balancee.smartpump.display.data.db.entities.StationIdentityEntity
 import app.balancee.smartpump.display.data.db.entities.TransactionEntity
@@ -16,8 +18,9 @@ import app.balancee.smartpump.display.data.db.entities.TransactionEntity
         DeviceConfigEntity::class,
         PulseStateEntity::class,
         StationIdentityEntity::class,
+        EventEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class SmartPumpDatabase : RoomDatabase() {
@@ -25,4 +28,5 @@ abstract class SmartPumpDatabase : RoomDatabase() {
     abstract fun deviceConfigDao(): DeviceConfigDao
     abstract fun pulseStateDao(): PulseStateDao
     abstract fun stationIdentityDao(): StationIdentityDao
+    abstract fun eventDao(): EventDao
 }

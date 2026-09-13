@@ -1,20 +1,23 @@
-// Hilt module — provides Room DB, all three DAOs, and binds all three repository implementations.
+// Hilt module — provides Room DB, every DAO, and binds the repository implementations.
 package app.balancee.smartpump.display.di
 
 import android.content.Context
 import androidx.room.Room
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.data.db.DeviceConfigDao
+import app.balancee.smartpump.display.data.db.EventDao
 import app.balancee.smartpump.display.data.db.PulseStateDao
 import app.balancee.smartpump.display.data.db.SmartPumpDatabase
 import app.balancee.smartpump.display.data.db.SmartPumpMigrations
 import app.balancee.smartpump.display.data.db.StationIdentityDao
 import app.balancee.smartpump.display.data.db.TransactionDao
 import app.balancee.smartpump.display.data.repository.DeviceConfigRepositoryImpl
+import app.balancee.smartpump.display.data.repository.EventRepositoryImpl
 import app.balancee.smartpump.display.data.repository.PulseRepositoryImpl
 import app.balancee.smartpump.display.data.repository.StationIdentityRepositoryImpl
 import app.balancee.smartpump.display.data.repository.TransactionRepositoryImpl
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
+import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.StationIdentityRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
@@ -55,6 +58,9 @@ object DatabaseModule {
     @Provides
     fun provideStationIdentityDao(db: SmartPumpDatabase): StationIdentityDao =
         db.stationIdentityDao()
+
+    @Provides
+    fun provideEventDao(db: SmartPumpDatabase): EventDao = db.eventDao()
 }
 
 @Module
@@ -72,4 +78,7 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindStationIdentityRepository(impl: StationIdentityRepositoryImpl): StationIdentityRepository
+
+    @Binds @Singleton
+    abstract fun bindEventRepository(impl: EventRepositoryImpl): EventRepository
 }

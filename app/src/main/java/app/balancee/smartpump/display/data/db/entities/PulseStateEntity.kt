@@ -16,5 +16,18 @@ data class PulseStateEntity(
     val pulseCount: Int,
     /** Epoch millis of the last received pulse — used for 3 s nozzle-shutoff detection. */
     val lastPulseTimeMs: Long,
+    /**
+     * The adapter's own FREE-RUNNING count at the moment this row was written — the anchor the
+     * Phase 7h reconciler subtracts from to learn how much fuel moved while the app was down
+     * (OPEN_QUESTIONS #25). Distinct from [pulseCount], which is scoped to the transaction and
+     * restarts at zero on every relay-open.
+     *
+     * NULLABLE on purpose, and NULL is not zero. Zero is a legitimate adapter reading (a freshly
+     * booted board), so a non-null default would make every pre-7h row claim an anchor of zero and
+     * invite the reconciler to attribute the adapter's entire lifetime count as one giant gap.
+     * NULL means "no anchor was recorded", which the reconciler refuses to guess from — the same
+     * reasoning that made device_config.fuelType nullable at v3.
+     */
+    val adapterCount: Long?,
     val updatedAt: Long,
 )

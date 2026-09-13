@@ -6,6 +6,11 @@
 // operator/settings screen was ever drawn. Built from design-system.md tokens and the existing
 // components so it reads as part of the same product rather than a bolted-on form.
 //
+// Phase 7h added the fuel log at the bottom: fuel the adapter counted while the app was not
+// running. It lives here rather than behind its own navigation because it is read by the same
+// person, in the same visit, behind the same PIN — and inventing a second untethered screen for a
+// list of at most a few rows buys nothing.
+//
 // Two deliberate choices about being unhelpful:
 //  - Fields start BLANK on an unconfigured pump rather than pre-filled with a plausible price. A
 //    filled-looking field does not ask to be read, and the failure it invites (accepting a demo
@@ -41,7 +46,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.FuelType
+import app.balancee.smartpump.display.domain.model.OperationalEvent
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeCard
@@ -57,6 +64,9 @@ import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.WarningRed
 import app.balancee.smartpump.display.ui.util.formatNaira
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun OperatorConfigScreen(
@@ -65,6 +75,7 @@ fun OperatorConfigScreen(
     vm: OperatorConfigViewModel = hiltViewModel(),
 ) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val fuelLog by vm.fuelLog.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
@@ -194,9 +205,95 @@ fun OperatorConfigScreen(
             onClick = vm::onSave,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        FuelLogSection(entries = fuelLog)
+
         Spacer(Modifier.height(Dimensions.sectionSpacing))
     }
 }
+
+/**
+ * Fuel the adapter counted while the app was not running (Phase 7h, OPEN_QUESTIONS #25).
+ *
+ * The empty state is worth as much as the populated one: "nothing unaccounted for" is the answer
+ * an operator is usually looking for, and a section that vanishes when empty cannot give it.
+ *
+ * Litres are shown from the K-factor stamped on each row at write time, not today's, so a figure
+ * here does not quietly change value when calibration corrects that constant.
+ */
+@Composable
+private fun FuelLogSection(entries: List<OperationalEvent>) {
+    val unexplained = entries.count { it.type == EventType.PULSE_GAP_UNEXPLAINED }
+
+    BalanceeCard(borderColor = if (unexplained > 0) WarningRed else BorderSubtle) {
+        LabelText(text = "Fuel log")
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Fuel measured by the pump adapter while this screen was off or restarting.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        if (entries.isEmpty()) {
+            Text(
+                text = "Nothing unaccounted for.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = SuccessGreen,
+            )
+            return@BalanceeCard
+        }
+
+        entries.forEachIndexed { index, entry ->
+            if (index > 0) Spacer(Modifier.height(Dimensions.itemSpacing))
+            FuelLogRow(entry)
+        }
+    }
+}
+
+@Composable
+private fun FuelLogRow(entry: OperationalEvent) {
+    val unexplained = entry.type == EventType.PULSE_GAP_UNEXPLAINED
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                // An unknown amount is a worse finding than a number, not a smaller one, so it is
+                // spelled out rather than shown as a dash the eye slides over.
+                text = entry.litres?.let { "%.2f L".format(it) } ?: "Amount unknown",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (unexplained) WarningRed else TextPrimary,
+            )
+            Text(
+                text = formatLogTimestamp(entry.createdAtMs),
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+            )
+        }
+        entry.detail?.let {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+            )
+        }
+        entry.transactionRef?.let {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "Sale $it",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+            )
+        }
+    }
+}
+
+private fun formatLogTimestamp(millis: Long): String =
+    SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(millis))
 
 @Composable
 private fun StatusBanner(

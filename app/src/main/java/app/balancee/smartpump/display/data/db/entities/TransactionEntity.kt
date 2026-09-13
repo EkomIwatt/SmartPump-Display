@@ -17,4 +17,15 @@ data class TransactionEntity(
     val attendantNote: String?,
     val createdAt: Long,
     val syncedAt: Long?,
+    /**
+     * Litres added to this sale by Phase 7h pulse-gap recovery — fuel the adapter counted while
+     * the app was not watching. Almost always 0.0. Non-zero means litresDispensed contains a
+     * figure the app did not observe pulse-by-pulse, which is what makes the sale explain itself
+     * when its litre count is later compared against the dispenser's own totaliser.
+     *
+     * NOT NULL with a 0.0 default, unlike pulse_state.adapterCount: for a row written before 7h
+     * existed, "no recovery was applied" is simply true, so zero is the honest value rather than
+     * a guess.
+     */
+    val recoveredLitres: Double = 0.0,
 )

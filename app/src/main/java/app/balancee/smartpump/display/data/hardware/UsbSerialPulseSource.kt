@@ -14,7 +14,11 @@ import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.PulseMessage
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,6 +28,22 @@ class UsbSerialPulseSource @Inject constructor(
     private val connection: UsbSerialConnection,
     private val relay: RelayController,
 ) : PulseSource {
+
+    /**
+     * Delegated straight to the connection, which tracks it in the always-running read loop.
+     * Deliberately NOT tracked in [observe]: that flow is cold and only collected during a
+     * dispense, whereas the count is most needed when nothing is dispensing at all.
+     */
+    override val adapterCount: StateFlow<Long?> = connection.adapterCount
+
+    override suspend fun awaitAdapterCount(timeoutMs: Long): Long? {
+        connection.ensureStarted()
+        // The adapter volunteers its count in the ~2 s keep-alive, so this normally returns well
+        // inside the timeout. It can still time out for honest reasons — no board attached, USB
+        // permission not yet granted, a dead cable — and null then means "unknown", which the
+        // caller must not round down to zero.
+        return withTimeoutOrNull(timeoutMs) { adapterCount.filterNotNull().first() }
+    }
 
     override fun observe(): Flow<PulseMessage> = channelFlow {
         connection.ensureStarted()

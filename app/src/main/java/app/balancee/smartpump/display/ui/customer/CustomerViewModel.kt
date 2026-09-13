@@ -45,6 +45,7 @@ import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentResult
@@ -56,9 +57,11 @@ import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
+import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
+import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
 import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -83,8 +86,24 @@ private const val FILLUP_WATCHDOG_POLL_MS = 500L
  * kiosk. NOTE the resulting resolution is in *pulses*, so the litre precision it buys
  * moves with PULSES_PER_LITRE — at the current placeholder 100 pulses/L it is one write
  * per 0.25L (~25 writes for a full 10L pre-pay); a higher K-factor makes it finer.
+ *
+ * ALSO a term in ReconcilePulseGapUseCase.MAX_PLAUSIBLE_GAP_PULSES: the anchor written here is
+ * stale by up to this many pulses before anything goes wrong, so the gap ceiling includes it.
+ * Change one and change the other.
  */
 private const val PULSE_PERSIST_EVERY_N = 25
+
+/**
+ * How long boot resume waits for the adapter to volunteer its free-running count before giving up
+ * and treating it as unknown.
+ *
+ * The board sends that count in its ~2 s HB keep-alive, so the answer normally arrives well inside
+ * this; the allowance is for the link still coming up (enumeration, a USB permission grant). It is
+ * deliberately short because the relay is held closed for the whole wait and, on a resumed
+ * dispense, a customer is standing at the pump watching nothing happen. Timing out costs a logged
+ * "adapter silent" event, not a wrong number.
+ */
+private const val ADAPTER_COUNT_TIMEOUT_MS = 3_000L
 
 /** Wraps the canonical [TransactionState] with view-only fields the host screens read. */
 data class CustomerUiState(
@@ -99,9 +118,11 @@ data class CustomerUiState(
 class CustomerViewModel @Inject constructor(
     private val canStartTransaction: CanStartTransactionUseCase,
     private val deviceConfigRepository: DeviceConfigRepository,
+    private val events: EventRepository,
     private val paymentProcessor: PaymentProcessor,
     private val pulseSource: PulseSource,
     private val pulseRepository: PulseRepository,
+    private val reconcilePulseGap: ReconcilePulseGapUseCase,
     private val relay: RelayController,
     private val transactions: TransactionRepository,
 ) : ViewModel() {
@@ -122,6 +143,14 @@ class CustomerViewModel @Inject constructor(
      * Zero on a fresh dispense; non-zero only on power-cut resume.
      */
     private var pulseBaseline: Int = 0
+
+    /**
+     * Litres folded into [pulseBaseline] by pulse-gap recovery on the last boot resume — fuel the
+     * adapter counted while this app was not running. Carried from resume all the way to the audit
+     * row so a sale whose litre count jumped can say why; zero for every transaction that was not
+     * resumed. Cleared wherever [pulseBaseline] is.
+     */
+    private var recoveredLitres: Double = 0.0
 
     /**
      * CONFLATED state-write channel — only the latest pending state survives queuing, so
@@ -157,7 +186,8 @@ class CustomerViewModel @Inject constructor(
 
     private suspend fun bootResume() {
         val restored = pulseRepository.restoreTransactionState()
-        val restoredPulses = pulseRepository.restorePulseCount()
+        val persistedPulses = pulseRepository.restorePulseCount()
+        val restoredPulses = persistedPulses + reconcileGapOnResume(restored, persistedPulses)
         when (restored) {
             is TransactionState.Idle,
             is TransactionState.ModeSelect,
@@ -216,37 +246,181 @@ class CustomerViewModel @Inject constructor(
 
             is TransactionState.FixedDispensing -> {
                 pulseBaseline = restoredPulses
-                setState(restored)
                 val method = restored.method ?: deriveMethodForFlow(restored.flow)
-                startDispensing(restored.litresAuthorised, method)
+                if (targetAlreadyMet(restored.litresAuthorised)) {
+                    completeAndRecord(
+                        TransactionState.Complete(
+                            flow = restored.flow,
+                            txnId = restored.txnId,
+                            litres = litresFromBaseline(),
+                            amountKobo = restored.amountKobo,
+                            method = method,
+                        )
+                    )
+                } else {
+                    setState(restored.copy(litresSoFar = resumedLitres(restored.litresSoFar)))
+                    startDispensing(restored.litresAuthorised, method)
+                }
             }
 
             is TransactionState.CashFixedDispensing -> {
                 pulseBaseline = restoredPulses
-                setState(restored)
-                startCashFixedDispensing(
-                    litresCutoff = restored.litresCutoff,
-                    cashAmountKobo = restored.cashAmountKobo,
-                    txnId = restored.txnId,
-                )
+                if (targetAlreadyMet(restored.litresCutoff)) {
+                    completeAndRecord(
+                        TransactionState.Complete(
+                            flow = TransactionFlow.CASH_FIXED,
+                            txnId = restored.txnId,
+                            litres = litresFromBaseline(),
+                            amountKobo = restored.cashAmountKobo,
+                            method = null,
+                        )
+                    )
+                } else {
+                    setState(restored.copy(litresSoFar = resumedLitres(restored.litresSoFar)))
+                    startCashFixedDispensing(
+                        litresCutoff = restored.litresCutoff,
+                        cashAmountKobo = restored.cashAmountKobo,
+                        txnId = restored.txnId,
+                    )
+                }
             }
 
             is TransactionState.FillupDispensing -> {
                 pulseBaseline = restoredPulses
-                setState(restored)
+                // No target to overshoot on an open-ended fill-up, so there is no completion
+                // branch here — recovery only ever corrects the running figure.
+                setState(restored.copy(litresSoFar = resumedLitres(restored.litresSoFar)))
                 startFillupDispensing(restored.txnId)
             }
         }
+    }
+
+    /**
+     * Phase 7h — work out how much fuel the adapter counted while this app was not running, and
+     * return the pulses that may be added to the resumed transaction (0 when none may be).
+     *
+     * Runs BEFORE the restored state is dispatched, so the dispensing collector starts from the
+     * true figure rather than correcting itself afterwards. The cost is that a resumed screen can
+     * be up to ADAPTER_COUNT_TIMEOUT_MS late; the alternative — dispatch first, adjust after — has
+     * the collector briefly counting against a baseline it is about to be told is wrong, which is
+     * the class of bug this phase exists to remove.
+     *
+     * Everything unattributable is recorded rather than discarded. See OPEN_QUESTIONS #25.
+     */
+    private suspend fun reconcileGapOnResume(restored: TransactionState, persistedPulses: Int): Int {
+        val dispensing = restored is TransactionState.FixedDispensing ||
+            restored is TransactionState.CashFixedDispensing ||
+            restored is TransactionState.FillupDispensing
+
+        val anchor = pulseRepository.restoreAdapterAnchor()
+        // Ordinary cold start: no sale was in flight and no anchor was left behind, so there is
+        // nothing that could have been missed. Skipping here also keeps every idle boot free of
+        // both the adapter wait and a meaningless "no anchor" event on every single launch.
+        if (anchor == null && !dispensing) return 0
+
+        val adapterCountNow = pulseSource.awaitAdapterCount(ADAPTER_COUNT_TIMEOUT_MS)
+        val ref = pulseRepository.getActiveTransactionRef()
+
+        return when (val gap = reconcilePulseGap(anchor, adapterCountNow, dispensing)) {
+            is ReconcilePulseGapUseCase.Result.NoGap -> 0
+
+            is ReconcilePulseGapUseCase.Result.Recovered -> {
+                recoveredLitres = gap.pulses / PULSES_PER_LITRE
+                // Commit the corrected count and re-anchor to the reading it was measured from,
+                // BEFORE the event is written and before dispensing restarts. Until this lands,
+                // the recovered pulses exist only in memory and the stored anchor still points at
+                // the last checkpoint, so a second death inside the next 25 pulses would recover
+                // this same fuel again and log a second, overlapping row. adapterCountNow is
+                // non-null here: Recovered is unreachable when it is not.
+                runCatching {
+                    pulseRepository.saveReconciledCount(
+                        count = persistedPulses + gap.pulses,
+                        adapterCount = adapterCountNow!!,
+                    )
+                }
+                runCatching {
+                    events.record(
+                        type = EventType.PULSE_GAP_RECOVERED,
+                        pulses = gap.pulses,
+                        transactionRef = ref,
+                        detail = "Added to the transaction in flight on resume.",
+                    )
+                }
+                gap.pulses
+            }
+
+            is ReconcilePulseGapUseCase.Result.Unexplained -> {
+                runCatching {
+                    events.record(
+                        type = EventType.PULSE_GAP_UNEXPLAINED,
+                        pulses = gap.pulses,
+                        transactionRef = ref,
+                        detail = unexplainedDetail(gap.reason),
+                    )
+                }
+                0
+            }
+        }
+    }
+
+    private fun litresFromBaseline(): Double = pulseBaseline / PULSES_PER_LITRE
+
+    /**
+     * The litre figure a resumed dispensing screen should show.
+     *
+     * Only overrides [persisted] when recovery actually added pulses, and the asymmetry is
+     * deliberate. The two sources are stale in opposite ways: the persisted STATE carries
+     * litresSoFar from the last conflated write, so it is fresh; the persisted pulse COUNT is only
+     * written every PULSE_PERSIST_EVERY_N pulses, so it lags. Normally the state is the better
+     * number and is left alone. But the anchor is written in the same breath as the count, so a
+     * recovered gap spans exactly that lag as well as the outage — which makes the baseline the
+     * authoritative figure precisely when there is something to recover, and never smaller than
+     * the one it replaces.
+     */
+    private fun resumedLitres(persisted: Double): Double =
+        if (recoveredLitres > 0.0) litresFromBaseline() else persisted
+
+    /**
+     * True when the fuel already delivered meets or exceeds what the customer paid for — only
+     * reachable once recovery has folded a gap into the baseline, since the live collector stops
+     * at the target itself.
+     *
+     * The relay must NOT reopen in that case. State-machine invariant #4 ("never dispense more
+     * than was paid") does not stop applying because the extra fuel left the pump while the app
+     * was blind; reopening would pour a second helping on top of one already delivered. The sale
+     * completes recording what ACTUALLY flowed, which can exceed what was charged — the audit row
+     * carries litres and amount independently, and recoveredLitres says how the two came apart.
+     * The station absorbs the difference, as it does for every other under-count in this path.
+     */
+    private fun targetAlreadyMet(targetLitres: Double): Boolean =
+        recoveredLitres > 0.0 && litresFromBaseline() >= targetLitres
+
+    /** Plain-language reason for the operator view. Deliberately says what to do about it. */
+    private fun unexplainedDetail(reason: ReconcilePulseGapUseCase.Reason): String = when (reason) {
+        ReconcilePulseGapUseCase.Reason.ADAPTER_SILENT ->
+            "The pulse adapter did not respond, so fuel delivered during the outage cannot be measured. Check the cable."
+        ReconcilePulseGapUseCase.Reason.NO_ANCHOR ->
+            "No reference reading was stored before the outage, so the amount cannot be worked out."
+        ReconcilePulseGapUseCase.Reason.ADAPTER_RESTARTED ->
+            "The pulse adapter lost power too and its counter restarted, so the amount is unrecoverable."
+        ReconcilePulseGapUseCase.Reason.IMPLAUSIBLE_SIZE ->
+            "More fuel was counted than one interrupted sale could explain. Not charged to a customer."
+        ReconcilePulseGapUseCase.Reason.NO_TRANSACTION ->
+            "Fuel was counted with no sale in progress."
     }
 
     private fun resetToIdle(clearPulses: Boolean) {
         setState(TransactionState.Idle)
         if (clearPulses) {
             viewModelScope.launch {
-                runCatching { pulseRepository.savePulseCount(0, 0L) }
+                // Null anchor is deliberate: with no transaction in flight there is nothing to
+                // anchor, and a stale one would let the next start invent a gap out of fuel that
+                // was never part of a sale.
+                runCatching { pulseRepository.savePulseCount(0, 0L, null) }
             }
         }
         pulseBaseline = 0
+        recoveredLitres = 0.0
     }
 
     private fun deriveMethodForFlow(flow: TransactionFlow): PaymentMethod? = when (flow) {
@@ -378,6 +552,7 @@ class CustomerViewModel @Inject constructor(
                     val txnId = generateCashTxnId()
                     cancelInFlightJobs()
                     pulseBaseline = 0
+                    recoveredLitres = 0.0
                     setState(
                         TransactionState.FillupDispensing(
                             txnId = txnId,
@@ -421,7 +596,12 @@ class CustomerViewModel @Inject constructor(
                     if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                         lastPersistAtPulses = cumulativePulses
                         runCatching {
-                            pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                            // Anchor the adapter's own free-running count to this write. A restart then
+                            // measures the gap as (count now - count then); null here means the link was
+                            // down, which reads as "unknown" rather than zero.
+                            pulseRepository.savePulseCount(
+                                cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                            )
                         }
                     }
                 }
@@ -647,6 +827,7 @@ class CustomerViewModel @Inject constructor(
             }
             cancelInFlightJobs()
             pulseBaseline = 0
+            recoveredLitres = 0.0
             val txnId = generateCashTxnId()
             setState(
                 TransactionState.CashFixedDispensing(
@@ -695,7 +876,12 @@ class CustomerViewModel @Inject constructor(
                             if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                                 lastPersistAtPulses = cumulativePulses
                                 runCatching {
-                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                                    // Anchor the adapter's own free-running count to this write. A restart then
+                                    // measures the gap as (count now - count then); null here means the link was
+                                    // down, which reads as "unknown" rather than zero.
+                                    pulseRepository.savePulseCount(
+                                        cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                                    )
                                 }
                             }
                         }
@@ -755,6 +941,7 @@ class CustomerViewModel @Inject constructor(
         val litresAuthorised = deviceConfig()?.litresCutoff(amountKobo)
             ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
         pulseBaseline = 0
+        recoveredLitres = 0.0
         setState(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.USSD_OFFLINE,
@@ -862,6 +1049,7 @@ class CustomerViewModel @Inject constructor(
             ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
 
         pulseBaseline = 0
+        recoveredLitres = 0.0
         setState(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
@@ -933,7 +1121,12 @@ class CustomerViewModel @Inject constructor(
                             if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
                                 lastPersistAtPulses = cumulativePulses
                                 runCatching {
-                                    pulseRepository.savePulseCount(cumulativePulses, msg.timestampMs)
+                                    // Anchor the adapter's own free-running count to this write. A restart then
+                                    // measures the gap as (count now - count then); null here means the link was
+                                    // down, which reads as "unknown" rather than zero.
+                                    pulseRepository.savePulseCount(
+                                        cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                                    )
                                 }
                             }
                         }
@@ -1005,6 +1198,7 @@ class CustomerViewModel @Inject constructor(
             transactionRef = txnId,
             attendantId = attendantId,
             attendantNote = null,
+            recoveredLitres = recoveredLitres,
         )
 
     private fun cancelInFlightJobs() {

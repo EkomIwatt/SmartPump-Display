@@ -10,6 +10,7 @@ package app.balancee.smartpump.display.ui.operator
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
+import app.balancee.smartpump.display.ui.customer.FakeEventRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.ui.customer.MainDispatcherRule
 import kotlinx.coroutines.flow.Flow
@@ -34,7 +35,7 @@ class OperatorConfigViewModelTest {
     }
 
     private fun vmFor(repo: FakeRepo) =
-        OperatorConfigViewModel(repo, CanStartTransactionUseCase(repo))
+        OperatorConfigViewModel(repo, CanStartTransactionUseCase(repo), FakeEventRepository())
 
     // ---- first run on an unconfigured pump -----------------------------------------
 

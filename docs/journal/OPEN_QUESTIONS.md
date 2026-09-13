@@ -35,7 +35,7 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
 - **#22** Pre-pay mid-dispense disconnect — safe-but-stuck UI recovery gap
 - **#23** CAL frame — how the sealed K-factor reaches the app · **protocol**
 - **#24** Session mark — `max()` compares a lifetime count against a per-transaction one · **protocol**
-- **#25** Lost pulses on tablet restart — fuel delivered, billed to nobody
+- **#25** Lost pulses on tablet restart — **decided + built (7h)**; adapter-down half still open
 - **#26** Firmware-owned cutoff — the fixed-dispense stop is a USB round trip · **protocol**
 
 **Payment integration** — 7-8
@@ -110,7 +110,44 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
     > size a lifetime totaliser to. Consequence for **OQ-03/#24 stands unchanged**: no per-dispense
     > scoping exists anywhere, so the session mark must be added to the protocol.
 
-25. **Lost pulses on tablet restart — counted by the adapter, discarded by the app; live on `main` today.** Independent of any EEPROM work, and the sharper half of #24. In the production topology the adapter is **UPS-powered and the tablet may not be**, so the adapter can outlive a tablet restart. If the tablet dies mid-dispense the firmware watchdog closes the relay after `HEARTBEAT_TIMEOUT_MS` (3 s) — but fuel flows for those 3 s and the adapter counts it. Because the *adapter* never rebooted it sends no `BOOT`, so on the tablet's return `PulseAccumulator.onPulse` hits its uninitialised branch (`PulseAccumulator.kt:43-47`), adopts the running count as a baseline and contributes **0** — roughly 1.5 L at the placeholder K-factor, delivered to the customer and billed to nobody. A second, smaller leak exists on every recovery path: the app persists only every `PULSE_PERSIST_EVERY_N = 25` pulses, so up to 24 pulses before any cut are never written. Both always under-count, so the station absorbs the loss rather than the customer. **Decision needed:** do these pulses land on the live transaction, or in a reconciliation log? They must land somewhere explicit — absorbing them into a new baseline is the current behaviour and is what the spec's recovery rule exists to prevent.
+25. **Lost pulses on tablet restart — DECIDED and BUILT 2026-09-11 (Phase 7h); one half remains open.**
+    Originally: the adapter counts fuel while the app is down and the app discarded it, so litres
+    reached a customer and were billed to nobody. The sharper half of #24, and it needed no EEPROM.
+
+    **The decision: onto the live transaction where it can be proved, into a log where it cannot.**
+    Not either/or — the log is the fallback, not the alternative. A refund was considered and is the
+    wrong instrument here: the app always UNDER-counts, so the customer is ahead and the station
+    absorbs the loss. (Refund belongs to #22, the interrupted pre-pay, and to #7.)
+
+    **What shipped** (branch `feature/phase-7h-pulse-continuity`, unmerged):
+    - The enabler was already on the wire — the adapter puts its cumulative in the **~2 s `HB`
+      keep-alive**, not only in `PULSE`. `SerialFrameParser` has read it since 7a;
+      `UsbSerialPulseSource` threw it away. So the count is readable **while idle, without opening
+      the relay and with no protocol change** — nothing here needed Olonade.
+    - `pulse_state.adapterCount` at **schema v4** anchors every pulse-count write; a restart
+      measures the gap as (count now − anchor). Nullable, and **null is never zero** — zero is a
+      real reading from a board that just booted.
+    - `ReconcilePulseGapUseCase` (pure) attributes, or refuses with one of four reasons: adapter
+      silent, no anchor, counter went backwards (**the board restarted too**), or the gap is larger
+      than one sale’s blind window. Ceiling is **in pulses, not litres**, since litres run through
+      the unmeasured K-factor (#1).
+    - The same subtraction also recovers the **up-to-24 pulses lost between persists**, the second
+      leak this item described.
+    - Unattributable gaps land in a new **`events`** table, surfaced on the operator screen behind
+      the attendant PIN.
+    - **Safety:** if recovery reveals the customer already had more than they paid for, the relay
+      does **not** reopen — invariant #4 does not stop applying because the fuel left the pump while
+      the app was blind. The sale records what actually flowed; amount stays what was paid.
+
+    **STILL OPEN — the adapter-down case.** When the board loses power too its counter restarts and
+    the evidence is gone; 7h reports this honestly as unexplained rather than guessing. Closing it
+    needs the **EEPROM totaliser (7g, firmware written, never flashed, held off `main`)**, and the
+    reconciler’s refusal branch is the seam it plugs into. Also note the UPS does **not** make this
+    rare: the dominant trigger is the app dying with mains perfectly healthy (crash, low-memory
+    kill, OS update reboot) — which is exactly the hazard the firmware watchdog was built for — and
+    `HW-D-02`’s ~6 minutes is sized to bridge a generator changeover, not an outage.
+
+    **Merge gate:** never run against a real board. See the 7h bench checklist in `TODO.md`.
 
 26. **Firmware-owned cutoff — the fixed-dispense stop is a USB round trip, and the overrun can exceed the TEST-01 tolerance.** Raised 2026-09-04. On the fixed/pre-pay/cash-fixed flows the app — not the adapter — decides when to stop: the firmware counts a pulse, frames it, ships it over USB, the app compares litres against the cutoff (`CustomerViewModel.kt:680-682`, and the same shape at `:918`), then sends `RLY:0` back down the wire. Every one of those hops is fuel on the ground. Budget: **0–30 ms** in the firmware's own `PULSE_TX_MIN_MS` throttle before the pulse is even transmitted, **~1–15 ms** of USB plus Android scheduling inbound, a coroutine hop, then `stopFuelFlow()`'s `withContext(Dispatchers.IO)` thread hop and the outbound write (`UsbSerialRelayController.kt:80`), then the firmware's `handleSerial()`. Call it **50–150 ms of controllable latency**, on top of a relay-coil + solenoid + fluid-coast term of 10–50 ms that no software change can touch. At 40 L/min that is **35–100 mL** of unbilled fuel per fixed sale — always in the customer's favour, so the station absorbs it.
 
@@ -127,6 +164,23 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
     **Synergy with #24 — this may pay for the session mark.** #24 needs "the app signals session-zero at relay-open, the adapter records the lifetime totaliser at that mark". `RLY:1:<pulses>` **is that signal** — same frame, same instant. If both changes are specified together the adapter can latch `sessionStart = readCount()` on the same command that arms the limit, and `lifetime_now − lifetime_at_mark` becomes readable for power-cut recovery at no extra protocol cost. Worth putting #23, #24 and #26 to Olonade as **one protocol-revision conversation** rather than three.
 
     **Scope.** The flows with a cutoff known before fuel moves: **Flow 1 (Fixed Pre-pay Digital)** and **Flow 4 (Cash Fixed Amount)**. The open-ended fill-ups — **Flow 2 (Fill-up Cash)** and **Flow 3 (Fill-up Digital)** — have no target to cut at and keep the current nozzle-idle shutoff; the ceiling suggested above would be a runaway backstop for them, not a cutoff. **Decision needed from Olonade:** is the relay-open frame allowed to grow a payload (it is app→device, so it does not touch the device→app framing that 7a bench-verified), and is a firmware-owned cutoff acceptable under NIS 348 given the adapter is specified read-only on the *pulse* path — the relay is a separate output, but "the board decides when to stop selling" is a metrology-adjacent claim worth confirming rather than assuming. Relates to #2 (shutoff timeout), #23 and #24.
+
+    **Bench evidence, 2026-09-13 (Phase 7h merge gate, step 8).** The latency budget above is the
+    *small* half of this question, and the gate measured the large one. When the app **dies**
+    mid-dispense there is no round trip at all: the only thing left is the firmware's comms-loss
+    watchdog, which by design keeps the relay closed for `HEARTBEAT_TIMEOUT_MS` = 3 s. At the bench
+    rate (50 pps, 100 pulses/L = 30 L/min) that is **~1.5 L per app death**, and a real forecourt
+    pump runs faster, so it hands over more. On the ₦2,000 pre-pay used for step 8 — about 2.3 L
+    paid for — the overshoot was **more than half the sale again**. The app behaved correctly
+    throughout: the relay did not reopen on resume and the sale completed recording more litres
+    than were charged. There is simply nothing in the current design that can stop fuel while the
+    app is dead, because the cutoff is the app's decision to make.
+    - So the case for `RLY:1:<pulses>` is no longer only about milliseconds of latency. It is the
+      only mechanism that bounds an **app crash** mid-sale, which is the failure Phase 7h exists
+      because of.
+    - Partial mitigation while this is open: **TODO #38**, shortening the watchdog from 3 s to 2 s.
+      The app PINGs at 1 Hz, so that is still two missed pings of tolerance, and it halves the
+      give-away. It is a mitigation, not a fix — 1 L given away instead of 1.5 L.
 
 ## Payment integration
 
