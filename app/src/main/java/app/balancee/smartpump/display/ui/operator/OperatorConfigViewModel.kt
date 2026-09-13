@@ -149,6 +149,8 @@ class OperatorConfigViewModel @Inject constructor(
 
     private companion object {
         /** Enough for an operator to see the recent past without turning the screen into a report. */
-        const val FUEL_LOG_LIMIT = 20
+        // TEMPORARY: 20 in the shipping build. Raised so a bench pair's trace rows and the
+        // real gap rows fit on one screen together. Restore with the rest of the trace.
+        const val FUEL_LOG_LIMIT = 40
     }
 }

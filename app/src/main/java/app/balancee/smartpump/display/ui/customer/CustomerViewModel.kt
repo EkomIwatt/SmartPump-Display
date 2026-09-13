@@ -324,11 +324,13 @@ class CustomerViewModel @Inject constructor(
         val ref = pulseRepository.getActiveTransactionRef()
 
         // TEMPORARY BENCH TRACE — remove before merge. See PULSE_TRACE.
-        pulseTrace {
-            "resume: persisted=$persistedPulses anchor=$anchor now=$adapterCountNow " +
-                "delta=${if (anchor != null && adapterCountNow != null) adapterCountNow - anchor else null} " +
-                "dispensing=$dispensing waitedMs=${System.currentTimeMillis() - waitStartedMs}"
-        }
+        val traceLine = "RESUME persisted=$persistedPulses anchor=$anchor now=$adapterCountNow " +
+            "delta=${if (anchor != null && adapterCountNow != null) adapterCountNow - anchor else null} " +
+            "dispensing=$dispensing waitedMs=${System.currentTimeMillis() - waitStartedMs}"
+        pulseTrace { traceLine }
+        // Also to the events table: the bench tablet's adb link will not hold long enough to read
+        // logcat, so the trace has to survive on the device and be readable on the fuel log card.
+        runCatching { events.record(EventType.TRACE, null, null, traceLine) }
 
         return when (val gap = reconcilePulseGap(anchor, adapterCountNow, dispensing)) {
             is ReconcilePulseGapUseCase.Result.NoGap -> 0
@@ -370,6 +372,19 @@ class CustomerViewModel @Inject constructor(
                 0
             }
         }
+    }
+
+    /**
+     * TEMPORARY BENCH TRACE — remove before merge, with PulseTrace.kt.
+     *
+     * The adapter's count at the instant fuel is authorised to move. Paired with the next resume's
+     * reading it bounds how much could physically have flowed, which is the number the recovered
+     * gap has to be checked against.
+     */
+    private suspend fun traceRelayOpen() {
+        val line = "RELAY-OPEN adapterCount=${pulseSource.adapterCount.value} baseline=$pulseBaseline"
+        pulseTrace { line }
+        runCatching { events.record(EventType.TRACE, null, null, line) }
     }
 
     private fun litresFromBaseline(): Double = pulseBaseline / PULSES_PER_LITRE
@@ -593,6 +608,8 @@ class CustomerViewModel @Inject constructor(
 
         dispenseJob = viewModelScope.launch {
             relay.startFuelFlow()
+            // TEMPORARY BENCH TRACE — remove before merge.
+            traceRelayOpen()
             try {
                 pulseSource.observe().collect { msg ->
                     if (msg !is PulseMessage.Pulse) return@collect
@@ -860,6 +877,8 @@ class CustomerViewModel @Inject constructor(
         var lastPersistAtPulses = pulseBaseline
         dispenseJob = viewModelScope.launch {
             relay.startFuelFlow()
+            // TEMPORARY BENCH TRACE — remove before merge.
+            traceRelayOpen()
             try {
                 pulseSource.observe().collect { msg ->
                     when (msg) {
@@ -1105,6 +1124,8 @@ class CustomerViewModel @Inject constructor(
         var lastPersistAtPulses = pulseBaseline
         dispenseJob = viewModelScope.launch {
             relay.startFuelFlow()
+            // TEMPORARY BENCH TRACE — remove before merge.
+            traceRelayOpen()
             try {
                 pulseSource.observe().collect { msg ->
                     when (msg) {
