@@ -1,6 +1,25 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-15 (both lines merged: 7h and Phase 9/9b/9c are on `main`)
+## Current status — 2026-09-15, later (OQ #22 built; signing cutover decided)
+
+**The last open decision holding up written code is settled and built.** OQ #22 went with Option 1:
+an attendant "End sale early" button that ends a fixed sale which will not reach its target. Checking
+the code first found the problem was wider than the question: a pre-pay customer whose tank fills
+before the target stranded the sale with no fault at all, no exit and the relay still on, and a
+power cycle only restored the same stuck sale. On `feature/oq22-end-sale`; JVM **232 tests / 27
+classes** green, `compileDebugRealHwKotlin` and `lintDebug` clean. **Not yet run on the tablet.**
+
+**#37 is fixed and on `origin/main`** (`213b123`): both receipts now show the price the sale was
+struck at.
+
+**Signing is decided.** Balancee has an Android key and keeps it for production; the 14-day run is
+signed with a dummy key, and the switch is a planned reinstall. That reinstall wipes the tablet, and
+it exposed **#40**: a release build cannot be debugged, so nothing can get the run's records off it
+first. Needs an in-app export before the run ends.
+
+---
+
+## Previous status — 2026-09-15 (both lines merged: 7h and Phase 9/9b/9c are on `main`)
 
 **`main` now carries everything built except the 7g firmware.** The Phase 9 line
 (`feature/onboarding-activation`, which contains `feature/api-live-probe`) was merged on top of 7h
@@ -1237,3 +1256,47 @@ arrives, it can be entered from the operator settings screen in the build on `ma
 **Next:**
 Push when approved. Then #37 (small, needs nobody), the 7g bench gate (#19), and the activation code
 on dev (#31 questions first, then #32).
+
+---
+
+### OQ #22 — End sale early, for fixed sales that will not reach their target
+**Date:** 2026-09-15
+**Status:** done (not yet run on the tablet)
+**Commit(s):** on `feature/oq22-end-sale` — see `git log`
+
+**Summary (plain language):**
+A pre-paid or cash-fixed sale used to have exactly one way to finish: pumping every litre paid for.
+If the customer's tank filled first, or the link to the pump adapter dropped for good, the screen
+waited forever, and even restarting the tablet brought the same stuck sale back. The attendant can
+now end it from the swipe-up panel. The app stops the fuel, records the litres that actually flowed
+against the amount the customer paid, and tells the customer to see the attendant about the
+difference.
+
+**Technical notes:**
+- **Decision:** Option 1 of `OQ22_OPTIONS_DRAFT.md`. No automatic timeout: a no-flow timer cannot
+  tell a full tank from a pause, and cutting off a paid sale by mistake is worse than a stuck screen.
+- **The case the question missed:** OQ #22 named a permanent link loss, which is rare under the
+  fixed-cable assumption. A tank that fills before the target is routine and strands the sale with
+  the relay still commanded on. Both corrections to the OQ text — no attendant exit existed, and a
+  power cycle does not clear it — were found in the code, not assumed.
+- `CustomerViewModel.onAttendantEndSaleEarly()`: relay off, collector cancelled, **then** the state
+  re-read, so a pulse in flight lands in the record or not at all, and a sale that hit its target in
+  that window completes normally instead of ending twice.
+- `TransactionState.Complete.litresTarget: Double? = null` — set only on an early end. Defaulted,
+  so persisted rows from earlier builds still decode (tested against a literal legacy JSON). The
+  audit note is `Ended by attendant at X of Y L`; amount stays what was paid.
+- UI: a full-width gold button in the slot "End fill-up" already uses, not a fourth card
+  (`flows.md` fixes three). Completion screen adds *"Sale ended early — X of Y L. Please see the
+  attendant."* ⚠️ **No design screen covers either** — deviation on record.
+- `state-machine.md`: early-end transitions added to Flows 1 and 4; the Universal row that sent a
+  disconnect to `Error(recoverable=true)` is corrected — that would have written no audit row.
+- **Not done:** the shared receipt text does not mention the early end, so it shows ₦ paid against
+  fewer litres with no explanation. `Transaction` has no target field and printing the free-text
+  `attendantNote` to customers would leak future notes. Small follow-up if wanted.
+- Tests: 7 new in `CustomerViewModelEndSaleEarlyTest` (pre-pay, cash-fixed, late pulses ignored,
+  stuck sale restored after a power cycle, no-op outside a fixed sale, normal completion unchanged,
+  legacy decode). JVM **232 / 27** green.
+
+**Next:**
+Try the button on the tablet with the rig (a pre-pay stopped short by holding the nozzle). Then
+#40 before any parallel run, the 7g bench gate, and the activation-code line.

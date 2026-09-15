@@ -3,6 +3,31 @@
 Until 2026-09-12 the project had **no signing configuration at all**, so `assembleRelease` produced
 an unsigned APK that Android will not install. This is how it works now.
 
+## Two keys, one reinstall — decided 2026-09-15
+
+- **The 14-day parallel run is signed with a dummy key.** Generate it with the steps below; it is
+  ours to hold, not Balancee's.
+- **Production is signed with Balancee's existing Android key.** Balancee holds it. Do not generate
+  a production key here.
+
+Android refuses an update signed by a different key, so **the switch is a planned reinstall on every
+run tablet**, not an upgrade. Uninstalling wipes the app's local sale history and fuel log, its
+activation credentials (they live in the Android KeyStore) and its device ID. So, at cutover:
+
+1. **Get the run's records off the tablet first.** A release build is not debuggable, so
+   `adb run-as` cannot reach its database — there is currently **no way** to do this (TODO #40).
+2. Uninstall the run build, install the Balancee-signed production build.
+3. **Activate fresh.** The new install has a new device ID, so the backend sees a new pump; that
+   needs a production activation code, or the old registration reset first (the #31 question,
+   asked of production).
+
+Key rotation (APK Signature Scheme v3) would avoid the reinstall, but it needs both keys at signing
+time and permanently records the dummy in the production app's signing history. **Rejected** in
+favour of the clean reinstall.
+
+**Keep the dummy key backed up for the whole run** (step 3 below applies to it). Losing it mid-run
+means a fix can only reach the run tablets through the same wipe.
+
 ## The one-time setup
 
 ### 1. Create the keystore

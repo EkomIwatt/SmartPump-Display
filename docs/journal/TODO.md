@@ -518,6 +518,11 @@ original five, plus `15dee70` from the bench gate.
     whether **Balancee already has an Android signing key**, since generating a second would be
     wrong. Creating a key is *not* irreversible: it only binds once a build signed with it is
     installed on a tablet expected to receive updates.
+  - **Custody ANSWERED 2026-09-15 (boss, via the user).** Balancee already has an Android key and
+    keeps it for **production**. The **14-day run is signed with a dummy key** we generate. Cutover
+    is a **planned reinstall**, chosen over APK Signature Scheme v3 rotation (which needs both keys
+    and ties the dummy into production's signing history). The reinstall wipes local history,
+    KeyStore credentials and the device ID, so production activates fresh. See `docs/RELEASE.md`.
   - When it happens: `keytool` command in `docs/RELEASE.md`, fill in `keystore.properties`, and
     **back the file up off the laptop** — losing it ends the app's upgrade path, because a field
     tablet will refuse an APK signed by a different key and reinstalling wipes local history *and*
@@ -527,6 +532,13 @@ original five, plus `15dee70` from the bench gate.
   - ⚠️ **A debug build cannot stand in for the parallel run** — it seeds its own price, exposes the
     debug hotspot, points at the dev backend, and installs under a different application id. Full
     reasoning in [`V1_BLOCKERS.md`](V1_BLOCKERS.md).
+- [ ] **40. Get the parallel run's records off a release build.** Found 2026-09-15 from the
+  signing decision: the run is cut over to production by **uninstalling**, which deletes the Room
+  database, and a release build is **not debuggable**, so `adb run-as` cannot copy it off first. The
+  upload job (7e) will not cover it either — it rides on `/authorise`, and cash sales have nothing
+  to upload. Needs an attendant-side export (e.g. the sale log and fuel log as CSV through the share
+  sheet, behind the PIN). Not urgent until the run exists, but it must land **before** the run
+  ends, and it may be wanted daily for the variance check against station stock records.
 - [x] **35. Receipt sharing — DONE 2026-09-12.** Was a no-op: `CustomerViewModel.onShareReceipt()`
   was an empty function while the Share button was **live** on the completion screen, so a customer
   tapped it and got silence. Now builds a plain-text receipt and sends it to the Android system

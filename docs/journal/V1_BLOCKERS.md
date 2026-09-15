@@ -35,14 +35,12 @@ Two candidates that need no rig, no reply and no decision. Sized roughly.
   have been unreachable in exactly the build that points at the dev backend. Activation is
   **optional**: cash sales do not need it, and a pump is often installed before its code exists.
   Design caveat stands — no activation screen exists in `docs/Strict design screens/`.
-1. **Transaction upload job (7e)** — the plan calls it self-contained and it is. Two things are
-   missing under it: `workmanager` was removed in the cleanup and is **not in
-   `gradle/libs.versions.toml`**, and **nothing marks a transaction synced**, so
-   `getPendingSync()` would return the same rows forever. Fails safe before activation, since the
-   call is signed and returns `NotActivated`.
-2. **Draft the OQ #22 options** — the last open decision (see section 5). Writing out the two or
-   three concrete recovery behaviours would let it be settled by picking, which is what worked for
-   OQ #17.
+1. **Transaction upload job (7e)** — ~~self-contained~~ **corrected 2026-09-15: it rides on #8.**
+   `UploadTransactionRequest` needs a server `transactionId` and `paymentReference`, and only
+   `/authorise` issues them, so a cash sale has nothing to upload and a digital one has nothing
+   until the payment flows exist. Also missing: `workmanager` (not in `gradle/libs.versions.toml`)
+   and anything that sets `syncedAt`.
+2. ~~**Draft the OQ #22 options**~~ — **done and decided 2026-09-15** (see section 5).
 
 ## 1. Blocked on nobody — movable today
 
@@ -54,10 +52,12 @@ The highest value per hour on the whole project, because none of it waits on a r
   - **Why last:** it is not on the critical path. Signing is a prerequisite of the **parallel run**,
     which cannot start until the K-factor is measured, which waits on Kelvin. Nothing this week
     needs it.
-  - **Why not sooner:** key **custody is the boss's call**, not an engineering one — who holds the
-    key and its password, where the backup lives, and whether it survives people moving on. Worth
-    asking first whether **Balancee already has an Android signing key**; generating a second one
-    would be the wrong move.
+  - ~~**Why not sooner:** key custody is the boss's call~~ — **answered 2026-09-15.** Balancee has
+    a key and holds it for **production**; the **parallel run uses a dummy key** we generate. The
+    switch is a **planned reinstall** at cutover (wipes history, credentials, device ID), not key
+    rotation. Custody no longer blocks the run key. Steps in `docs/RELEASE.md`.
+  - **New gap this exposed — #40:** a release build is not debuggable, so nothing can get the run's
+    records off a tablet before that reinstall.
   - Generating a key is **not** irreversible the way the activation code is. It only binds once a
     build signed with it is installed on a tablet expected to receive updates. A disposable local
     key can prove the pipeline any time.
@@ -150,10 +150,11 @@ Both are quietly holding up built code.
   `docs/Strict design screens/`**, so the layout is a deviation on record.
   - It no longer blocks **#14**'s mapping half or **#15**'s attendant half — both now wait only on
     **#8**, since nothing receives an `ApiError` until the payment flows exist.
-- [ ] **OQ #22 — "safe-but-stuck".** A permanent mid-dispense link loss on the fixed / pre-pay /
-  cash-fixed flows leaves the screen at the last litre count **indefinitely**. Fuel is physically
-  off, so it is safe rather than dangerous, but it clears only on a power cycle or attendant action.
-  Is that acceptable for V1, or do those flows need a bounded recovery?
+- [x] **OQ #22 — stuck fixed-flow sale — SETTLED 2026-09-15, Option 1.** An attendant "End sale
+  early" button ends a fixed sale that will not reach its target, recording litres flowed against
+  the amount paid. Covers the link-loss case the OQ named and the far more common one it did not: a
+  tank that fills before the target. No automatic timeout. See
+  [`OQ22_OPTIONS_DRAFT.md`](OQ22_OPTIONS_DRAFT.md).
 
 ## 6. Confirmed out of the V1 build cycle
 
@@ -178,13 +179,12 @@ Sorted by value per hour, given that section 4 is waiting on a reply either way.
 2. **Chase Kelvin for the meter output type and voltage (#22)** — it is the long pole in front of the
    K-factor, which is in front of the parallel run, which is in front of live money.
 3. **Send Olonade the three protocol questions** as one message.
-4. **Decide OQ #22** — the last of the two decisions that were holding up written code. ~~OQ #17~~
-   settled 2026-09-12.
-5. **Ask the boss about the signing key** — does Balancee already have one, and who holds it. A
-   question, not a task; it only needs answering before the parallel run.
-6. **Release signing, last (#34).** By decision, 2026-09-12. The build side is already done; what
-   remains is the key itself, and it is not needed until there is a production-shaped build to
-   install.
+4. ~~**Decide OQ #22**~~ — settled and built 2026-09-15 (Option 1). ~~OQ #17~~ settled 2026-09-12.
+5. ~~**Ask the boss about the signing key**~~ — answered 2026-09-15: dummy key for the run,
+   Balancee's for production, planned reinstall between them.
+6. **Release signing, last (#34).** The build side is done; the dummy run key can be generated any
+   time and no longer waits on anyone. Still last because the run waits on the K-factor. **#40**
+   (getting records off a release build) has to exist before the run ends.
 
 Done and off this list: **receipt sharing (#35)** and the **activation step (#33)**, both
 2026-09-12. **#21**, the third `Missing` case,

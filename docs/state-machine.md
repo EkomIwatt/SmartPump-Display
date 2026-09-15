@@ -165,6 +165,7 @@ Note: `CashFixedDispensing` could be folded into `FixedDispensing` with a `flow 
 | `PrepayAwaitingPayment`           | webhook received                     | `FixedDispensing`                   |
 | `PrepayAwaitingPayment`           | 5-min expiry, no webhook             | `Idle` (+ cancel txn)               |
 | `FixedDispensing`                 | pulses ≥ litresAuthorised            | `Complete`                          |
+| `FixedDispensing`                 | attendant taps End sale early (OQ #22) | `Complete` (litres = flowed, `litresTarget` set) |
 
 ### Flow 2 — Fill-up Cash
 
@@ -192,6 +193,7 @@ Note: `CashFixedDispensing` could be folded into `FixedDispensing` with a `flow 
 | `Idle`                            | attendant tap AUTHORISE CASH ₦…      | `CashFixedAmountEntry`              |
 | `CashFixedAmountEntry`            | attendant confirms ₦ amount          | `CashFixedDispensing`               |
 | `CashFixedDispensing`             | pulses ≥ litresCutoff                | `Complete`                          |
+| `CashFixedDispensing`             | attendant taps End sale early (OQ #22) | `Complete` (litres = flowed, `litresTarget` set) |
 
 ### Flow 5 — USSD Offline  *(DEFERRED to a future update — kept, not removed. See flows.md / OQ #9–#12.)*
 
@@ -205,7 +207,8 @@ Note: `CashFixedDispensing` could be folded into `FixedDispensing` with a `flow 
 
 | From                              | Event                                | To                                  |
 |-----------------------------------|--------------------------------------|-------------------------------------|
-| _any_                             | hardware disconnect / parse error    | `Error(recoverable=true)`           |
+| _dispensing_                      | hardware disconnect                  | _no transition_ — fuel stops on the adapter's watchdog; a brief drop resumes on reconnect; a permanent one is ended by the attendant (OQ #22) |
+| _any_                             | parse error                          | _ignored_ — the frame is dropped; cumulative counts self-heal on the next good line |
 | _any_                             | power cut                            | (state persisted; resume on boot)   |
 | `Error(recoverable=true)`         | retry / dismiss                      | previous state or `Idle`            |
 
