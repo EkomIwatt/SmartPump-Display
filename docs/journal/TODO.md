@@ -465,7 +465,18 @@ original five, plus `15dee70` from the bench gate.
   orders of magnitude smaller. Suspected cause: the pulses between the resume's adapter reading and
   the collector attaching, which `PulseAccumulator` swallows in its uninitialised branch. Not fixed:
   it is small, it fails safe, and it wants its own change with its own test.
-- [ ] **37. The receipt COMPUTES price/litre instead of carrying it.** `CustomerStateHost`'s
+- [x] **37. FIXED 2026-09-15 (`fix/receipt-struck-price`) — the simpler fix, not the one proposed
+  below.** Carrying the price on `Complete` was judged too much for what it buys. Instead the
+  completion screen now reads `uiState.priceKoboPerLitre`, the same ViewModel price the audit row
+  and the shared receipt are written from, and `onStartTransaction()` now refreshes that UI copy —
+  the pre-pay path passed neither of the other two refreshes, so after a price change the screen
+  showed the boot-time price. One new test (`CustomerViewModelMoneyTest`), fails without the fix.
+  - **Accepted, not fixed:** that ViewModel price is reloaded from config at boot, so a sale that
+    completes *after an app restart* records today's price, even if the operator changed it during
+    the restart window. Both receipts still agree, on the new price. Judged rare enough — it needs
+    a PIN-gated price edit inside an interrupted sale — to not justify threading the price through
+    every state. Revisit if the parallel run ever shows it.
+  - _Original entry, kept for history:_ **The receipt COMPUTES price/litre instead of carrying it.** `CustomerStateHost`'s
   `priceKoboPerLitreFromState` prints `round(amountKobo / litres)`, so the "Price / L" line moves
   whenever litres and money come apart — which pulse-gap recovery and the step-8 overshoot now make
   routine. After the gate's ₦2,000 overshoot the receipt understated the unit price by nearly half:

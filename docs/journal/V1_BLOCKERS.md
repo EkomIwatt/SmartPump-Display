@@ -66,9 +66,9 @@ The highest value per hour on the whole project, because none of it waits on a r
   **#35**.
 - [x] **7h bench gate — PASSED 2026-09-13, merged.** **#27**. Left two under-counting findings
   (**#28**, **#36**), a watchdog proposal (**#38**) and one receipt defect:
-- [ ] **#37 — two receipts, two prices.** The screen computes price/litre as amount ÷ litres; the
-  shared receipt (#35) prints the price the sale was struck at. Both are on `main` since 2026-09-15,
-  so they now disagree whenever litres and money come apart. Small, and needs nobody.
+- [x] **#37 — two receipts, two prices — FIXED 2026-09-15.** The completion screen now reads the same
+  price as the saved record and the shared receipt. A price edited during an app restart is
+  accepted as rare, not fixed.
 - [ ] **7g firmware gate** — worse than merely pending: `hardware/*.ino` on `main` is the **pre-7g**
   sketch while the docs beside it describe the post-7g one, so anyone flashing from `main` gets
   firmware predating four defect fixes. **#19** / `BRANCH_7G_SUMMARY.md`.
