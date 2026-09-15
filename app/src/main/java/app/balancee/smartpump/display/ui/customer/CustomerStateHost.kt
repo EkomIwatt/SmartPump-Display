@@ -187,6 +187,7 @@ fun CustomerStateHost(
             onShareReceipt = onShareReceipt,
             onDismiss = onDismissComplete,
             modifier = modifier,
+            litresTarget = state.litresTarget,
         )
 
         is TransactionState.Error -> ErrorScreen(

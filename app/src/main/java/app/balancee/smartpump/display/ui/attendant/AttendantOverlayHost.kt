@@ -63,6 +63,7 @@ fun AttendantOverlayHost(
     onAttendantCashFixed: () -> Unit,
     onAttendantCashReceived: () -> Unit,
     onAttendantEndFillup: () -> Unit,
+    onAttendantEndSaleEarly: () -> Unit,
     onOpenSettings: () -> Unit,
     pinBypassEnabled: Boolean,
     verifyPin: suspend (String) -> Boolean,
@@ -147,6 +148,10 @@ fun AttendantOverlayHost(
                     },
                     onEndFillup = {
                         onAttendantEndFillup()
+                        visible = false
+                    },
+                    onEndSaleEarly = {
+                        onAttendantEndSaleEarly()
                         visible = false
                     },
                     // Closing the panel first means settings opens over a clean screen, and the

@@ -167,6 +167,12 @@ sealed class TransactionState {
         val amountKobo: Long,
         val method: PaymentMethod? = null,   // null for cash-only flows that have no digital method
         val attendantId: String? = null,     // null in V1 (no roles)
+        /**
+         * Set only when the attendant ended a fixed sale before it reached its target (OQ #22):
+         * the litres the customer paid for, where [litres] is what actually flowed. Null for every
+         * sale that finished normally. Defaulted, so rows persisted before it existed still decode.
+         */
+        val litresTarget: Double? = null,
     ) : TransactionState()
 
     /**

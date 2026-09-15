@@ -75,6 +75,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Locale
 import javax.inject.Inject
 
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
@@ -678,6 +679,53 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The attendant ends a fixed sale (pre-pay, USSD, cash-fixed) before it reaches its target —
+     * OQ #22, Option 1, decided 2026-09-15.
+     *
+     * Without this a fixed sale had no exit but its target. A customer whose tank filled first, or
+     * a link that dropped and stayed down, left the screen in dispensing for good, and a power
+     * cycle only restored the same stuck sale. Fill-up does not need it: its flow-gap watchdog
+     * already ends an open-ended sale on what flowed.
+     *
+     * The record states what happened rather than tidying it: litres are what actually flowed,
+     * the amount is what the customer paid, and the audit note carries the target. Settling the
+     * difference is the attendant's (cash) or the backend's (digital, OQ #7) — not the pump's.
+     *
+     * Fuel stops before the count is read, and the collector is cancelled before the state is
+     * re-checked, so a pulse in flight either lands in the record or not at all — and a sale that
+     * hit its target in that window completes normally instead of being ended twice.
+     */
+    fun onAttendantEndSaleEarly() {
+        val state = currentState()
+        if (state !is TransactionState.FixedDispensing && state !is TransactionState.CashFixedDispensing) return
+        viewModelScope.launch {
+            relay.stopFuelFlow()
+            dispenseJob?.cancel()
+            dispenseJob = null
+            val ended = when (val current = currentState()) {
+                is TransactionState.FixedDispensing -> TransactionState.Complete(
+                    flow = current.flow,
+                    txnId = current.txnId,
+                    litres = current.litresSoFar,
+                    amountKobo = current.amountKobo,
+                    method = current.method ?: deriveMethodForFlow(current.flow),
+                    litresTarget = current.litresAuthorised,
+                )
+                is TransactionState.CashFixedDispensing -> TransactionState.Complete(
+                    flow = TransactionFlow.CASH_FIXED,
+                    txnId = current.txnId,
+                    litres = current.litresSoFar,
+                    amountKobo = current.cashAmountKobo,
+                    method = null,
+                    litresTarget = current.litresCutoff,
+                )
+                else -> return@launch
+            }
+            completeAndRecord(ended)
+        }
+    }
+
     fun onFillupPayCash() {
         val current = currentState() as? TransactionState.FillupTankFull ?: return
         setState(
@@ -1261,7 +1309,9 @@ class CustomerViewModel @Inject constructor(
             priceKoboPerLitre = priceKoboPerLitre,
             transactionRef = txnId,
             attendantId = attendantId,
-            attendantNote = null,
+            attendantNote = litresTarget?.let { target ->
+                String.format(Locale.UK, "Ended by attendant at %.2f of %.2f L", litres, target)
+            },
             recoveredLitres = recoveredLitres,
         )
 

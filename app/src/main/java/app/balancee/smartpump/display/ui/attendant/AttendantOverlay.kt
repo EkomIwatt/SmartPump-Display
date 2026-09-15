@@ -57,6 +57,7 @@ fun AttendantPanel(
     onAuthoriseCash: () -> Unit,
     onCashReceived: () -> Unit,
     onEndFillup: () -> Unit,
+    onEndSaleEarly: () -> Unit,
     onOpenSettings: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
@@ -66,6 +67,8 @@ fun AttendantPanel(
     val cashFixedEnabled = state is TransactionState.Idle
     val cashReceivedEnabled = state is TransactionState.FillupAwaitingCashConfirm
     val fillupInProgress = state is TransactionState.FillupDispensing
+    val fixedSaleInProgress = state is TransactionState.FixedDispensing ||
+        state is TransactionState.CashFixedDispensing
 
     Column(
         modifier = modifier
@@ -190,6 +193,19 @@ fun AttendantPanel(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+
+        // OQ #22 (Option 1, 2026-09-15): the only exit from a fixed sale that will not reach its
+        // target — a tank that filled first, or a link that stayed down. Same slot and shape as
+        // "End fill-up" above rather than a fourth card, which docs/flows.md does not allow. Gold,
+        // because it settles money: the customer paid for more than flowed.
+        if (fixedSaleInProgress) {
+            BalanceeButton(
+                label = "End sale early · record litres dispensed",
+                onClick = onEndSaleEarly,
+                accentColor = PrimaryGold,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -279,6 +295,7 @@ private fun AttendantPanelIdlePreview() {
             onAuthoriseCash = {},
             onCashReceived = {},
             onEndFillup = {},
+            onEndSaleEarly = {},
             onOpenSettings = {},
             onDismiss = {},
         )
@@ -299,6 +316,7 @@ private fun AttendantPanelAwaitingCashPreview() {
             onAuthoriseCash = {},
             onCashReceived = {},
             onEndFillup = {},
+            onEndSaleEarly = {},
             onOpenSettings = {},
             onDismiss = {},
         )
@@ -319,6 +337,7 @@ private fun AttendantPanelFillingPreview() {
             onAuthoriseCash = {},
             onCashReceived = {},
             onEndFillup = {},
+            onEndSaleEarly = {},
             onOpenSettings = {},
             onDismiss = {},
         )

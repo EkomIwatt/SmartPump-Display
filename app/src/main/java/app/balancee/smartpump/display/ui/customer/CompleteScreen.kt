@@ -63,6 +63,7 @@ fun CompleteScreen(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     pumpLabel: String = "Pump 1",
+    litresTarget: Double? = null,
 ) {
     // Flow 1 (digital pre-pay) finishes on a gold receipt card; cash, fill-up, and USSD
     // completions land on a green "dispense succeeded" card. Source: strict-design screens.
@@ -125,6 +126,20 @@ fun CompleteScreen(
                     )
                     HeroSerifText(text = "Done.", color = accent)
                     LabelText(text = "Transaction complete")
+
+                    // OQ #22: the attendant ended a fixed sale short. Said plainly on the customer's
+                    // screen, because the ledger below shows fewer litres than the amount paid buys,
+                    // and the customer is the one who needs to go and settle it. No design screen
+                    // covers this line (flagged in OQ22_OPTIONS_DRAFT.md).
+                    if (litresTarget != null) {
+                        Text(
+                            text = "Sale ended early — %.2f of %.2f L. Please see the attendant."
+                                .format(litres, litresTarget),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = PrimaryGold,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
 
                     // Receipt ledger in the same state-tinted rounded panel the dispensing
                     // screens use (accent @7% fill, @30% border). Gold for the Flow 1 pre-pay

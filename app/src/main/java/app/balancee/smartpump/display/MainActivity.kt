@@ -148,6 +148,7 @@ private fun SmartPumpRoot(
                     onAttendantCashFixed = customerVm::onAttendantCashFixed,
                     onAttendantCashReceived = customerVm::onAttendantCashReceived,
                     onAttendantEndFillup = customerVm::onSimulateNozzleShutoff,
+                    onAttendantEndSaleEarly = customerVm::onAttendantEndSaleEarly,
                     onOpenSettings = { settingsVisible = true },
                     pinBypassEnabled = pinBypass,
                     verifyPin = gateVm::verifyPin,
