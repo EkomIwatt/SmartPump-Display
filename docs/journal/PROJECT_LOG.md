@@ -1,6 +1,26 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-13 (7h bench gate PASSED; a defect found, fixed and retested on the rig)
+## Current status — 2026-09-15 (both lines merged: 7h and Phase 9/9b/9c are on `main`)
+
+**`main` now carries everything built except the 7g firmware.** The Phase 9 line
+(`feature/onboarding-activation`, which contains `feature/api-live-probe`) was merged on top of 7h
+in `553a049`. Both had branched from `3aea28c` without seeing each other. Five files conflicted, all
+of them two additions in the same spot. Verified on the merge commit: JVM **224 tests / 26 classes**
+green, exactly 165 + 59; `compileDebugRealHwKotlin`, `lintDebug` and `assembleRelease` clean. Not
+yet pushed.
+
+**One thing the merge made worse, on purpose to record rather than fix inside a merge: TODO #37.**
+7h's notes predicted it and it is true: the on-screen receipt computes price/litre from amount ÷
+litres, while the shared receipt from 9b prints the price the sale was struck at. They now disagree
+about the same sale whenever litres and money come apart.
+
+**The activation code is still the gate** on the API line (#31, #32), and the operator settings
+screen that redeems it is now on `main`. The remaining no-wait work: #37, the 7g bench gate (#19),
+the upload job (7e) and the OQ #22 options.
+
+---
+
+## Previous status — 2026-09-13 (7h bench gate PASSED; a defect found, fixed and retested on the rig)
 
 **The Phase 7h merge gate is closed.** All eight steps of TODO #27 ran on an Arduino Uno with the
 sketch from `main` and **no flow meter** — the firmware's own synthetic generator supplies the
@@ -1185,3 +1205,35 @@ could not actually be redeemed by an operator); the **transaction upload job** (
 `workmanager` re-added and a `markSynced` path, neither of which exists); and a **draft of the
 OQ #22 options**, the last open decision. Everything else waits on the bench rig, Kelvin, Olonade or
 the activation code.
+
+---
+
+### Phase 9 line — merged to `main` on top of 7h
+**Date:** 2026-09-15
+**Status:** done (not yet pushed)
+**Commit(s):** `553a049` merge / docs follow-up on `merge/activation`, fast-forwarded to `main`
+
+**Summary (plain language):**
+Two lines of work had been built side by side without seeing each other: the fix for fuel counted
+while the app was restarting (7h), and the first real contact with the Balancee server plus the
+screen where an installer types the pump's activation code (Phase 9). Both are now in the main copy
+of the app, and the full test suite and release build pass with both in. When the activation code
+arrives, it can be entered from the operator settings screen in the build on `main`.
+
+**Technical notes:**
+- Both branches started at `3aea28c`. The merge was done on a throwaway branch cut from `main` and
+  only fast-forwarded once green, so `main` was never in a half-merged state.
+- **Conflicts, all additive:** `DatabaseModule` (two new repository bindings), `CustomerViewModel`
+  (two imports), `OperatorConfigScreen` (activation panel placed under "Save settings", fuel log
+  below it — an ordering choice, no design screen exists for either), `PROJECT_LOG` and `TODO`.
+- **Verified on the merge commit:** JVM **224 tests / 26 classes**, 0 failures; that is 165 (7h) +
+  59 (Phase 9), so no test went missing. `compileDebugRealHwKotlin`, `lintDebug`, `assembleRelease`
+  clean. No instrumented run: neither side's device-specific code changed in the merge.
+- **#37 confirmed after merging:** shared receipt prints the struck price, screen prints amount ÷
+  litres. Recorded, not fixed here.
+- **Housekeeping:** the Phase 9 TODO had two items numbered #33; the `probe.sh` one is now **#39**.
+  `V1_BLOCKERS.md` refreshed: 7h and Phase 9 moved to merged, #27 ticked, #37 added as movable.
+
+**Next:**
+Push when approved. Then #37 (small, needs nobody), the 7g bench gate (#19), and the activation code
+on dev (#31 questions first, then #32).

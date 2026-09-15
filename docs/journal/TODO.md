@@ -289,7 +289,8 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     ship.
   - **Do not loosen `PumpLoggingInterceptor`** to see the `/activate` response (#12): assert on the
     parsed object and redact before anything reaches disk.
-- [ ] **33. `docs/api-probes/2026-09-12/probe.sh` is re-runnable** and sends no secrets. Re-run it
+- [ ] **39. `docs/api-probes/2026-09-12/probe.sh` is re-runnable** _(was a second #33, renumbered
+  2026-09-15 at the merge; nothing referenced it by number)_ and sends no secrets. Re-run it
   after any backend deploy to see whether the 401s have grown a `code` field yet (#18f).
 
 ---
@@ -475,6 +476,11 @@ original five, plus `15dee70` from the bench gate.
   - **Check when merging forward:** receipt *sharing* (**#35**, on the Phase 9 line) builds its text
     from the saved audit row. If so, the shared receipt and the on-screen one disagree about the
     same sale, which is worse than either being wrong alone.
+    **CONFIRMED on `main` after the 2026-09-15 merge:** the shared text prints the audit row's
+    `transaction.priceKoboPerLitre` (`ReceiptText.kt`), the screen prints
+    `priceKoboPerLitreFromState` (`CustomerStateHost.kt`). They now disagree on exactly the sales
+    where litres and money came apart. Fixing #37 as described — carry the price on `Complete` —
+    closes both, since the share text is already right.
   - Found during the 7h gate, but **not a 7h defect** — recovery only made it visible. Fix
     separately.
 - [ ] **38. Shorten the firmware watchdog from 3 s to 2 s?** The app PINGs at 1 Hz, so three seconds

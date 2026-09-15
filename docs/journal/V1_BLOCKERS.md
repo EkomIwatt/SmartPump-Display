@@ -1,6 +1,6 @@
 # What is still blocking V1
 
-_Compiled 2026-09-12._
+_Compiled 2026-09-12. Refreshed 2026-09-15 after 7h and the Phase 9 line were both merged to `main`._
 
 **This file is a view, not a second source of truth.** Every item points at its real entry in
 [`TODO.md`](TODO.md) (work items, `#n`) or [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) (decisions,
@@ -17,8 +17,8 @@ work sorted by a different question: **who is holding it up, and what can move t
 
 | | |
 |---|---|
-| Built and merged | all 5 flows, real Arduino pulse + relay, operator config, persistence/boot-resume, signed network layer, encrypted credentials, device identity |
-| Built, unmerged | 7h pulse continuity (bench gate), 7g firmware (bench gate), Phase 9 API work + the activation step (no gate) |
+| Built and merged | all 5 flows, real Arduino pulse + relay, operator config, persistence/boot-resume, signed network layer, encrypted credentials, device identity, 7h pulse continuity, Phase 9 API work + the activation step |
+| Built, unmerged | 7g firmware (bench gate) |
 | Not built | transaction upload job, release signing, the payment feature flows |
 | Never measured | the meter K-factor — every litre figure runs on a placeholder |
 
@@ -64,8 +64,11 @@ The highest value per hour on the whole project, because none of it waits on a r
 - [x] **Receipt sharing — done 2026-09-12.** Plain-text receipt through the Android system share
   sheet, built from the saved audit row so a screen restored after a power cut is not dated "now".
   **#35**.
-- [ ] **7h bench gate** — eight-step checklist, Arduino + tablet, ~1 h. Closes a live under-billing
-  bug (**OQ #25**). **#27**.
+- [x] **7h bench gate — PASSED 2026-09-13, merged.** **#27**. Left two under-counting findings
+  (**#28**, **#36**), a watchdog proposal (**#38**) and one receipt defect:
+- [ ] **#37 — two receipts, two prices.** The screen computes price/litre as amount ÷ litres; the
+  shared receipt (#35) prints the price the sale was struck at. Both are on `main` since 2026-09-15,
+  so they now disagree whenever litres and money come apart. Small, and needs nobody.
 - [ ] **7g firmware gate** — worse than merely pending: `hardware/*.ino` on `main` is the **pre-7g**
   sketch while the docs beside it describe the post-7g one, so anyone flashing from `main` gets
   firmware predating four defect fixes. **#19** / `BRANCH_7G_SUMMARY.md`.
@@ -170,7 +173,8 @@ Listed so they are not rediscovered as surprises.
 
 Sorted by value per hour, given that section 4 is waiting on a reply either way.
 
-1. **The two bench gates (#27, #19).** Both need only the rig, and #19 removes a live trap on `main`.
+1. **The 7g bench gate (#19).** Needs only the rig, and removes a live trap on `main`. ~~#27~~
+   passed 2026-09-13.
 2. **Chase Kelvin for the meter output type and voltage (#22)** — it is the long pole in front of the
    K-factor, which is in front of the parallel run, which is in front of live money.
 3. **Send Olonade the three protocol questions** as one message.
