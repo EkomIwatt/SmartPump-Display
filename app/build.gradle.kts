@@ -1,10 +1,60 @@
 // App-level build config for SmartPump Display kiosk app.
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
+}
+
+// ---- Version -------------------------------------------------------------------------------
+//
+// Bump [appVersionCode] on EVERY build handed to anyone, even a re-cut of the same code. Android
+// refuses to install an APK whose versionCode is not greater than the one already installed, and a
+// kiosk tablet bolted to a forecourt is exactly where "just uninstall it first" is not an option.
+// [appVersionName] is what a human reads on the operator screen; keep it semantic.
+val appVersionCode = 1
+val appVersionName = "1.0.0"
+
+// ---- Release signing -----------------------------------------------------------------------
+//
+// Credentials come from `keystore.properties` at the repo root (gitignored — see
+// keystore.properties.example) or, for CI, the matching environment variables. Nothing
+// signing-related is ever committed: not the keystore, not the passwords, not the alias.
+//
+// When they are absent the release build stays UNSIGNED rather than failing configuration. That is
+// deliberate — a fresh clone, a CI lint run and anyone building debug must all still work without
+// the station's private key. The trade is that an unsigned release is possible, so the build warns
+// loudly at configuration time and `docs/RELEASE.md` says how to verify before handing an APK over.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) keystorePropertiesFile.inputStream().use { load(it) }
+}
+
+fun signingValue(key: String, env: String): String? =
+    (keystoreProperties.getProperty(key) ?: System.getenv(env))?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("storeFile", "SMARTPUMP_STORE_FILE")
+val releaseStorePassword = signingValue("storePassword", "SMARTPUMP_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("keyAlias", "SMARTPUMP_KEY_ALIAS")
+val releaseKeyPassword = signingValue("keyPassword", "SMARTPUMP_KEY_PASSWORD")
+
+// The keystore path is resolved against the repo root so a relative entry works on any machine;
+// an absolute path (the safer place to keep it) is passed through unchanged by File's own rules.
+val releaseKeystore = releaseStoreFile?.let { rootProject.file(it) }
+val releaseSigningReady = releaseKeystore != null &&
+    releaseKeystore.exists() &&
+    releaseStorePassword != null &&
+    releaseKeyAlias != null &&
+    releaseKeyPassword != null
+
+if (!releaseSigningReady) {
+    logger.warn(
+        "SmartPump: release signing is NOT configured — `assembleRelease` will produce an " +
+            "UNSIGNED apk that cannot be installed. See docs/RELEASE.md.",
+    )
 }
 
 android {
@@ -15,10 +65,21 @@ android {
         applicationId = "app.balancee.smartpump.display"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -41,6 +102,10 @@ android {
             buildConfigField("Boolean", "MOCK_HARDWARE", "false")
         }
         release {
+            // Null when the credentials are absent, which leaves the apk unsigned rather than
+            // failing the build. Verify with `apksigner verify` before handing one over —
+            // docs/RELEASE.md.
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             buildConfigField("Boolean", "MOCK_HARDWARE", "false")
             // Production backend (per boss, 2026-07-04).

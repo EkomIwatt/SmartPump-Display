@@ -5,7 +5,11 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-13 (Phase 7h bench gate PASSED; three findings logged)_
+_Last updated: 2026-09-15 (Phase 9/9b/9c merged to `main` on top of 7h)_
+
+> **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
+> blocker rather than by phase — useful for "what can move today". It points back here; it does not
+> restate detail, so this file stays the source of truth for work items.
 
 ---
 
@@ -128,11 +132,24 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
     (was 5 at gate #10): the new `legacyFormatBlob_isPurged_ratherThanPartiallyRead` passes, so the
     `v: 2` purge is confirmed against real KeyStore crypto, and the original five still pass with
     `pumpId` required. _(move to PROJECT_LOG when the conformance batch is logged.)_
-- [ ] **14. Error `message` discarded (MED).** Business errors ("Amount mismatch…", "out of stock",
-  "Payment has not been confirmed") arrive as opaque blobs. ~~Add `ApiError.Business(code, message)`~~
-  — **the type already exists** (added by #11, currently only fed by 2xx envelope refusals). What's
-  left: parse the envelope out of 4xx *error* bodies in `safeApiCall`, fill in `httpCode`, and map
-  the handful of known messages to attendant-facing copy.
+- [~] **14. Error `message` discarded (MED) — PARSING HALF DONE 2026-09-12** on branch
+  `feature/api-live-probe` (`4970c4e`). `safeApiCall` reads the envelope back out of a non-2xx body
+  and returns `ApiError.Business(message, code, httpCode)`.
+  - **Built on observed bytes, not inference.** The Reference states the failure envelope in §1 and
+    never prints one; the dev probe captured it (`docs/api-probes/2026-09-12/`). Two things the
+    captures decided that a careful reading would have got wrong: `code` is a **top-level sibling of
+    `message`**, not a field inside `data`; and it is **absent from every observed 401** while
+    present on the 400 from `/activate`, so it is nullable and callers must degrade to `message`.
+  - **Conservative by design.** Only a JSON object with a real boolean `status:false` counts. An
+    HTML 404 (what an undeployed route actually returns), a plain-text 502 and a 4xx whose envelope
+    claims success all stay `ApiError.Http` with the bytes intact — a deployment mistake must not
+    read as the server declining a sale. Retryability unchanged.
+  - **The mapping half is UNBLOCKED — OQ #17 settled 2026-09-12.** The copy now exists
+    ([`ERROR_COPY_DRAFT.md`](ERROR_COPY_DRAFT.md), Catalogue A), the customer/attendant split is
+    decided and built for local errors, and the attendant surface is the swipe-up panel. What is
+    left is wiring, and it **waits on #8**: nothing receives an `ApiError` and sets
+    `TransactionState.Error` until the payment feature flows exist, so building the mapping now
+    would carry text nothing reads.
   - **The Reference's full error catalogue is now extracted** (2026-09-01, same Flate/ToUnicode
     decode as #11 — the audit had only sampled it): global codes 400 / 401 / 404, eight literal 401
     auth messages, and per-endpoint tables for §4.2 and §4.3. §1 states the failure envelope
@@ -180,12 +197,102 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
 - [x] **17. `amount` money unit — DECIDED 2026-08-05: NAIRA.** Reference example `amount 7000 /
   expectedLitres 10` → ₦700/L. App stays kobo; repository mapper owns the ÷100. Fails closed at
   `/authorise` if wrong. Recorded in `PumpApiDtos.kt`. _(Decimals still open — see #18.)_
-- [ ] **18. Backend/spec asks — fold into #6.** (a) `GET /api/pump/config` doesn't exist and
-  **nothing tells the pump its `fuelType`**, which `/authorise` requires; (b)
-  `GET /api/pump/transactions/{id}` doesn't exist → no fallback if an FCM push drops;
-  (c) does `amount` accept decimals? (integer-only constrains pricing to whole naira/L — a business
-  call); (d) full status set (`PAID` is real but missing from the §5 list); (e) what to sign for a
-  GET. **Send today — their lead time is the critical path.**
+- [~] **18. Backend/spec asks — SENT; partly answered by the wire itself (2026-09-12).** Probing
+  `api.dev.balancee.app` answered more than the reply did. Evidence: `docs/api-probes/2026-09-12/`.
+  - ~~(a) `GET /api/pump/config` doesn't exist~~ — **DEPLOYED.** 401 `Missing pump authentication
+    headers` with `X-Matched-Path: /api/pump/config`; an undeployed route returns an HTML 404 with
+    `X-Matched-Path: /404`, so this is a real handler. **Its payload shape is still unverified** —
+    that needs credentials, and 7b's second half rides on it.
+  - ~~(b) `GET /api/pump/transactions/{id}` doesn't exist~~ — **DEPLOYED**, as a parameterised route
+    (`X-Matched-Path: /api/pump/transactions/[id]`). Response shape likewise unverified.
+  - (c) **does `amount` accept decimals?** Unanswered; unreachable without credentials. Still a
+    pricing decision, not just a technical one.
+  - (d) **full status set** — unanswered; needs a real transaction to observe.
+  - (e) **what to sign for a GET** — unanswered **and untestable from outside**: the server
+    validates the API key *before* the timestamp and signature, so a stale `X-Timestamp` and a
+    removed `X-Signature` both return `Invalid API key`. Now behind activation, along with (c), (d)
+    and the clock-skew window (#15).
+  - (f) **stable error codes — HALF BUILT.** The 400 from `/activate` returns
+    `"code":"INVALID_REQUEST"` beside `message`; **none of the three observed 401s carry one.** Go
+    back with that specific gap rather than re-asking the general question.
+  - **Also confirmed for free:** our four signing header names (`X-Api-Key` / `X-Device-Id` /
+    `X-Timestamp` / `X-Signature`) are correct — sending them moves the server off "missing headers"
+    onto "Invalid API key". That was previously only our reading of Reference §3.
+
+## 🟢 Phase 9 — first contact with the real backend (BUILT, unmerged)
+
+Branch `feature/api-live-probe`, three commits off `main` at `3aea28c`. `f77cfb3` probe evidence,
+`4970c4e` error-envelope parsing (#14 half), `5a378fe` activation persistence. Verified: JVM **155
+tests / 19 classes** green (125 → 155); `compileDebugRealHwKotlin` + `lintDebug` clean. Nothing
+device-specific, so no instrumented run needed — **no bench gate on this one.**
+
+**Phase 9c** continues on `feature/onboarding-activation`, branched off the above because it builds
+directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 classes** green (170 →
+184); `compileDebugRealHwKotlin` + `lintDebug` clean, no new lint findings. Also no bench gate.
+
+- [x] **33. The activation code now has a way in.** `PumpActivationRepository` shipped with **no
+  caller**, so an arriving code could not be redeemed by an operator. Two entries now share one
+  panel and one `ActivationViewModel`:
+  - **Onboarding step 4.** Provisioning moved from the PIN match to the end of the new step, because
+    writing the identity row *is* what ends onboarding — the gate observes that row — so saving at
+    step 3 would have made step 4 unreachable. Activation is **optional**: a pump is often installed
+    before its code exists, and cash sales do not need one. The exit reads "Finish without
+    activating", not a hidden skip.
+  - **The operator settings screen**, behind the attendant PIN — and for most units the *only*
+    reachable entry. A pump installed before its code was issued finished onboarding long ago, and a
+    debug build auto-provisions a demo identity and never shows onboarding at all. Without this,
+    **#32** could not have been driven from the one build that points at the dev backend.
+  - `ActivationReport` turns each outcome into operator-facing words **plus what may be done next**.
+    The two flags exist for one case: after `Unreachable` the *same* code is safe to resend, while a
+    *different* code may burn a spare on a pump the server has already registered. Typing a
+    different code there **warns rather than blocks** — support may have confirmed the first never
+    landed, and an operator who did the right thing must not be stuck.
+  - The **device ID is on screen from the first frame**, because the recovery for an ambiguous
+    activation is an operator reading it out to support. `PumpActivationRepository` gains `pumpId`
+    so the panel can also say what the unit is registered *as*.
+  - ⚠️ **Design-authority flag:** no activation screen exists in `docs/Strict design screens/`, so
+    the layout is invention — the same deviation already on record for the error screen. Tokens and
+    components are the existing ones.
+  - **Not covered by tests:** `OnboardingViewModel`'s step sequencing. It takes an Android `Context`
+    for logo decoding and the project has no Robolectric or mocking library, so there is no cheap
+    JVM fake. The outcome-to-next-move logic, which is the part worth protecting, has 13 tests.
+
+- [x] **30. Activation now keeps what it is given.** `PumpApiClient.activate()` existed and **nothing
+  called it**: it returned the once-only `apiKey`/`signingSecret` and no caller saved them, so
+  redeeming the single-use code would have marked the pump activated server-side and dropped the
+  keys. `PumpActivationRepository` makes the call, the save and a **read-back** one operation.
+  - The **read-back** is the point: `save()` returning proves only that nothing threw, and the
+    Keystore store deliberately discards an undecryptable blob, so a bad write looks like success.
+  - Outcomes separate `Refused` (nothing issued, try a fresh code) from `Unreachable` (**unknown,
+    not "no"** — a timeout can land after the server committed) from `CredentialsLost` (spent, and
+    the answer is gone — *including* an unparseable success body).
+  - Guards: already-activated is refused **locally** (a valid second code would overwrite and
+    abandon the backend's `pumpId`); the `deviceId` echo is checked and a mismatch **keeps** the
+    credentials while reporting the disagreement.
+- [ ] **31. Two questions to the backend before the code is used.** Both shrink a one-way door to
+  nothing: **are dev activation codes re-issuable** (our "single-use" claim is asserted in
+  `API_CONFORMANCE_AUDIT.md` **without a quoted Reference line** — it may be our own assumption
+  carried forward), and **can a dev pump be reset and re-activated** against the same deviceId.
+- [ ] **32. THE GATE — redeem one code on dev.** Everything left on the API line is behind it, and
+  it should all be done in one sitting while the server is in a known state:
+  1. Activate once. Confirm the credentials survive a process restart.
+  2. `GET /config` → **capture the literal payload** and build its fixture from those bytes, not
+     from our restatement (that is how #11 got in). Unblocks 7b's second half.
+  3. `/authorise` happy path, then a deliberate **amount mismatch** → confirms whether stable codes
+     arrived on that path (#18f).
+  4. Send a **decimal `amount`** → settles #18c by observation.
+  5. Poll `/transactions/{id}` → the real status set (#18d).
+  6. Confirm **GET signing** (we send `timestamp + "." + ""`) and the **clock-skew** strings (#15).
+  7. `/transactions/upload` last.
+  - Drive it through `PumpApiClient`, **not curl** — what is under test is our signing, our envelope
+    parsing and our credential store. A curl script would test a second implementation we do not
+    ship.
+  - **Do not loosen `PumpLoggingInterceptor`** to see the `/activate` response (#12): assert on the
+    parsed object and redact before anything reaches disk.
+- [ ] **33. `docs/api-probes/2026-09-12/probe.sh` is re-runnable** and sends no secrets. Re-run it
+  after any backend deploy to see whether the 401s have grown a `code` field yet (#18f).
+
+---
 
 ## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SPLIT — docs/app on `main`, firmware held)
 
@@ -377,6 +484,44 @@ original five, plus `15dee70` from the bench gate.
 
 ## Now — unblocked, high value
 
+- [~] **34. Release signing — BUILD SIDE DONE 2026-09-12, keystore still owed.** Was: no
+  `signingConfig` at all and the scaffold's `versionCode = 1` / `versionName = "1.0"`, so a release
+  APK was **unsigned and could not be installed** on a station tablet. It had been on no list
+  anywhere, which was the dangerous part.
+  - `signingConfigs` now reads `keystore.properties` (gitignored, template committed as
+    `keystore.properties.example`) or the four `SMARTPUMP_*` environment variables for CI. Version
+    is declared once at the top of the build file with the bump rule stated.
+  - **Absent credentials leave release UNSIGNED rather than failing configuration** — a fresh clone,
+    a CI lint run and every debug build must work without the station's private key. The build logs
+    a loud warning instead, and `docs/RELEASE.md` makes `apksigner verify` a required step.
+  - **The keystore itself is DEFERRED TO LAST — decided 2026-09-12.** It is not on the critical
+    path: signing is a prerequisite of the **parallel run**, which waits on the K-factor, which
+    waits on Kelvin. And key **custody is the boss's decision** (who holds it, where the backup
+    lives, whether it survives people moving on) — with a prior question worth asking, namely
+    whether **Balancee already has an Android signing key**, since generating a second would be
+    wrong. Creating a key is *not* irreversible: it only binds once a build signed with it is
+    installed on a tablet expected to receive updates.
+  - When it happens: `keytool` command in `docs/RELEASE.md`, fill in `keystore.properties`, and
+    **back the file up off the laptop** — losing it ends the app's upgrade path, because a field
+    tablet will refuse an APK signed by a different key and reinstalling wipes local history *and*
+    the activation identity.
+  - **Do R8 after this, not before** (see the deferred minify item), so a broken release build can
+    only have one cause at a time.
+  - ⚠️ **A debug build cannot stand in for the parallel run** — it seeds its own price, exposes the
+    debug hotspot, points at the dev backend, and installs under a different application id. Full
+    reasoning in [`V1_BLOCKERS.md`](V1_BLOCKERS.md).
+- [x] **35. Receipt sharing — DONE 2026-09-12.** Was a no-op: `CustomerViewModel.onShareReceipt()`
+  was an empty function while the Share button was **live** on the completion screen, so a customer
+  tapped it and got silence. Now builds a plain-text receipt and sends it to the Android system
+  share sheet (**OQ #14**, already resolved — no bespoke print-to-cashier channel). Part of 7f.
+  - **Plain text deliberately:** the OS offers WhatsApp / SMS / email, and the receipt has to
+    survive being pasted into any of them. A PDF or image renders in some and is useless in others.
+  - **The record is re-read from the audit log**, not rendered from screen state: the state carries
+    no completion time, so a screen restored after a power cut would otherwise be dated "now".
+    Needed a new `TransactionRepository.getTransaction(id)` + DAO query. Falls back to screen state
+    if the row is missing, which is possible because `saveTransaction` is best-effort.
+  - `buildReceiptText` is a pure function with an injectable zone, so the exact characters a
+    customer receives are asserted in tests rather than eyeballed.
 - [x] **10. Verify `KeystorePumpCredentialsStore` crypto** (instrumented test) — **merge gate CLOSED
   2026-07-08.** `app/src/androidTest/.../data/network/KeystorePumpCredentialsStoreTest.kt` (first
   androidTest in the project; commit `91fa772`) — covers not-activated, save→current round-trip,

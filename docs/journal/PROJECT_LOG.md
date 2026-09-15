@@ -63,6 +63,112 @@ survive into production.
 
 ---
 
+## Previous status — 2026-09-12 (Phase 9c: the activation code finally has a way in)
+
+**Phase 9c is on `feature/onboarding-activation`, one commit (`ce4a0b8`) off
+`feature/api-live-probe`** — branched from there rather than from `main` because it builds directly
+on `5a378fe`, which is not merged. No bench gate: nothing here is device-specific. Verified: JVM
+**184 tests / 22 classes** green (170 → 184); `compileDebugRealHwKotlin` and `lintDebug` clean, with
+no new lint findings.
+
+**What was wrong.** `PumpActivationRepository` was built the same morning with **no caller**. The
+call, the save and the read-back were all correct and completely unreachable: nothing in the app
+asked an operator for an activation code, so a code arriving from Balanceè could not be redeemed,
+and **#32** — the one-sitting sequence that unblocks the rest of the API line, and that insists on
+being driven through `PumpApiClient` rather than curl — had nothing to drive it from.
+
+**What was built.** Two entry points sharing one panel and one `ActivationViewModel`:
+
+- **Onboarding step 4.** Provisioning moved from the PIN confirm-match to the end of the new step.
+  That reordering is the substance of the change, not housekeeping: writing the identity row *is*
+  what ends onboarding, because `IdentityGateViewModel` observes that row and swaps the screen out,
+  so provisioning at step 3 would have made step 4 unreachable. The PIN is held in memory across
+  the activation step, which is no worse than it already was across the confirm entry.
+- **The operator settings screen**, behind the attendant PIN. This one was not in the original
+  suggestion and turns out to matter more: a pump installed before its code was issued finished
+  onboarding long ago and will never see it again, and **every debug build auto-provisions a demo
+  identity and never shows onboarding at all**. An onboarding-only entry would therefore have been
+  unreachable in exactly the build that points at the dev backend — #32 would still have been
+  blocked, for a new reason.
+
+**Activation is optional, deliberately.** A pump is routinely installed before its code exists, and
+cash sales do not need one. The exit reads "Finish without activating" rather than hiding as a skip
+link, and the panel says plainly that cash works and card does not.
+
+**The outcome copy carries a decision, not just words.** `ActivationReport` maps each of the six
+outcomes to operator-facing text **plus what may be done next**, as two separate flags. They diverge
+on exactly one case, which is the case an installer will get wrong: after `Unreachable` the *same*
+code is safe to resend, while a *different* code may burn a spare on a pump the server has already
+registered. Typing a different code there **warns rather than blocks** — support may have confirmed
+the first code never landed, and an operator who did the right thing must not be stuck behind a
+guard with no key. The device ID is on screen from the first frame, because that recovery is a phone
+call about this specific unit; `PumpActivationRepository` gained `pumpId` so the panel can also say
+what the unit is registered *as*.
+
+⚠️ **Design-authority flag (CLAUDE.md).** There is **no activation screen in `docs/Strict design
+screens/`**, so this layout is invention — the same deviation already on record for the error
+screen. Tokens and components are the existing ones; only the arrangement is new.
+
+**Not covered by tests:** `OnboardingViewModel`'s step sequencing. It takes an Android `Context` for
+logo decoding, and the project has no Robolectric and no mocking library, so there is no cheap JVM
+fake for it. The outcome-to-next-move logic, which is the part worth protecting, has 13 tests.
+
+**Still the gate:** the activation code itself. #32 is now runnable the moment one lands.
+
+---
+
+## Previous status — 2026-09-12 (first real backend contact; two untracked V1 gaps closed)
+
+**Everything below is on `feature/api-live-probe`, 15 commits off `main` at `3aea28c`, unmerged and
+with no bench gate** — nothing here is device-specific. Verified at the last commit: JVM **170 tests
+/ 21 classes** green, `compileDebugRealHwKotlin` + `lintDebug` + `assembleRelease` clean.
+
+**Start here next session:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) sorts the remaining work by *who is
+holding it up*. Three candidates need nobody: an **activation step in onboarding** (done 2026-09-12,
+see the status above), the **transaction upload job** (7e — `workmanager` is not in the catalogue and nothing marks a row
+synced), and a **draft of the OQ #22 options** (the last open decision). Everything else waits on
+the bench rig, Kelvin, Olonade, or the activation code.
+
+**Phase 9b (same day) closed two V1 gaps that were tracked nowhere at all.** Release builds could
+not be signed — no `signingConfig` existed, so `assembleRelease` produced an uninstallable APK, and
+nothing would have caught it until someone tried to put a build on a tablet. The build side is now
+in; **the keystore itself is deferred to last by decision**, since signing gates the parallel run
+(which waits on the K-factor) and key custody is the boss's call. Separately, **receipt sharing was
+an empty function** behind a live button, and now works. **OQ #17 is settled**: customer gets one
+plain line, diagnostics go to the swipe-up attendant panel, and the long-dead `recoverable` flag now
+changes what the card looks like.
+
+**Phase 9 — first contact with the real backend.**
+The project has now made real requests to a real Balancee server for the first time — every prior
+test ran against fixtures we wrote ourselves, which is the arrangement that let the response-envelope
+defect through in August.
+
+**What the probe settled** (evidence in `docs/api-probes/2026-09-12/`, no credentials sent, nothing
+spendable touched): **both endpoints from `BOSS_CONFIRMATIONS_DRAFT.md` items 1 and 2 are deployed on
+dev**; **our four signing header names are correct**; the **literal failure envelope** is captured for
+the first time; and a **top-level `code` exists on the 400 from `/activate` but on none of the 401s**,
+so the stable-error-code ask is half built. The server checks the API key *before* the timestamp and
+signature, so **GET signing and clock skew cannot be tested from outside** — they now sit behind
+activation with the `/config` payload, the decimals question and the status set.
+
+**Two fixes rode on that.** TODO #14's parsing half is done — 4xx refusals now arrive as
+`ApiError.Business` with the server's own message and code, on observed bytes rather than inference
+(its *mapping* half is still blocked on attendant copy, OQ #17). And **activation is now safe to
+spend**: `PumpApiClient.activate()` had no caller, so redeeming the single-use code would have
+marked the pump activated server-side and thrown the once-only keys away. Call, save and read-back
+are now one operation with outcomes that distinguish "refused" from "unknown" from "the code is
+spent and the answer is lost".
+
+**The activation code is now the gate on everything remaining.** Two questions to the backend shrink
+the risk before it is used: are dev codes re-issuable, and can a dev pump be reset and re-activated.
+Unchanged and independent of all of it: the **7h bench gate** and the **7g firmware gate**, both of
+which need only the Arduino.
+
+Verified: JVM **155 tests / 19 classes** green (125 → 155); `compileDebugRealHwKotlin` and
+`lintDebug` clean.
+
+---
+
 ## Previous status — 2026-09-11 (7h built on a branch; bench run outstanding)
 
 **Phase 7h — pulse continuity across restarts — is BUILT on `feature/phase-7h-pulse-continuity`**
@@ -921,3 +1027,161 @@ and see the resumed screen show *more* litres than it did at the kill.
 
 **Next:**
 The bench run. Then merge, and back to the #18 asks, which remain the critical path by lead time.
+
+---
+
+### Phase 9 — first contact with the real backend
+**Date:** 2026-09-12
+**Status:** done
+**Commit(s):** `f77cfb3` (probe evidence) / `4970c4e` (error-envelope parsing, TODO #14 half) /
+`5a378fe` (activation persistence) — branch `feature/api-live-probe`, off `main` at `3aea28c`
+
+**Summary (plain language):**
+Until today nothing in this project had ever spoken to a real Balancee server. Every test passed
+against a pretend server we built ourselves from the API document, which is exactly the arrangement
+that let a serious bug through in August. We sent five real requests to the development server —
+carrying no passwords and unable to spend anything — and learned three useful things. Both of the
+new endpoints we asked the backend team for are built and running. The names we use to identify
+ourselves in every request are correct. And we captured what a real error from the server actually
+looks like, which the document describes but never shows.
+
+We then fixed the two things that finding out made possible. The app now understands the server's
+refusals ("out of stock", "amount mismatch") instead of treating them as an unreadable blob. And the
+one step that can never be repeated — redeeming the pump's activation code — now actually keeps what
+it is given. Before today it would have thrown the pump's permanent keys away and left the code
+spent.
+
+**Technical notes:**
+- **The probe.** Five unauthenticated requests against `api.dev.balancee.app`, captured verbatim in
+  `docs/api-probes/2026-09-12/` with a re-runnable `probe.sh`. No credentials exist to send and
+  none were sent; the `/activate` probe carries `{}`, so it cannot redeem a code.
+  - **Both new endpoints are deployed** — items 1 and 2 of `BOSS_CONFIRMATIONS_DRAFT.md`.
+    `X-Matched-Path` settles it past the status code: `/api/pump/config` and
+    `/api/pump/transactions/[id]`. The control request proves the inference: an undeployed route
+    returns an HTML 404 with `X-Matched-Path: /404`, so a JSON envelope is a real handler answering.
+  - **Our four signing header names are correct.** Sending `X-Api-Key` / `X-Device-Id` /
+    `X-Timestamp` / `X-Signature` moves the server off `Missing pump authentication headers` and
+    onto `Invalid API key`. Previously this was only our reading of Reference §3.
+  - **The literal failure envelope, first sight.** `{"status":false,"message":…}`, `data` absent.
+    §1 describes it; the document never prints one.
+  - **A top-level `code` exists on one path.** The 400 from `/activate` returns
+    `"code":"INVALID_REQUEST"` as a sibling of `message`, **not** inside `data`. That is the stable
+    error code asked for in draft item 3 — so the ask was partly built, and the remaining gap is now
+    specific rather than general.
+  - **What the probe cannot reach.** The server validates the API key *first*: a two-hour-stale
+    `X-Timestamp` and a request with `X-Signature` removed entirely both return `Invalid API key`.
+    So GET signing and the 5-minute freshness window (#15) are untestable from outside, and sit
+    behind activation along with the `/config` payload shape, the decimals question and the full
+    status set.
+- **TODO #14, parsing half (`4970c4e`).** `safeApiCall` now reads the envelope back out of a non-2xx
+  body and returns `ApiError.Business(message, code, httpCode)`. Parsing is conservative: only a
+  JSON object with a real boolean `status:false` counts, so an HTML 404, a plain-text 502 and a 4xx
+  whose envelope claims success all stay `ApiError.Http` with the bytes intact — a deployment
+  mistake must not read as the server declining a sale. Retryability is unchanged. Every fixture is
+  a byte-for-byte copy from `docs/api-probes/`. One existing test *changed* rather than being added
+  to: it asserted the old opaque-blob behaviour.
+  - **The mapping half is still blocked**, on copy rather than code: no error screen exists in
+    `docs/Strict design screens/` and OQ #17 is open.
+- **Activation persistence (`5a378fe`).** `PumpActivationRepository` + impl. `PumpApiClient.activate()`
+  existed and **nothing called it** — it returned the credentials and no caller saved them, so
+  running it would have spent the single-use code, marked the pump activated server-side and dropped
+  the once-only `apiKey`/`signingSecret`. The call, the save and a **read-back** are now one
+  operation.
+  - **The read-back is the point.** `save()` returning without throwing proves only that nothing
+    escaped, and the Keystore store deliberately discards an undecryptable blob — so a write that
+    produced one would look exactly like success. Write retried once: giving up on a transient
+    failure costs a revoke-and-reissue.
+  - **Outcomes separate three things a caller must not confuse.** `Refused` = nothing issued, try a
+    fresh code. `Unreachable` = **unknown, not "no"** (a timeout or 5xx can land after the server
+    committed) → ask the backend whether this deviceId activated before burning a second code.
+    `CredentialsLost` = the server activated us and the answer did not survive, *including* a
+    success body we could not parse — deliberately not softened into "retry".
+  - **Two guards.** Activating an already-activated device is refused locally and never sent (a
+    valid second code would succeed and overwrite, abandoning the `pumpId` the backend holds). And
+    the `deviceId` echo is checked — a mismatch **keeps** the credentials (they are the
+    irreplaceable half, and the server's own id is what it authenticates) but reports the
+    disagreement, which nothing downstream could otherwise detect.
+  - No secret appears in any outcome message.
+- **Verified:** JVM **155 tests / 19 classes** green (125 → 155); `compileDebugRealHwKotlin` and
+  `lintDebug` clean. Nothing device-specific here, so no instrumented run was needed.
+
+**Next:**
+The activation code is the gate on everything left. With it: redeem once on dev, capture `/config`'s
+literal payload and build its fixture from those bytes, then settle GET signing, clock skew, the
+decimals question and the full status set in the same sitting. Ask the backend two things first —
+are dev codes re-issuable, and can a dev pump be reset and re-activated — since that decides whether
+this stays a one-way door. Independently: the 7h bench gate and the 7g firmware gate, both of which
+need only the Arduino.
+
+---
+
+### Phase 9b — the V1 gaps that were tracked nowhere, plus error copy
+**Date:** 2026-09-12
+**Status:** done (signing partial by decision)
+**Commit(s):** `68c7107` blocker inventory / `9ab8f58` release signing / `5e92572` release doc /
+`e250849` receipt sharing / `d23db1a` + `94bda66` board / `b65cd5c` + `c2c62f9` + `16d4495` +
+`99f6e66` + `6a055e1` error copy — all on `feature/api-live-probe`
+
+**Summary (plain language):**
+Asked what was still standing between the app and V1, and two answers turned out to be written down
+nowhere. The app could not produce an installable release build at all, because it had no signing
+setup — that would have been discovered on the day someone tried to put it on a station tablet. And
+the Share button on the receipt screen did nothing; it had been an empty function since Phase 3.
+Both are now fixed. We also settled how the pump talks to people when something goes wrong: the
+customer gets one plain sentence they can act on, and the technical explanation goes to the
+attendant panel behind the PIN, where somebody can actually use it.
+
+**Technical notes:**
+- **`V1_BLOCKERS.md`** — a new view of the same work the board tracks, sorted by *who is holding it
+  up* rather than by phase. Points at TODO/OQ numbers and deliberately does not restate them.
+- **TODO #34 release signing — build side done, keystore DEFERRED TO LAST by decision.** There was
+  no `signingConfig` at all and `release` still carried the scaffold's `versionCode = 1` /
+  `versionName = "1.0"`. Credentials now come from a gitignored `keystore.properties` or four
+  `SMARTPUMP_*` env vars; absent credentials leave release **unsigned rather than failing
+  configuration**, so a fresh clone and CI still work, with a loud warning and `docs/RELEASE.md`
+  making `apksigner verify` mandatory. Verified: `assembleRelease` emits `app-release-unsigned.apk`.
+  - **Deferred because it is not on the critical path** — signing gates the *parallel run*, which
+    gates on the K-factor, which waits on Kelvin. And **key custody is the boss's call**, with a
+    prior question worth asking: does Balancee already have an Android signing key?
+  - **Recorded: a debug build cannot stand in for the parallel run.** It seeds its own price/fuel
+    via `seedDefaultConfigIfMissing()` (true for `debugRealHw` too — it is `initWith(debug)`),
+    exposes the long-press debug hotspot with live price editing and payment force-resolve, points
+    at the dev backend, and installs under a different application id. Later demonstrated
+    accidentally: a unit test could not simulate an unconfigured pump with a null config, because
+    `BuildConfig.DEBUG` is true under test and the seed fired.
+- **TODO #35 receipt sharing — DONE.** `onShareReceipt()` was empty while the button was live.
+  Plain text through the Android system share sheet (OQ #14). The record is **re-read from the audit
+  log**, not rendered from screen state, so a receipt shared after a power-cut resume is not dated
+  "now" — needed a new `TransactionRepository.getTransaction(id)` + DAO query, falling back to
+  screen state because `saveTransaction` is best-effort. Month names are **pinned in code**: `MMM`
+  under `Locale.UK` renders "Sept" on a modern JVM and "Sep" elsewhere, and the JVM's CLDR data is
+  not Android's ICU data.
+- **OQ #17 error copy — SETTLED, all five review items.** Drafted as
+  [`ERROR_COPY_DRAFT.md`](ERROR_COPY_DRAFT.md) so it could be decided by reviewing words rather than
+  answering an abstract question. **Design-authority flag stands on record: there is no error screen
+  in `docs/Strict design screens/`**, so both the words and the layout are a deviation.
+  - **The split:** customer gets one plain line ("…please see attendant"), diagnostics go to the
+    **swipe-up attendant panel** — already behind the PIN, already what an attendant opens, and the
+    PUMP SETTINGS button that fixes most cases is in the same chrome row.
+  - `TransactionState.Error` gains `attendantDetail`. **No Room migration**: state persists as
+    kotlinx JSON in one column, and a new field with a default decodes from older rows.
+  - **`recoverable` is finally read.** It was carried on every error and used by nothing, so a dead
+    end looked identical to a retry. Gold vs red, reusing the app's existing colour vocabulary; the
+    button's *action* is unchanged, since there is no retry in the state machine.
+  - Fixed two leaks onto the customer display: the payment processor's raw reason and the USSD SMS
+    parser string. Fixed two wordings for one condition — the missing-field copy now lives on
+    `CanStartTransactionUseCase` and is shared with the operator screen.
+  - 6 new tests assert **the split, not the prose**: no naira figure, no gateway error on the
+    customer line.
+  - **Catalogue A (server errors) is written but NOT wired** — nothing receives an `ApiError` until
+    the payment flows (#8) exist. Wiring it now would carry text nothing reads.
+- **Verified:** JVM **170 tests / 21 classes** green (155 → 170); `compileDebugRealHwKotlin`,
+  `lintDebug` and `assembleRelease` clean. No instrumented run needed — nothing device-specific.
+
+**Next:**
+Three unblocked candidates, none needing the rig, the backend or the boss: an **activation step in
+onboarding** (the `PumpActivationRepository` built earlier today has no caller, so an arriving code
+could not actually be redeemed by an operator); the **transaction upload job** (7e — needs
+`workmanager` re-added and a `markSynced` path, neither of which exists); and a **draft of the
+OQ #22 options**, the last open decision. Everything else waits on the bench rig, Kelvin, Olonade or
+the activation code.

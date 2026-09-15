@@ -41,12 +41,14 @@ import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.Surface
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.TextSecondary
 import app.balancee.smartpump.display.ui.theme.TextTertiary
+import app.balancee.smartpump.display.ui.theme.WarningRed
 
 @Composable
 fun AttendantPanel(
@@ -122,6 +124,14 @@ fun AttendantPanel(
             }
         }
 
+        // The diagnostic half of an error (OQ #17, item 3 decided 2026-09-12: this panel). It sits
+        // here rather than on the customer card because the panel is already behind the PIN and is
+        // what an attendant opens when a customer waves them over — no new navigation, and the
+        // PUMP SETTINGS button that fixes most of these is in the same chrome row above.
+        (state as? TransactionState.Error)?.attendantDetail?.let { detail ->
+            AttendantErrorBanner(detail = detail, recoverable = state.recoverable)
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -180,6 +190,39 @@ fun AttendantPanel(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+}
+
+/**
+ * The attendant's half of an error: what actually went wrong and what to do about it.
+ *
+ * Deliberately plain and full-width rather than a card — it is information, not an action, and the
+ * three action cards below must stay the only things that look tappable. The accent matches the
+ * customer card's (gold when trying again could work, red when it cannot) so a glance at both
+ * screens tells the same story.
+ */
+@Composable
+private fun AttendantErrorBanner(detail: String, recoverable: Boolean) {
+    val accent = if (recoverable) PrimaryGold else WarningRed
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = Surface,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(Dimensions.cornerChip),
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        LabelText(
+            text = if (recoverable) "Needs attention" else "Cannot sell",
+            color = accent,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = detail,
+            style = MaterialTheme.typography.bodyLarge,
+            color = TextPrimary,
+        )
     }
 }
 

@@ -276,8 +276,13 @@ class PumpApiClientTest {
 
     // ---- Transport failures (unchanged by #11) -------------------------------------------------
 
+    /**
+     * Changed by TODO #14: this used to assert [ApiError.Http] with the reason left as an opaque
+     * blob. A 4xx whose body is a failure envelope is a considered refusal, so it now arrives as
+     * [ApiError.Business] with the server's own message and the HTTP status filled in.
+     */
     @Test
-    fun `non-2xx maps to Http error carrying code and body`() = runBlocking {
+    fun `4xx with a failure envelope maps to Business carrying message and httpCode`() = runBlocking {
         server.enqueue(
             MockResponse().setResponseCode(400).setBody(
                 """{"status":false,"message":"Amount mismatch for PETROL..."}""",
@@ -288,10 +293,77 @@ class PumpApiClientTest {
 
         assertTrue(result is ApiResult.Failure)
         val error = (result as ApiResult.Failure).error
+        assertTrue(error is ApiError.Business)
+        assertEquals("Amount mismatch for PETROL...", (error as ApiError.Business).message)
+        assertEquals(400, error.httpCode)
+        assertNull(error.code) // this endpoint sends no stable code today
+    }
+
+    /**
+     * Verbatim from docs/api-probes/2026-09-12/body-activate-empty-body.json — the real 400 from
+     * api.dev.balancee.app. The `code` sibling is the only stable identifier the server gives us.
+     */
+    @Test
+    fun `the real 400 from activate yields its stable code`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(400).setBody(
+                """{"status":false,"message":"An activation code is required.","code":"INVALID_REQUEST"}""",
+            ),
+        )
+
+        val result = client.activate("")
+
+        assertTrue(result is ApiResult.Failure)
+        val error = (result as ApiResult.Failure).error
+        assertTrue(error is ApiError.Business)
+        assertEquals("INVALID_REQUEST", (error as ApiError.Business).code)
+        assertEquals("An activation code is required.", error.message)
+        assertEquals(400, error.httpCode)
+    }
+
+    /**
+     * Verbatim from docs/api-probes/2026-09-12/body-config-no-auth.json. A 401 with no `code` —
+     * the case that makes the field nullable rather than required.
+     */
+    @Test
+    fun `the real 401 maps to Business with a null code`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(401).setBody(
+                """{"status":false,"message":"Missing pump authentication headers"}""",
+            ),
+        )
+
+        val result = client.config()
+
+        assertTrue(result is ApiResult.Failure)
+        val error = (result as ApiResult.Failure).error
+        assertTrue(error is ApiError.Business)
+        assertEquals("Missing pump authentication headers", (error as ApiError.Business).message)
+        assertEquals(401, error.httpCode)
+        assertNull(error.code)
+    }
+
+    /**
+     * A route the backend never built answers with an HTML error page, not an envelope — that is
+     * what api.dev.balancee.app actually returns (the control capture). It must stay
+     * [ApiError.Http] with the bytes intact, or a deployment mistake would read as the server
+     * refusing the sale.
+     */
+    @Test
+    fun `a non-envelope 4xx body stays an Http error with the bytes intact`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(404)
+                .setHeader("Content-Type", "text/html")
+                .setBody("<!DOCTYPE html><html><head><title>404</title></head></html>"),
+        )
+
+        val result = client.authorise(authoriseReq)
+
+        assertTrue(result is ApiResult.Failure)
+        val error = (result as ApiResult.Failure).error
         assertTrue(error is ApiError.Http)
-        assertEquals(400, (error as ApiError.Http).code)
-        // The message is still an opaque blob here — parsing it out is TODO #14.
-        assertTrue(error.body!!.contains("Amount mismatch for PETROL"))
+        assertEquals(404, (error as ApiError.Http).code)
+        assertTrue(error.body!!.contains("<!DOCTYPE html>"))
     }
 
     @Test

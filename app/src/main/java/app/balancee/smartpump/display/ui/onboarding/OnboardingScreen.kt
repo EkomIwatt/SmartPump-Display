@@ -1,6 +1,11 @@
 // First-boot install flow shown when StationIdentityRepository.isProvisioned() == false.
-// Locks the device until the operator finishes all three steps; the customer-facing host
+// Locks the device until the operator finishes all four steps; the customer-facing host
 // is not reachable from this screen, only the engineering long-press hotspot stays live.
+//
+// Step 4 is activation, and it is the one step that may be finished without doing anything: a
+// pump is often installed before its code has been issued, and cash sales do not need one. So
+// "Finish without activating" is a first-class exit, not a hidden escape — and the same panel is
+// reachable later from the operator settings screen, which is how a pump activated after install.
 package app.balancee.smartpump.display.ui.onboarding
 
 import android.graphics.BitmapFactory
@@ -42,6 +47,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.balancee.smartpump.display.ui.activation.ActivationPanelContent
+import app.balancee.smartpump.display.ui.activation.ActivationUiState
+import app.balancee.smartpump.display.ui.activation.ActivationViewModel
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
@@ -66,8 +74,10 @@ import androidx.compose.foundation.shape.CircleShape
 fun OnboardingScreen(
     modifier: Modifier = Modifier,
     vm: OnboardingViewModel = hiltViewModel(),
+    activationVm: ActivationViewModel = hiltViewModel(),
 ) {
     val state by vm.ui.collectAsState()
+    val activation by activationVm.ui.collectAsState()
 
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -85,7 +95,7 @@ fun OnboardingScreen(
         PumpHeader(
             pumpLabel = "Pump 1",
             mode = "Setup",
-            stateLabel = "Step ${state.step.ordinal + 1} of 3",
+            stateLabel = "Step ${state.step.ordinal + 1} of ${state.stepCount}",
             stateColor = BrandBlue,
         )
 
@@ -129,6 +139,12 @@ fun OnboardingScreen(
                         onDigit = vm::onPinDigit,
                         onBackspace = vm::onPinBackspace,
                     )
+
+                    OnboardingStep.Activation -> ActivationStep(
+                        activation = activation,
+                        onCodeChange = activationVm::setCode,
+                        onActivate = activationVm::submit,
+                    )
                 }
             }
         }
@@ -137,6 +153,8 @@ fun OnboardingScreen(
             step = state.step,
             canAdvanceIdentity = state.canAdvanceIdentity,
             submitting = state.submitting,
+            activated = activation.activated,
+            activating = activation.submitting,
             onBack = vm::goBack,
             onNext = vm::goNext,
         )
@@ -319,11 +337,48 @@ private fun PinStep(
     }
 }
 
+/**
+ * Step 4. The panel itself is shared with the operator settings screen; only the framing copy
+ * here is onboarding-specific, because at install time the code may simply not exist yet.
+ */
+@Composable
+private fun ActivationStep(
+    activation: ActivationUiState,
+    onCodeChange: (String) -> Unit,
+    onActivate: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        LabelText(text = "Step 4 · activation", color = BrandBlue)
+        HeroSerifText(
+            text = if (activation.activated) "This pump is live." else "Connect to Balanceè.",
+            color = if (activation.activated) SuccessGreen else BrandBlue,
+        )
+        Text(
+            text = if (activation.activated) {
+                "Activation is done. Finish setup and the pump is ready to sell."
+            } else {
+                "If the activation code hasn't arrived yet, finish without it. Cash sales work " +
+                    "straight away, and an attendant can activate later from pump settings."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+        )
+
+        ActivationPanelContent(
+            state = activation,
+            onCodeChange = onCodeChange,
+            onSubmit = onActivate,
+        )
+    }
+}
+
 @Composable
 private fun NavigationRow(
     step: OnboardingStep,
     canAdvanceIdentity: Boolean,
     submitting: Boolean,
+    activated: Boolean,
+    activating: Boolean,
     onBack: () -> Unit,
     onNext: () -> Unit,
 ) {
@@ -352,6 +407,24 @@ private fun NavigationRow(
                 label = "Next",
                 onClick = onNext,
                 variant = BalanceeButtonVariant.Brand,
+                modifier = Modifier.weight(1f),
+            )
+
+            OnboardingStep.Activation -> BalanceeButton(
+                label = when {
+                    submitting -> "Saving setup…"
+                    activated -> "Finish setup"
+                    else -> "Finish without activating"
+                },
+                onClick = onNext,
+                variant = if (activated) {
+                    BalanceeButtonVariant.Brand
+                } else {
+                    BalanceeButtonVariant.Secondary
+                },
+                // Never let the install be closed out mid-request: the answer decides whether the
+                // code was spent, and this screen is where that answer is read.
+                enabled = !submitting && !activating,
                 modifier = Modifier.weight(1f),
             )
 

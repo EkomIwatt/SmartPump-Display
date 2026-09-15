@@ -10,6 +10,15 @@ interface TransactionRepository {
     /** Persist a completed transaction record. Append-only — records are never deleted. */
     suspend fun saveTransaction(transaction: Transaction)
 
+    /**
+     * One record by its pump-side id, or null if it was never saved.
+     *
+     * Null is a real outcome, not just a defensive branch: `saveTransaction` is called
+     * best-effort after a dispense completes (the customer already has fuel, so a failed write
+     * must not block the screen), so a completed sale can legitimately have no row.
+     */
+    suspend fun getTransaction(id: String): Transaction?
+
     /** Live stream of recent transactions ordered newest-first. */
     fun getRecentTransactions(limit: Int = 50): Flow<List<Transaction>>
 

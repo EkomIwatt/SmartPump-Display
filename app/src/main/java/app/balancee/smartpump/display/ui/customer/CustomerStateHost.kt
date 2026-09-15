@@ -33,6 +33,7 @@ import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.Dimensions
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.TextPrimary
 import app.balancee.smartpump.display.ui.theme.WarningRed
@@ -187,6 +188,7 @@ fun CustomerStateHost(
 
         is TransactionState.Error -> ErrorScreen(
             message = state.message,
+            recoverable = state.recoverable,
             onDismiss = onCancel,
             modifier = modifier,
         )
@@ -198,12 +200,27 @@ private fun priceKoboPerLitreFromState(state: TransactionState.Complete): Long =
         Math.round(state.amountKobo / state.litres)
     } else 0L
 
+/**
+ * Customer-facing failure card. [message] is the one plain line the customer gets; the diagnostic
+ * half lives in the attendant panel and never appears here (OQ #17).
+ *
+ * [recoverable] changes the presentation, which it did not until 2026-09-12 — the flag was carried
+ * on every error and read by nothing, so "try again" and "this pump cannot sell" looked identical
+ * to whoever was standing at the pump. Gold reads as "something to do" everywhere else in this app
+ * (it is the authorise/cash colour), red as a stop, so the distinction reuses that vocabulary
+ * rather than inventing one. The button does the same thing either way: there is no retry in the
+ * state machine, and inventing one here would be a behaviour change, not copy.
+ *
+ * No design screen covers this; see the flag at the top of ERROR_COPY_DRAFT.md.
+ */
 @Composable
 private fun ErrorScreen(
     message: String,
+    recoverable: Boolean,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val accent = if (recoverable) PrimaryGold else WarningRed
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -212,21 +229,24 @@ private fun ErrorScreen(
         contentAlignment = Alignment.Center,
     ) {
         BalanceeCard(
-            borderColor = WarningRed,
+            borderColor = accent,
             modifier = Modifier.sizeIn(maxWidth = 520.dp),
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                LabelText(text = "Error", color = WarningRed)
+                LabelText(
+                    text = if (recoverable) "Please try again" else "Cannot continue",
+                    color = accent,
+                )
                 Text(
                     text = message,
                     style = MaterialTheme.typography.headlineMedium,
                     color = TextPrimary,
                 )
                 BalanceeButton(
-                    label = "Back to idle",
+                    label = if (recoverable) "Start over" else "Back to idle",
                     onClick = onDismiss,
                 )
             }

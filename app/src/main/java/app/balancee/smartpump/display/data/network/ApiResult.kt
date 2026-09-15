@@ -26,11 +26,20 @@ sealed interface ApiError {
      * "Amount mismatch for PETROL…", "PETROL is currently out of stock". A considered refusal, so
      * never retryable.
      *
-     * [httpCode] is null for envelope-level failures on a 2xx response. Parsing the envelope out
-     * of 4xx *error* bodies — where these messages mostly arrive — is TODO #14; that work fills
-     * this in rather than adding a second type.
+     * [httpCode] is null for envelope-level failures on a 2xx response, and set when the envelope
+     * was recovered from a 4xx error body — which is where these messages mostly arrive.
+     *
+     * [code] is the server's stable error code (e.g. "INVALID_REQUEST"), and the thing worth
+     * matching on: the messages are human-readable prose with values interpolated into them, so
+     * matching those breaks silently the day someone rewords one. It is nullable because the
+     * server is inconsistent about sending it — observed on the 400 from /activate and on none of
+     * the 401s (docs/api-probes/2026-09-12/) — so callers must be able to degrade to [message].
      */
-    data class Business(val message: String?, val httpCode: Int? = null) : ApiError
+    data class Business(
+        val message: String?,
+        val code: String? = null,
+        val httpCode: Int? = null,
+    ) : ApiError
 
     /** A signed call was attempted before the device was activated (no credentials). Not retryable. */
     data object NotActivated : ApiError

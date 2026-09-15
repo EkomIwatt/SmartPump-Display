@@ -1,13 +1,21 @@
 // Backing VM for the install-time onboarding flow.
 //
-// Three steps:
+// Four steps:
 //   1. Identity   — station ID (typed) + display name.
 //   2. Logo       — optional PNG, scaled to 512px on the longer side and stored as bytes.
 //   3. PIN        — 4-digit PIN entered twice; second entry must match the first.
+//   4. Activation — redeem the Balanceè activation code. Optional, and owned by
+//                   ActivationViewModel; this VM only holds the step and the finish.
 //
 // On Finish, calls StationIdentityRepository.provision(...) which hashes the PIN and writes
 // the row. IdentityGateViewModel observes the same row and the gate flips to Provisioned,
 // dropping MainActivity into the normal customer/attendant host.
+//
+// Why provisioning waits for step 4 rather than firing when the PIN matches: writing the identity
+// row *is* what ends onboarding, because the gate observes that row and swaps the screen out from
+// under us. Provisioning at step 3 would therefore make step 4 unreachable. The PIN is held in
+// memory across the activation step instead, which is no worse than it already was across the
+// confirm entry.
 package app.balancee.smartpump.display.ui.onboarding
 
 import android.content.ContentResolver
@@ -37,7 +45,7 @@ private const val MIN_STATION_ID_LENGTH = 3
 private const val PIN_LENGTH = 4
 private const val TAG = "OnboardingVm"
 
-enum class OnboardingStep { Identity, Logo, Pin }
+enum class OnboardingStep { Identity, Logo, Pin, Activation }
 
 /** Sub-state inside the PIN step — first entry, then confirm-match. */
 enum class PinSubStep { Entering, Confirming }
@@ -55,6 +63,9 @@ data class OnboardingUiState(
     val error: String? = null,
     val finished: Boolean = false,
 ) {
+    /** Total steps, for the "Step n of N" caption. Derived so adding a step cannot desync it. */
+    val stepCount: Int get() = OnboardingStep.entries.size
+
     val canAdvanceIdentity: Boolean
         get() = stationId.trim().length >= MIN_STATION_ID_LENGTH &&
             displayName.trim().length >= MIN_DISPLAY_NAME_LENGTH
@@ -156,7 +167,9 @@ class OnboardingViewModel @Inject constructor(
 
             PinSubStep.Confirming -> if (snap.confirmPin.length == PIN_LENGTH) {
                 if (snap.firstPin == snap.confirmPin) {
-                    finishProvisioning()
+                    // Advance rather than save — see the file header on why provisioning is the
+                    // last thing that happens rather than the third.
+                    _ui.update { it.copy(step = OnboardingStep.Activation, error = null) }
                 } else {
                     _ui.update {
                         it.copy(
@@ -207,8 +220,10 @@ class OnboardingViewModel @Inject constructor(
             }
 
             OnboardingStep.Pin -> {
-                // Pin step finishes via auto-submit on confirm match; goNext is a no-op here.
+                // The PIN step advances itself once the confirm entry matches; goNext is a no-op.
             }
+
+            OnboardingStep.Activation -> finishProvisioning()
         }
     }
 
@@ -220,6 +235,18 @@ class OnboardingViewModel @Inject constructor(
             OnboardingStep.Pin -> _ui.update {
                 it.copy(
                     step = OnboardingStep.Logo,
+                    firstPin = "",
+                    confirmPin = "",
+                    pinSubStep = PinSubStep.Entering,
+                    pinMismatchFlash = false,
+                    error = null,
+                )
+            }
+            // Back from activation re-takes the PIN. Any activation already done is unaffected:
+            // the credentials live in their own store, not in this VM's state.
+            OnboardingStep.Activation -> _ui.update {
+                it.copy(
+                    step = OnboardingStep.Pin,
                     firstPin = "",
                     confirmPin = "",
                     pinSubStep = PinSubStep.Entering,
@@ -249,6 +276,7 @@ class OnboardingViewModel @Inject constructor(
                     it.copy(
                         submitting = false,
                         error = "Couldn't save setup. Try again.",
+                        step = OnboardingStep.Pin,
                         firstPin = "",
                         confirmPin = "",
                         pinSubStep = PinSubStep.Entering,

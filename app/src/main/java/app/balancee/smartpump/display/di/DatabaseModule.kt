@@ -14,11 +14,13 @@ import app.balancee.smartpump.display.data.db.TransactionDao
 import app.balancee.smartpump.display.data.repository.DeviceConfigRepositoryImpl
 import app.balancee.smartpump.display.data.repository.EventRepositoryImpl
 import app.balancee.smartpump.display.data.repository.PulseRepositoryImpl
+import app.balancee.smartpump.display.data.repository.PumpActivationRepositoryImpl
 import app.balancee.smartpump.display.data.repository.StationIdentityRepositoryImpl
 import app.balancee.smartpump.display.data.repository.TransactionRepositoryImpl
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
+import app.balancee.smartpump.display.domain.repository.PumpActivationRepository
 import app.balancee.smartpump.display.domain.repository.StationIdentityRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import dagger.Binds
@@ -81,4 +83,8 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindEventRepository(impl: EventRepositoryImpl): EventRepository
+
+    /** Backed by the API and the credential store, not Room — it sits here with the other repositories. */
+    @Binds @Singleton
+    abstract fun bindPumpActivationRepository(impl: PumpActivationRepositoryImpl): PumpActivationRepository
 }

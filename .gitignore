@@ -9,6 +9,12 @@
 .cxx
 local.properties
 
+# Release signing — the keys to every future update of this app. Never commit these.
+# `keystore.properties.example` IS tracked, as the template.
+keystore.properties
+*.jks
+*.keystore
+
 # Per-user Claude Code settings (settings.json stays tracked/shared)
 .claude/settings.local.json
 

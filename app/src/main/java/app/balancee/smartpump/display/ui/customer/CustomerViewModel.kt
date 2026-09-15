@@ -62,14 +62,17 @@ import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
+import app.balancee.smartpump.display.ui.util.buildReceiptText
 import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -129,6 +132,16 @@ class CustomerViewModel @Inject constructor(
 
     private val _ui = MutableStateFlow(CustomerUiState())
     val ui: StateFlow<CustomerUiState> = _ui.asStateFlow()
+
+    /**
+     * One-shot receipt text for the host to put through the system share sheet.
+     *
+     * A Channel rather than UI state: launching the share sheet is an event, and parking the text
+     * in [CustomerUiState] would re-fire it on every recomposition and again on a rotation. Nothing
+     * else in this ViewModel needs one, so the seam stays this single stream.
+     */
+    private val _shareReceipt = Channel<String>(Channel.BUFFERED)
+    val shareReceipt: Flow<String> = _shareReceipt.receiveAsFlow()
 
     private var paymentJob: Job? = null
     private var expiryJob: Job? = null
@@ -464,6 +477,7 @@ class CustomerViewModel @Inject constructor(
                         TransactionState.Error(
                             message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
+                            attendantDetail = CanStartTransactionUseCase.attendantDetail(result.missing),
                         )
                     )
                 }
@@ -567,6 +581,7 @@ class CustomerViewModel @Inject constructor(
                         TransactionState.Error(
                             message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
+                            attendantDetail = CanStartTransactionUseCase.attendantDetail(result.missing),
                         )
                     )
                 }
@@ -794,6 +809,7 @@ class CustomerViewModel @Inject constructor(
                         TransactionState.Error(
                             message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                             recoverable = true,
+                            attendantDetail = CanStartTransactionUseCase.attendantDetail(result.missing),
                         )
                     )
                 }
@@ -805,9 +821,15 @@ class CustomerViewModel @Inject constructor(
         if (currentState() !is TransactionState.CashFixedAmountEntry) return
         if (priceKoboPerLitre <= 0L) {
             setState(
+                // Was "Price not set — contact operator." — operator language on a
+                // customer-facing display, and a second wording for the condition the guard
+                // already has copy for. One condition, one sentence (OQ #17, approved 2026-09-12).
                 TransactionState.Error(
-                    message = "Price not set — contact operator.",
+                    message = CanStartTransactionUseCase.CUSTOMER_MESSAGE,
                     recoverable = true,
+                    attendantDetail = CanStartTransactionUseCase.attendantDetail(
+                        setOf(CanStartTransactionUseCase.Missing.PRICE),
+                    ),
                 )
             )
             return
@@ -818,9 +840,13 @@ class CustomerViewModel @Inject constructor(
             if (cutoff <= 0.0) {
                 // Smallest dispensable step is 0.01 L, i.e. priceKoboPerLitre / 100 kobo.
                 setState(
+                    // The attendant typed this amount, so the actionable number is theirs: it goes
+                    // to the panel, not onto the customer card (OQ #17).
                     TransactionState.Error(
-                        message = "Amount is below the minimum dispense (${formatNaira(priceKoboPerLitre / 100)}).",
+                        message = "Amount is too small — please see attendant.",
                         recoverable = true,
+                        attendantDetail = "Below the smallest dispensable step — the minimum at " +
+                            "this price is ${formatNaira(priceKoboPerLitre / 100)} for 0.01 L.",
                     )
                 )
                 return@launch
@@ -960,9 +986,12 @@ class CustomerViewModel @Inject constructor(
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
         setState(
+            // The reason comes from the bank SMS parser and means nothing to a customer standing
+            // at the pump; it is exactly what an attendant needs. Split per OQ #17.
             TransactionState.Error(
-                message = "USSD payment failed — $reason.",
+                message = "Payment was not completed.",
                 recoverable = true,
+                attendantDetail = "USSD payment failed — $reason.",
             )
         )
     }
@@ -1068,8 +1097,9 @@ class CustomerViewModel @Inject constructor(
         cancelInFlightJobs()
         setState(
             TransactionState.Error(
-                message = "Payment failed — ${failed.reason}.",
+                message = "Payment was not completed.",
                 recoverable = true,
+                attendantDetail = "Payment failed — ${failed.reason}.",
             )
         )
     }
@@ -1161,9 +1191,40 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Build the receipt and hand it to the UI to put through the system share sheet (OQ #14).
+     *
+     * The record is re-read from the audit log rather than rendered from the on-screen state,
+     * because the state does not carry a completion time and a screen restored after a power cut
+     * would otherwise be dated "now". If the row is missing — `saveTransaction` is best-effort, so
+     * that is possible — the screen state is used as the fallback: a receipt with the right money
+     * and litres beats no receipt, and the customer is standing there either way.
+     */
     fun onShareReceipt() {
-        // Wired to a real share sheet in Phase 7. Logged-only for now so the button isn't dead.
+        val complete = currentState() as? TransactionState.Complete ?: return
+        viewModelScope.launch {
+            val config = runCatching { deviceConfigRepository.getConfig() }.getOrNull()
+            val record = runCatching { transactions.getTransaction(complete.txnId) }.getOrNull()
+                ?: complete.asFallbackRecord()
+            _shareReceipt.send(buildReceiptText(record, config))
+        }
     }
+
+    /**
+     * The completion state as a [Transaction], for when the saved row cannot be read. `createdAt`
+     * defaults to now, which is only right because this path is reached seconds after the dispense
+     * — the saved row exists precisely so the normal path does not depend on that.
+     */
+    private fun TransactionState.Complete.asFallbackRecord() = Transaction(
+        id = txnId,
+        flow = flow,
+        paymentMethod = method,
+        litresDispensed = litres,
+        amountKobo = amountKobo,
+        priceKoboPerLitre = priceKoboPerLitre,
+        transactionRef = txnId,
+        attendantId = attendantId,
+    )
 
     fun onDismissComplete() {
         if (currentState() is TransactionState.Complete) onCancel()

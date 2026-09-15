@@ -10,6 +10,7 @@
 // hotspot is the only escape.
 package app.balancee.smartpump.display
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
@@ -30,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -109,6 +112,21 @@ private fun SmartPumpRoot(
             modifier = Modifier.fillMaxSize(),
         )
         return
+    }
+
+    // Receipt sharing (OQ #14 — the Android system share sheet, no bespoke channel). Collected
+    // here rather than in CompleteScreen: firing an intent needs the Activity context, and a
+    // one-shot event must not live inside a screen that recomposes. The ViewModel builds the text;
+    // this only carries it to the OS.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        customerVm.shareReceipt.collect { receipt ->
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, receipt)
+            }
+            context.startActivity(Intent.createChooser(send, null))
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

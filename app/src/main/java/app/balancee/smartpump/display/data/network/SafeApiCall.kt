@@ -16,6 +16,13 @@ import java.io.IOException
  * caught before the generic IOException arm. [EnvelopeFailureException] is a plain
  * RuntimeException and must be caught before the trailing Throwable arm, or a considered
  * "no" from the server degrades into [ApiError.Unknown].
+ *
+ * The HttpException arm reads the envelope back out of the error body (TODO #14) so a 4xx refusal
+ * arrives as [ApiError.Business] carrying the server's own reason and code, rather than as an
+ * opaque blob the caller has to re-parse. It only does so when the body really is a failure
+ * envelope; anything else — an HTML 404, a plain-text 502 from a proxy — stays [ApiError.Http]
+ * with the bytes intact. Retryability is unchanged by this: [ApiError.Business] is never retried,
+ * and 4xx was never retryable under [isRetryable] either, so nothing that used to back off stops.
  */
 suspend fun <T> safeApiCall(block: suspend () -> T): ApiResult<T> =
     try {
@@ -25,10 +32,15 @@ suspend fun <T> safeApiCall(block: suspend () -> T): ApiResult<T> =
     } catch (e: PumpNotActivatedException) {
         ApiResult.Failure(ApiError.NotActivated)
     } catch (e: EnvelopeFailureException) {
-        ApiResult.Failure(ApiError.Business(e.serverMessage))
+        ApiResult.Failure(ApiError.Business(e.serverMessage, e.serverCode))
     } catch (e: HttpException) {
         val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
-        ApiResult.Failure(ApiError.Http(e.code(), body))
+        when (val envelope = parseApiErrorBody(body)) {
+            null -> ApiResult.Failure(ApiError.Http(e.code(), body))
+            else -> ApiResult.Failure(
+                ApiError.Business(envelope.message, envelope.code, e.code()),
+            )
+        }
     } catch (e: SerializationException) {
         ApiResult.Failure(ApiError.Serialization(e))
     } catch (e: IOException) {
