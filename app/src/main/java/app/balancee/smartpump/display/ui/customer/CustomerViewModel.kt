@@ -470,6 +470,9 @@ class CustomerViewModel @Inject constructor(
             when (val result = canStartTransaction()) {
                 is CanStartTransactionUseCase.Result.Allowed -> {
                     priceKoboPerLitre = result.config.koboPerLitre
+                    // Keep the UI copy in step: the completion screen reads it, and the pre-pay
+                    // path never passes the other two refreshes (TODO #37).
+                    _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
                     setState(TransactionState.ModeSelect())
                 }
                 is CanStartTransactionUseCase.Result.NotConfigured -> {

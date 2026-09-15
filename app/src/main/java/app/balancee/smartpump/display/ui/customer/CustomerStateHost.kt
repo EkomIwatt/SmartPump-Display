@@ -180,7 +180,10 @@ fun CustomerStateHost(
             litres = state.litres,
             amountKobo = state.amountKobo,
             method = state.method,
-            priceKoboPerLitre = priceKoboPerLitreFromState(state),
+            // The price the sale was struck at — the same value the audit row and the shared
+            // receipt carry. Not amount ÷ litres: those come apart on an overshoot or a recovered
+            // pulse gap, and the quotient is then a price the station never charged (TODO #37).
+            priceKoboPerLitre = uiState.priceKoboPerLitre,
             onShareReceipt = onShareReceipt,
             onDismiss = onDismissComplete,
             modifier = modifier,
@@ -194,11 +197,6 @@ fun CustomerStateHost(
         )
     }
 }
-
-private fun priceKoboPerLitreFromState(state: TransactionState.Complete): Long =
-    if (state.amountKobo > 0 && state.litres > 0) {
-        Math.round(state.amountKobo / state.litres)
-    } else 0L
 
 /**
  * Customer-facing failure card. [message] is the one plain line the customer gets; the diagnostic

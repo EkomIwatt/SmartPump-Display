@@ -3,8 +3,11 @@
 // the below-minimum rejection, and the audit record written on completion.
 package app.balancee.smartpump.display.ui.customer
 
+import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.TransactionFlow
+import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -116,5 +119,28 @@ class CustomerViewModelMoneyTest {
         assertEquals(PaymentMethod.BALANCEE_APP, record.paymentMethod)
         assertEquals(500_000, record.amountKobo)
         assertEquals(5.0, record.litresDispensed, 0.0)
+    }
+
+    // ---- receipt price (TODO #37) -------------------------------------------------
+
+    @Test
+    fun `completion screen shows the same price as the saved record after a price change`() {
+        val vm = harness.build()    // boots at TEST_KOBO_PER_LITRE (₦1000/L)
+        harness.deviceConfig.config = DeviceConfig(koboPerLitre = 120_000, fuelType = FuelType.PETROL)
+
+        vm.onStartTransaction()     // picks up ₦1200/L
+        vm.onModeTileTap(TransactionMode.PRE_PAY)
+        vm.onAmountTileTap(amountNaira = 6000)
+        vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+        vm.onModeConfirm()
+        harness.payment.succeed()
+        harness.pulseSource.emitPulse(count = 500) // 5.0 L → Complete
+
+        assertTrue(state(vm) is TransactionState.Complete)
+        val record = harness.transactions.last!!
+        assertEquals(120_000, record.priceKoboPerLitre)
+        // The completion screen reads this. The pre-pay path never refreshed it, so the screen
+        // showed the boot-time price while the shared receipt showed the new one.
+        assertEquals(record.priceKoboPerLitre, vm.ui.value.priceKoboPerLitre)
     }
 }
