@@ -72,7 +72,7 @@ unpaid.
 
 ## 5. ⚠️ The QR expiry is **20 minutes**, not 5
 
-Measured four times, from the captures' own timestamps:
+Measured five times, from the captures' own timestamps:
 
 | authorised at | expiresAt | window |
 |---|---|---|
@@ -80,6 +80,7 @@ Measured four times, from the captures' own timestamps:
 | 22:43:31.143 | 23:03:32.245 | 20 min 1 s |
 | 22:51:47.546 | 23:11:48.682 | 20 min 1 s |
 | 23:13:06.232 | 23:33:07.279 | 20 min 1 s |
+| 23:31:25.336 | 23:51:26.532 | 20 min 1 s |
 
 Three places in the app say five minutes:
 
@@ -147,13 +148,63 @@ it as final drops the record permanently — the one outcome that job exists to 
 **Not run: the upload happy path.** It requires a transaction that has actually been paid, which
 requires someone to pay a Paystack checkout with real money. See §8.
 
-## 8. What is left, and what it would cost
+## 8. The paid lifecycle, end to end · **#18d ANSWERED**, upload happy path **PASSED**
 
-The whole payment lifecycle past `PENDING_PAYMENT` is unobserved: the real status set (**#18d**), what
-a `PAID` transaction looks like to `/transactions/{id}`, and a successful upload.
+Run at 23:31–23:34 with 0.1 L (₦149), paid for real at the Paystack checkout. Three states, in order,
+all verbatim:
 
-All three come from one experiment: authorise a **small** amount, pay that Paystack checkout for real,
-then poll and upload. At ₦1490/L the amount follows the litres — 0.1 L is ₦149 — so the cost is a few
-hundred naira of real money moving into the station's real Paystack account, plus its fees. That is a
-decision for whoever owns the account, not a technical call.
+```
+POST /authorise
+sent:     {"pumpId":"3727aebf-…","transactionId":"probe-9c729d97-…","amount":149,
+           "expectedLitres":0.1,"fuelType":"PETROL"}
+received: {"status":true,"message":"Transaction authorised","data":{"status":"PENDING_PAYMENT",…}}
 
+  … the checkout is paid …
+
+GET /transactions/probe-9c729d97-…
+received: {"status":true,"message":"Pump transaction","data":{"status":"PAID",
+           "transactionId":"probe-9c729d97-…","paymentReference":"BPM-4777712b…",
+           "authorizationUrl":"https://checkout.paystack.com/q3ddgmt6rike2b2",
+           "expiresAt":"2026-09-16T23:51:26.532Z"}}
+
+POST /transactions/upload
+sent:     {"pumpId":"3727aebf-…","transactionId":"probe-9c729d97-…",
+           "paymentReference":"BPM-4777712b…","actualLitresDispensed":0.1,
+           "startedAt":"2026-09-16T23:31:45.932486Z","completedAt":"2026-09-16T23:34:45.932486Z"}
+received: {"status":true,"message":"Transaction recorded","data":{"status":"DISPENSED",…}}
+```
+
+**The status set is `PENDING_PAYMENT` → `PAID` → `DISPENSED`** — exactly the three strings the DTOs
+guessed at in July, now observed rather than assumed. **#18d is closed.**
+
+**The upload happy path works**, and the 409 from §7 was the gate doing its job rather than a defect.
+
+## 9. All three endpoints return the SAME object
+
+Not three response shapes — one transaction resource, viewed three times:
+
+```
+{status, transactionId, paymentReference, authorizationUrl, expiresAt}
+```
+
+`/authorise`, `/transactions/{id}` and `/transactions/upload` all return exactly that, differing only
+in `status` and in the envelope's `message` ("Transaction authorised" / "Pump transaction" /
+"Transaction recorded").
+
+Our three DTOs are three **partial** views of it. `TransactionStatusResponse` and
+`UploadTransactionResponse` both omit `authorizationUrl` and `expiresAt`, which parse away silently
+under `ignoreUnknownKeys`. Not a defect — but `expiresAt` on a status poll is exactly what a countdown
+should be reading (**#43**), and it is being discarded. See TODO **#46**.
+
+## 10. Still unknown, and now cheap to find out
+
+**Does upload validate `actualLitresDispensed` against `expectedLitres`?** This run sent 0.1 for 0.1 —
+a perfect match — so the question is untouched, and it is not academic. Every case where the two
+legitimately differ is one the app already produces: a tank that fills before the target, an attendant
+ending a fixed sale early (OQ #22), the pulses 7h recovers after a restart. If the server refuses a
+mismatch, none of those can be reported.
+
+**The probe costs nothing.** The transaction above is already paid and dispensed, so pressing upload
+again with a different litres figure needs no payment and answers two questions at once: whether the
+endpoint validates litres, and whether it is really idempotent on `transactionId` the way our retry
+logic assumes.

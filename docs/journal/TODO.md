@@ -299,7 +299,7 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - ~~Ask for a dev code / a dev authentication path~~ — **dropped.** We were told dev needs no
     activation code (which our own dev 401s do not obviously support, and which no longer matters),
     and we are not going to dev.
-- [ ] **32. THE GATE — redeem the code, on production, against the throwaway pump (#31).**
+- [x] **32. THE GATE — ALL SEVEN STEPS RUN, 2026-09-16.** On production, against the throwaway pump (#31).
   Everything left on the API line is behind it, and it should be done in one sitting while the server is in a known state:
   1. ~~Activate once. Confirm the credentials survive a process restart.~~ ✅ **PASSED 2026-09-16**
      — pump `3727aebf-…`, deviceId echo matched the dashboard, survived a force-stop.
@@ -312,16 +312,20 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
      carry none — business failures have codes, authentication failures do not.
   4. ~~Send a **decimal `amount`**~~ ✅ **ANSWERED 2026-09-16: accepted.** 3501.5 for 2.35 L at ₦1490,
      request and response both captured. `amount` must stop being a `Long` — **#44**.
-  5. ~~Poll `/transactions/{id}`~~ ✅ **PARTLY.** An unknown id returns 404
-     `TRANSACTION_NOT_FOUND`; `PENDING_PAYMENT` observed on authorise. The rest of the status set
-     (#18d) needs a paid transaction, which needs someone to actually pay.
+  5. ~~Poll `/transactions/{id}` → the real status set (#18d)~~ ✅ **PASSED 2026-09-16, including a
+     paid transaction.** The set is `PENDING_PAYMENT` → `PAID` → `DISPENSED` — the three strings the
+     DTOs guessed in July, now observed. An unknown id returns 404 `TRANSACTION_NOT_FOUND`. **#18d
+     is closed.**
   6. ~~Confirm **GET signing** and the **clock-skew** strings~~ ✅ **BOTH ANSWERED 2026-09-16.**
      GET signing: step 2's 200 proves `timestamp + "." + ""` is what the server verifies. Clock skew
      (**#15**): a `/config` signed ten minutes in the past returns
      `401 {"status":false,"message":"Request timestamp is not fresh"}` — **the exact string the audit
      predicted from the Reference's prose**, so the copy already drafted in `ERROR_COPY_DRAFT.md`
      stands. No `code` on it, consistent with the auth-failure rule.
-  7. `/transactions/upload` last. **Still unrun** — it now has the ids it needs.
+  7. ~~`/transactions/upload` last~~ ✅ **PASSED 2026-09-16** — against a genuinely paid transaction
+     (0.1 L, ₦149, paid for real). Returns `DISPENSED`. Against an **unpaid** one it returns 409
+     `PAYMENT_NOT_CONFIRMED` — the payment gate is enforced server-side, which is the better finding
+     of the two (**#45**).
   - Drive it through `PumpApiClient`, **not curl** — what is under test is our signing, our envelope
     parsing and our credential store. A curl script would test a second implementation we do not
     ship.
@@ -417,6 +421,29 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - **Unrelated but adjacent:** this endpoint cannot be the home for **cash** sales either — it demands
     a `paymentReference` only `/authorise` issues. `V1_BLOCKERS.md` already says a cash sale has
     nothing to upload; this is the server agreeing.
+- [ ] **46. Three DTOs are three partial views of one resource.** Observed 2026-09-16 (§9 of
+  `docs/api-probes/2026-09-16-prod-gate/`): `/authorise`, `/transactions/{id}` and
+  `/transactions/upload` all return the **same object** — `{status, transactionId, paymentReference,
+  authorizationUrl, expiresAt}` — differing only in `status` and the envelope's `message`.
+  - `AuthoriseResponse` has all five. `TransactionStatusResponse` and `UploadTransactionResponse`
+    have three, so `authorizationUrl` and `expiresAt` **parse away silently** under
+    `ignoreUnknownKeys`.
+  - **The one that matters is `expiresAt` on a status poll.** #43 says the expiry countdown must read
+    the server's value rather than a 5-minute constant; the poll is where a running screen would
+    refresh it, and today it is discarded before any caller sees it.
+  - **Fix:** one `PumpTransactionResponse` behind the three names, or the two thin ones gaining the
+    missing fields. Cheap now, and it removes a class of "why does the poll know less than the
+    authorise did" confusion later. Do it with #8, from the captured bytes.
+- [ ] **47. Does `/transactions/upload` validate `actualLitresDispensed` against `expectedLitres`?**
+  Unknown — the 2026-09-16 run sent 0.1 for 0.1, a perfect match, so the question was never put.
+  - **Not academic.** Every case where the two legitimately differ is one the app already produces: a
+    tank that fills before the target, an attendant ending a fixed sale early (OQ #22), and the pulses
+    7h recovers after a restart. If the server refuses a mismatch, **none of those can be reported**,
+    and the app's whole under-counting posture (#28, #36) assumes they can.
+  - **The probe is free.** Transaction `probe-9c729d97-…` is already paid and dispensed, so pressing
+    upload again with a different litres figure needs no payment. It answers two things at once:
+    whether litres are validated, and whether the endpoint is really **idempotent on
+    `transactionId`** the way `retryingApiCall` already assumes when it retries an upload.
 - [ ] **41. Credentials can only arrive by redeeming a code — and dev may not use codes.**
   `PumpActivationRepositoryImpl:54` is the **only** writer of `PumpCredentialsStore` in the app;
   everything else reads. So if dev hands over an `apiKey` + `signingSecret` + `pumpId` directly

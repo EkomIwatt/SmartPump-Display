@@ -1,0 +1,41 @@
+# SmartPump API capture
+# server:     https://api.balancee.app/
+# written:    2026-09-16T23:34:56.252716Z
+# responses:  6 (newest first)
+# NOTE: bodies are verbatim. Build fixtures from these bytes, not from a restatement of them (TODO #11).
+
+---- POST /api/pump/transactions/upload → 200
+---- at 2026-09-16T23:34:46.377282Z
+---- sent:
+{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","transactionId":"probe-9c729d97-3020-401e-9ed8-a52a3fd0201c","paymentReference":"BPM-4777712b112c4fc685b53565f1e5849d","actualLitresDispensed":0.1,"startedAt":"2026-09-16T23:31:45.932486Z","completedAt":"2026-09-16T23:34:45.932486Z"}
+---- received:
+{"status":true,"message":"Transaction recorded","data":{"status":"DISPENSED","transactionId":"probe-9c729d97-3020-401e-9ed8-a52a3fd0201c","paymentReference":"BPM-4777712b112c4fc685b53565f1e5849d","authorizationUrl":"https://checkout.paystack.com/q3ddgmt6rike2b2","expiresAt":"2026-09-16T23:51:26.532Z"}}
+
+---- GET /api/pump/transactions/probe-9c729d97-3020-401e-9ed8-a52a3fd0201c → 200
+---- at 2026-09-16T23:34:20.515951Z
+{"status":true,"message":"Pump transaction","data":{"status":"PAID","transactionId":"probe-9c729d97-3020-401e-9ed8-a52a3fd0201c","paymentReference":"BPM-4777712b112c4fc685b53565f1e5849d","authorizationUrl":"https://checkout.paystack.com/q3ddgmt6rike2b2","expiresAt":"2026-09-16T23:51:26.532Z"}}
+
+---- POST /api/pump/authorise → 200
+---- at 2026-09-16T23:31:25.336669Z
+---- sent:
+{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","transactionId":"probe-9c729d97-3020-401e-9ed8-a52a3fd0201c","amount":149,"expectedLitres":0.1,"fuelType":"PETROL"}
+---- received:
+{"status":true,"message":"Transaction authorised","data":{"status":"PENDING_PAYMENT","transactionId":"probe-9c729d97-3020-401e-9ed8-a52a3fd0201c","paymentReference":"BPM-4777712b112c4fc685b53565f1e5849d","authorizationUrl":"https://checkout.paystack.com/q3ddgmt6rike2b2","expiresAt":"2026-09-16T23:51:26.532Z"}}
+
+---- POST /api/pump/transactions/upload → 409
+---- at 2026-09-16T23:19:09.251674Z
+---- sent:
+{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","transactionId":"probe-1d6dc982-02e6-4961-b260-887239786117","paymentReference":"BPM-791e5766f1aa419695506e9949dc3a8d","actualLitresDispensed":2.35,"startedAt":"2026-09-16T23:16:07.983982Z","completedAt":"2026-09-16T23:19:07.983982Z"}
+---- received:
+{"status":false,"message":"Payment has not been confirmed for this transaction. Do not dispense until payment is confirmed.","code":"PAYMENT_NOT_CONFIRMED"}
+
+---- POST /api/pump/authorise → 200
+---- at 2026-09-16T23:13:06.232474Z
+---- sent:
+{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","transactionId":"probe-1d6dc982-02e6-4961-b260-887239786117","amount":3501.5,"expectedLitres":2.35,"fuelType":"PETROL"}
+---- received:
+{"status":true,"message":"Transaction authorised","data":{"status":"PENDING_PAYMENT","transactionId":"probe-1d6dc982-02e6-4961-b260-887239786117","paymentReference":"BPM-791e5766f1aa419695506e9949dc3a8d","authorizationUrl":"https://checkout.paystack.com/r15ru028lccwuts","expiresAt":"2026-09-16T23:33:07.279Z"}}
+
+---- GET /api/pump/config → 200
+---- at 2026-09-16T23:12:47.912504Z
+{"status":true,"message":"Pump config","data":{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","stationName":"Kachi","fuelType":"PETROL","pricePerUnit":1490,"updatedAt":"2026-09-15T09:44:39.187Z"}}
