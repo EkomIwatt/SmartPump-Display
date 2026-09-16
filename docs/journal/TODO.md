@@ -392,6 +392,31 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     kobo, so it cannot express more than two — yet `price × litres` exceeds two whenever the price is
     not a multiple of ten (₦1491 × 2.357 L = ₦3,514.287). Today's ₦1490 hides it. The probe is litres
     **2.3571** → 3512.079.
+- [ ] **45. `PAYMENT_NOT_CONFIRMED` is a refusal that can become a success — and our taxonomy has no
+  word for that.** Observed 2026-09-16 (`docs/api-probes/2026-09-16-prod-gate/`):
+  ```
+  POST /api/pump/transactions/upload → 409
+  {"status":false,"message":"Payment has not been confirmed for this transaction. Do not dispense
+   until payment is confirmed.","code":"PAYMENT_NOT_CONFIRMED"}
+  ```
+  - **The good half:** the server enforces the payment gate itself. It will not record fuel against an
+    unpaid sale, which is a safety property nobody had verified and which does not depend on the app
+    behaving.
+  - **The defect-in-waiting:** a 409 with an envelope parses as `ApiError.Business`, and
+    `ApiResult.kt:52` makes every `Business` **not retryable** — documented as "a considered refusal".
+    This one is not. It is true *now* and may be false in a minute, once payment confirms. An upload
+    job that treats it as final **drops the record permanently**, and a dispense that never reaches
+    the backend is the one outcome the upload job exists to prevent.
+  - **Where it bites:** not the ordinary pre-pay flow, where money lands before fuel does. It bites
+    when an upload fires before the server has confirmed payment — a missed `PAID` push, a poll that
+    timed out, a queued upload replayed early after a restart.
+  - **Shape of a fix:** a third outcome beside retryable/terminal — *retry later, not now* — keyed on
+    the `code` rather than the prose. `isRetryable` is the wrong question for it; WorkManager needs
+    "reschedule with backoff" while the operator needs to not be told the sale failed. Decide when 7e
+    is built, but it must be decided, not discovered.
+  - **Unrelated but adjacent:** this endpoint cannot be the home for **cash** sales either — it demands
+    a `paymentReference` only `/authorise` issues. `V1_BLOCKERS.md` already says a cash sale has
+    nothing to upload; this is the server agreeing.
 - [ ] **41. Credentials can only arrive by redeeming a code — and dev may not use codes.**
   `PumpActivationRepositoryImpl:54` is the **only** writer of `PumpCredentialsStore` in the app;
   everything else reads. So if dev hands over an `apiKey` + `signingSecret` + `pumpId` directly

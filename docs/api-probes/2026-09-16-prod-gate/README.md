@@ -4,7 +4,7 @@
 in-app probe panel (stage 9d-2), driven through `PumpApiClient`, pulled with `adb`. The file beside
 this one is verbatim; everything below cites it.
 
-Six questions that have been open since August are answered here, and one assumption is wrong.
+Seven questions that have been open since August are answered here, and one assumption is wrong.
 
 ---
 
@@ -122,6 +122,38 @@ cannot express more than two — yet `price × litres` can exceed two whenever t
 multiple of ten (₦1491 × 2.357 L = ₦3,514.287). With today's ₦1490 that cannot arise, so the question
 is dormant rather than answered. The probe for it is litres **2.3571** → 3512.079, three places.
 
-## 7. Not run
+## 7. Upload refuses to record fuel against an unpaid sale · **step 7**
 
-`POST /transactions/upload` (step 7). It needs the ids from a happy authorise, which now exist.
+```
+POST /api/pump/transactions/upload → 409
+sent:     {"pumpId":"3727aebf-…","transactionId":"probe-1d6dc982-…",
+           "paymentReference":"BPM-791e5766…","actualLitresDispensed":2.35,
+           "startedAt":"2026-09-16T23:16:07.983982Z","completedAt":"2026-09-16T23:19:07.983982Z"}
+received: {"status":false,"message":"Payment has not been confirmed for this transaction. Do not
+           dispense until payment is confirmed.","code":"PAYMENT_NOT_CONFIRMED"}
+```
+
+The endpoint is deployed and it works — what it refused is correct. The transaction was authorised
+and never paid, and the server will not record a dispense against it. **That gate is server-side and
+does not depend on the app behaving**, which nobody had verified.
+
+A fourth stable code, and a fourth status class (400, 401, 404, 409). The rule from §3 holds.
+
+**It also exposes a gap in our error taxonomy — TODO #45.** A 409 with an envelope parses as
+`ApiError.Business`, and every `Business` is classified **not retryable** ("a considered refusal").
+This one is a refusal that may become a success once payment confirms, so an upload job that treats
+it as final drops the record permanently — the one outcome that job exists to prevent.
+
+**Not run: the upload happy path.** It requires a transaction that has actually been paid, which
+requires someone to pay a Paystack checkout with real money. See §8.
+
+## 8. What is left, and what it would cost
+
+The whole payment lifecycle past `PENDING_PAYMENT` is unobserved: the real status set (**#18d**), what
+a `PAID` transaction looks like to `/transactions/{id}`, and a successful upload.
+
+All three come from one experiment: authorise a **small** amount, pay that Paystack checkout for real,
+then poll and upload. At ₦1490/L the amount follows the litres — 0.1 L is ₦149 — so the cost is a few
+hundred naira of real money moving into the station's real Paystack account, plus its fees. That is a
+decision for whoever owns the account, not a technical call.
+
