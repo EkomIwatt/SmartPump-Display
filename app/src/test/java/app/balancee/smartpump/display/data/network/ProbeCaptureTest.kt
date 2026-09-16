@@ -5,13 +5,16 @@
 // nothing about peekBody leaving the body readable downstream.
 package app.balancee.smartpump.display.data.network
 
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -136,6 +139,59 @@ class ProbeCaptureTest {
         assertFalse(recorder.captures.value.isEmpty())
 
         recorder.clear()
+
+        assertTrue(recorder.captures.value.isEmpty())
+    }
+
+    @Test
+    fun `a POST keeps what was sent, not only what came back`() {
+        // The gap this closes: the decimal-amount run (#18c) produced a capture showing a 200 and no
+        // record of the amount that earned it, so the finding rested on someone's memory of a text
+        // box. On a POST the request IS the experiment.
+        val sent = """{"pumpId":"P1","amount":3501.5,"expectedLitres":2.35}"""
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"status":true}"""))
+
+        val request = Request.Builder()
+            .url(server.url("/api/pump/authorise"))
+            .post(sent.toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(request).execute().close()
+
+        assertEquals(sent, recorder.captures.value.single().requestBody)
+    }
+
+    @Test
+    fun `the request body still reaches the server unconsumed`() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"status":true}"""))
+        val sent = """{"amount":3501.5}"""
+
+        val request = Request.Builder()
+            .url(server.url("/api/pump/authorise"))
+            .post(sent.toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(request).execute().close()
+
+        assertEquals(sent, server.takeRequest().body.readUtf8())
+    }
+
+    @Test
+    fun `a GET has no request body to keep`() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"status":true}"""))
+
+        get("/api/pump/config")
+
+        assertNull(recorder.captures.value.single().requestBody)
+    }
+
+    @Test
+    fun `the activation request is not kept either — it carries the code`() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"status":true}"""))
+
+        val request = Request.Builder()
+            .url(server.url("/api/pump/activate"))
+            .post("""{"activationCode":"not-a-real-code"}""".toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(request).execute().close()
 
         assertTrue(recorder.captures.value.isEmpty())
     }

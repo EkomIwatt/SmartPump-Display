@@ -485,6 +485,26 @@ private fun CaptureBlock(capture: ProbeCapture) {
                 color = WarningRed,
             )
         }
+        capture.requestBody?.let { sent ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "sent",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextTertiary,
+            )
+            CodePanel(
+                text = sent,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "received",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextTertiary,
+            )
+        }
         Spacer(Modifier.height(4.dp))
         CodePanel(
             text = capture.body,

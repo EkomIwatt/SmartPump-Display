@@ -39,6 +39,11 @@ object ProbeCaptureFormat {
                 appendLine()
                 appendLine("---- ${capture.method} ${capture.path} → ${capture.httpCode}")
                 appendLine("---- at ${capture.at}")
+                capture.requestBody?.let { sent ->
+                    appendLine("---- sent:")
+                    appendLine(sent)
+                    appendLine("---- received:")
+                }
                 if (capture.truncated) {
                     appendLine("---- TRUNCATED at ${ProbeResponseRecorder.MAX_CAPTURE_BYTES} bytes — NOT fixture material")
                 }
