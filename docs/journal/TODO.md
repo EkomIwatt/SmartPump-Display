@@ -301,14 +301,18 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     and we are not going to dev.
 - [ ] **32. THE GATE — redeem the code, on production, against the throwaway pump (#31).**
   Everything left on the API line is behind it, and it should be done in one sitting while the server is in a known state:
-  1. Activate once. Confirm the credentials survive a process restart.
-  2. `GET /config` → **capture the literal payload** and build its fixture from those bytes, not
-     from our restatement (that is how #11 got in). Unblocks 7b's second half.
+  1. ~~Activate once. Confirm the credentials survive a process restart.~~ ✅ **PASSED 2026-09-16**
+     — pump `3727aebf-…`, deviceId echo matched the dashboard, survived a force-stop.
+  2. ~~`GET /config` → capture the literal payload~~ ✅ **PASSED 2026-09-16.** The payload matched
+     nothing we had: no `prices` map, one pump with one fuel and one price. DTO rebuilt from the
+     bytes (`1c3dc26`). Capture: `docs/api-probes/2026-09-16-prod-config/`. **7b's second half is
+     unblocked**, and it struck two items off the backend ask (see #31).
   3. `/authorise` happy path, then a deliberate **amount mismatch** → confirms whether stable codes
      arrived on that path (#18f).
   4. Send a **decimal `amount`** → settles #18c by observation.
   5. Poll `/transactions/{id}` → the real status set (#18d).
-  6. Confirm **GET signing** (we send `timestamp + "." + ""`) and the **clock-skew** strings (#15).
+  6. ~~Confirm **GET signing**~~ ✅ **ANSWERED 2026-09-16** by step 2's 200: `timestamp + "." + ""`
+     is what the server verifies. The **clock-skew** half (#15) is built and unrun.
   7. `/transactions/upload` last.
   - Drive it through `PumpApiClient`, **not curl** — what is under test is our signing, our envelope
     parsing and our credential store. A curl script would test a second implementation we do not
@@ -324,8 +328,13 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - ✅ **Stage 9d-1 BUILT 2026-09-16** (branch `feature/api-probe-panel`) — `debugProd` build type
     (the debug app pointed at production, own applicationId) plus an **API probe panel** on the
     operator screen that runs step 2 through the real client and keeps the literal bytes. Runbook:
-    [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md). **Steps 3-7 not built yet** — cleared to build (#31); step 3 is cleared to *press* once
-    the Paystack question comes back.
+    [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md).
+  - ✅ **Stage 9d-2 BUILT 2026-09-16** — every remaining step has a button. Read-only ones
+    (`/transactions/{id}`, and a `/config` signed ten minutes in the past for #15) press freely;
+    `/authorise` and upload sit behind an acknowledgement switch that resets each time the panel is
+    rebuilt. The panel does the amount arithmetic **before** sending and refuses to send a fractional
+    naira amount, which is #18c answered by arithmetic: at ₦1490/L, every metered fill-up produces
+    one. Runbook: [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md).
   - _Superseded, kept for the reasoning:_ before 9d-1, `activate()` was the only client method with
     an in-app caller, so `config()`, `authorise()`, `transactionStatus()` and `uploadTransaction()`
     could not be driven at all — and #32 requires driving them through `PumpApiClient` rather than

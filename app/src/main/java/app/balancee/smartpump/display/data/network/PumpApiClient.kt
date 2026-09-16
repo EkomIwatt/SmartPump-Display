@@ -18,6 +18,7 @@ import app.balancee.smartpump.display.data.network.dto.UploadTransactionRequest
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionResponse
 import app.balancee.smartpump.display.data.network.dto.unwrap
 import app.balancee.smartpump.display.domain.network.DeviceIdProvider
+import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,6 +45,14 @@ class PumpApiClient @Inject constructor(
     /** Start a sale. On success the response carries the Paystack authorizationUrl for the QR. */
     suspend fun authorise(request: AuthoriseRequest): ApiResult<AuthoriseResponse> =
         safeApiCall { service.authorise(request).unwrap() }
+
+    /**
+     * Authorise with a hand-built body — debug probe panel only. See [PumpApiService.authoriseRaw]:
+     * `amount` is a `Long` on [AuthoriseRequest], so the decimal question (#18c) cannot otherwise be
+     * asked by the client that will have to live with the answer.
+     */
+    suspend fun authoriseRaw(body: JsonObject): ApiResult<AuthoriseResponse> =
+        safeApiCall { service.authoriseRaw(body).unwrap() }
 
     /** Poll payment status during the PENDING_PAYMENT window (fallback to the PAID push). */
     suspend fun transactionStatus(transactionId: String): ApiResult<TransactionStatusResponse> =

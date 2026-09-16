@@ -6,6 +6,8 @@ package app.balancee.smartpump.display.di
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.data.network.KeystorePumpCredentialsStore
 import app.balancee.smartpump.display.data.network.PersistentDeviceIdProvider
+import app.balancee.smartpump.display.data.network.ProbeClock
+import app.balancee.smartpump.display.data.network.ProbeClockOffset
 import app.balancee.smartpump.display.data.network.ProbeCaptureInterceptor
 import app.balancee.smartpump.display.data.network.ProbeResponseRecorder
 import app.balancee.smartpump.display.data.network.PumpApiService
@@ -57,7 +59,13 @@ object NetworkModule {
     fun provideSigningInterceptor(
         credentialsStore: PumpCredentialsStore,
         clock: Clock,
-    ): PumpSigningInterceptor = PumpSigningInterceptor(credentialsStore, clock)
+        probeOffset: ProbeClockOffset,
+    ): PumpSigningInterceptor =
+        // ProbeClock, not the bare clock: the debug probe panel can shift request signing into the
+        // past to see what a stale timestamp actually returns (#15). The shift reaches signing and
+        // nothing else — audit rows, receipts and the fuel log keep the real clock — and
+        // ProbeClockOffset.set() is inert in release.
+        PumpSigningInterceptor(credentialsStore, ProbeClock(clock, probeOffset))
 
     @Provides
     @Singleton

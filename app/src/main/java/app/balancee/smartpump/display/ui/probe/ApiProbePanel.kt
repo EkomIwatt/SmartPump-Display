@@ -1,14 +1,15 @@
 // The debug-only API probe panel, below the activation panel on the operator screen.
 //
 // Design-authority flag (CLAUDE.md): like the activation panel and the error screen before it,
-// nothing in docs/Strict design screens/ covers this. It is built from existing pieces —
-// BalanceeCard, LabelText, CodePanel, the tone-tinted report block the activation panel uses — so
-// the deviation is layout only, not tokens. It is also never seen by a customer or an attendant: it
-// is compiled into debug builds only and sits behind the attendant PIN on the settings screen.
+// nothing in docs/Strict design screens/ covers this. Built from existing pieces — BalanceeCard,
+// LabelText, CodePanel, the tone-tinted report block — so the deviation is layout only, not tokens.
+// It is never seen by a customer or an attendant: compiled into debug builds only, behind the
+// attendant PIN.
 //
-// The loudest thing on the card is which server it is pointed at. That is deliberate. A debuggable
-// build that can reach production is new (the debugProd variant), and the failure it invites is
-// running a test call against a real station's pump because the tablet looked like the dev one.
+// Two things are deliberately loud. Which server this is pointed at, because a debuggable build
+// that can reach production is new. And the line between probes that only ask questions and probes
+// that create records — the second kind sits behind a switch that resets every time the panel is
+// rebuilt, because /authorise initialises a real Paystack payment.
 package app.balancee.smartpump.display.ui.probe
 
 import androidx.compose.foundation.background
@@ -22,12 +23,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -40,7 +49,9 @@ import app.balancee.smartpump.display.ui.components.CodePanel
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
+import app.balancee.smartpump.display.ui.theme.BrandBlue
 import app.balancee.smartpump.display.ui.theme.Dimensions
+import app.balancee.smartpump.display.ui.theme.OnPrimary
 import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
@@ -58,19 +69,40 @@ fun ApiProbePanel(
     val state by vm.ui.collectAsStateWithLifecycle()
     ApiProbePanelContent(
         state = state,
-        onProbeConfig = vm::probeConfig,
-        onSaveCaptures = vm::saveCaptures,
-        onClearCaptures = vm::clearCaptures,
+        actions = ApiProbeActions(
+            onProbeConfig = vm::probeConfig,
+            onProbeStatus = vm::probeStatus,
+            onProbeClockSkew = vm::probeClockSkew,
+            onProbeAuthorise = vm::probeAuthorise,
+            onProbeUpload = vm::probeUpload,
+            onTransactionIdChange = vm::setTransactionId,
+            onLitresChange = vm::setLitres,
+            onAcknowledgeWrites = vm::setWritesAcknowledged,
+            onSaveCaptures = vm::saveCaptures,
+            onClearCaptures = vm::clearCaptures,
+        ),
         modifier = modifier,
     )
 }
 
+/** Grouped so the preview and the content signature do not grow a parameter per button. */
+data class ApiProbeActions(
+    val onProbeConfig: () -> Unit = {},
+    val onProbeStatus: () -> Unit = {},
+    val onProbeClockSkew: () -> Unit = {},
+    val onProbeAuthorise: (AuthoriseVariant) -> Unit = {},
+    val onProbeUpload: () -> Unit = {},
+    val onTransactionIdChange: (String) -> Unit = {},
+    val onLitresChange: (String) -> Unit = {},
+    val onAcknowledgeWrites: (Boolean) -> Unit = {},
+    val onSaveCaptures: () -> Unit = {},
+    val onClearCaptures: () -> Unit = {},
+)
+
 @Composable
 internal fun ApiProbePanelContent(
     state: ApiProbeUiState,
-    onProbeConfig: () -> Unit,
-    onSaveCaptures: () -> Unit,
-    onClearCaptures: () -> Unit,
+    actions: ApiProbeActions,
     modifier: Modifier = Modifier,
 ) {
     BalanceeCard(
@@ -104,15 +136,120 @@ internal fun ApiProbePanelContent(
                 "none — every signed call will stop at the interceptor"
             },
         )
+        state.config?.let {
+            Spacer(Modifier.height(8.dp))
+            DetailRow(
+                label = "Config",
+                value = "${it.fuelType.name} · ${it.pricePerUnit}/L · ${it.stationName}",
+            )
+        }
+
+        // ---- asks questions, creates nothing ----------------------------------------------
 
         Spacer(Modifier.height(Dimensions.sectionSpacing))
+        LabelText(text = "Read-only")
+        Spacer(Modifier.height(8.dp))
         BalanceeButton(
             label = if (state.running) "Calling…" else "GET /config",
-            onClick = onProbeConfig,
+            onClick = actions.onProbeConfig,
             variant = BalanceeButtonVariant.Secondary,
             enabled = state.canProbe,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        Spacer(Modifier.height(8.dp))
+        ProbeField(
+            label = "Transaction id",
+            value = state.transactionId,
+            onValueChange = actions.onTransactionIdChange,
+            placeholder = "blank → probe-not-a-real-id",
+        )
+        Spacer(Modifier.height(8.dp))
+        BalanceeButton(
+            label = "GET /transactions/{id}",
+            onClick = actions.onProbeStatus,
+            variant = BalanceeButtonVariant.Secondary,
+            enabled = state.canProbe,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(8.dp))
+        BalanceeButton(
+            label = "GET /config signed 10 min ago",
+            onClick = actions.onProbeClockSkew,
+            variant = BalanceeButtonVariant.Secondary,
+            enabled = state.canProbe,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = "A refusal here is the good outcome — it is the freshness window #15 was " +
+                "written around but nobody has ever seen.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+
+        // ---- creates records ---------------------------------------------------------------
+
+        Spacer(Modifier.height(Dimensions.sectionSpacing))
+        WritesGate(state = state, onAcknowledge = actions.onAcknowledgeWrites)
+
+        if (state.writesAcknowledged) {
+            Spacer(Modifier.height(12.dp))
+            ProbeField(
+                label = "Litres",
+                value = state.litres,
+                onValueChange = actions.onLitresChange,
+                placeholder = "e.g. 2.0",
+                numeric = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            AmountLine(state = state)
+
+            Spacer(Modifier.height(12.dp))
+            BalanceeButton(
+                label = "POST /authorise",
+                onClick = { actions.onProbeAuthorise(AuthoriseVariant.Happy) },
+                variant = BalanceeButtonVariant.Primary,
+                enabled = state.canWrite,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimensions.itemSpacing)) {
+                BalanceeButton(
+                    label = "…amount +1",
+                    onClick = { actions.onProbeAuthorise(AuthoriseVariant.Mismatch) },
+                    variant = BalanceeButtonVariant.Secondary,
+                    enabled = state.canWrite,
+                    modifier = Modifier.weight(1f),
+                )
+                BalanceeButton(
+                    label = "…decimal amount",
+                    onClick = { actions.onProbeAuthorise(AuthoriseVariant.Decimal) },
+                    variant = BalanceeButtonVariant.Secondary,
+                    enabled = state.canWrite,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            BalanceeButton(
+                label = "POST /transactions/upload",
+                onClick = actions.onProbeUpload,
+                variant = BalanceeButtonVariant.Secondary,
+                enabled = state.canUpload,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (state.lastAuthorise == null) {
+                Text(
+                    text = "Upload needs the transaction id and payment reference that only a real " +
+                        "/authorise issues.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                )
+            }
+        }
+
+        // ---- results -----------------------------------------------------------------------
 
         state.summary?.let {
             Spacer(Modifier.height(Dimensions.sectionSpacing))
@@ -138,13 +275,13 @@ internal fun ApiProbePanelContent(
             Row(horizontalArrangement = Arrangement.spacedBy(Dimensions.itemSpacing)) {
                 BalanceeButton(
                     label = "Save to file",
-                    onClick = onSaveCaptures,
+                    onClick = actions.onSaveCaptures,
                     variant = BalanceeButtonVariant.Secondary,
                     modifier = Modifier.weight(1f),
                 )
                 BalanceeButton(
                     label = "Clear",
-                    onClick = onClearCaptures,
+                    onClick = actions.onClearCaptures,
                     variant = BalanceeButtonVariant.Secondary,
                     modifier = Modifier.weight(1f),
                 )
@@ -154,7 +291,7 @@ internal fun ApiProbePanelContent(
         state.savedPath?.let {
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Saved. adb pull \"$it\"",
+                text = "Saved. MSYS_NO_PATHCONV=1 adb pull \"$it\"",
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = SuccessGreen,
@@ -169,6 +306,119 @@ internal fun ApiProbePanelContent(
             )
         }
     }
+}
+
+/**
+ * The switch in front of everything that leaves a record behind. Off by default and not remembered:
+ * a panel reopened later starts safe, which is the right default for a control whose cheapest
+ * mistake is a live payment initialisation on a real Paystack account.
+ */
+@Composable
+private fun WritesGate(state: ApiProbeUiState, onAcknowledge: (Boolean) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                (if (state.productionServer) PrimaryGold else BorderSubtle).copy(alpha = 0.10f),
+                RoundedCornerShape(Dimensions.cornerCard),
+            )
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = state.writesAcknowledged,
+                onCheckedChange = onAcknowledge,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = OnPrimary,
+                    checkedTrackColor = PrimaryGold,
+                    uncheckedTrackColor = BorderSubtle,
+                ),
+            )
+            Spacer(Modifier.height(0.dp))
+            Column(modifier = Modifier.padding(start = 12.dp)) {
+                Text(
+                    text = "Allow probes that create records",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                )
+                Text(
+                    text = if (state.productionServer) {
+                        "/authorise returns a Paystack checkout URL. On this server that is a real " +
+                            "payment initialisation. Do not scan the QR it produces."
+                    } else {
+                        "/authorise and upload write transactions the server keeps."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What the authorise will actually send — and, when the arithmetic does not fit, the finding
+ * itself. The server checks `amount == litres × price` exactly, so a fractional product is not a
+ * rounding inconvenience, it is a sale that cannot be authorised.
+ */
+@Composable
+private fun AmountLine(state: ApiProbeUiState) {
+    when (val plan = state.amountPlan) {
+        null -> Text(
+            text = if (state.config == null) {
+                "Run GET /config first — the price has to come from the server, not from us."
+            } else {
+                "Enter a litres figure above zero."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+
+        is AmountPlan.Exact -> DetailRow(
+            label = "amount to send",
+            value = "${plan.naira}  (= ${state.litres} L × ${state.config?.pricePerUnit})",
+        )
+
+        is AmountPlan.Fractional -> Text(
+            text = "${state.litres} L × ${state.config?.pricePerUnit} = ${plan.naira} — not a " +
+                "whole naira, so `amount: Long` cannot carry it. Use the decimal probe: this is " +
+                "#18c, and on this arithmetic every fill-up hits it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = PrimaryGold,
+        )
+    }
+}
+
+@Composable
+private fun ProbeField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    numeric: Boolean = false,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        placeholder = { Text(placeholder) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (numeric) KeyboardType.Decimal else KeyboardType.Text,
+        ),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary,
+            focusedLabelColor = BrandBlue,
+            unfocusedLabelColor = TextSecondary,
+            focusedIndicatorColor = BrandBlue,
+            unfocusedIndicatorColor = BorderSubtle,
+            cursorColor = BrandBlue,
+        ),
+    )
 }
 
 @Composable
@@ -245,7 +495,7 @@ private fun CaptureBlock(capture: ProbeCapture) {
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 900, heightDp = 900)
+@Preview(showBackground = true, backgroundColor = 0xFF0B0B0A, widthDp = 900, heightDp = 1400)
 @Composable
 private fun ApiProbePanelPreview() {
     SmartPumpDisplayTheme {
@@ -258,11 +508,13 @@ private fun ApiProbePanelPreview() {
                     baseUrl = "https://api.balancee.app/",
                     activated = true,
                     pumpId = "PUMP-001",
+                    writesAcknowledged = true,
+                    litres = "2.35",
+                    config = PreviewConfig.observed,
                     summary = ProbeSummary(
-                        tone = ProbeTone.Caution,
-                        headline = "200 OK, but zero prices parsed",
-                        detail = "The envelope unwrapped and the body parsed, yet prices came " +
-                            "out empty.",
+                        tone = ProbeTone.Success,
+                        headline = "Refused, as a stale timestamp should be",
+                        detail = "message: Request timestamp is not fresh",
                     ),
                     captures = listOf(
                         ProbeCapture(
@@ -270,15 +522,24 @@ private fun ApiProbePanelPreview() {
                             path = "/api/pump/config",
                             httpCode = 200,
                             at = Instant.parse("2026-09-16T12:00:00Z"),
-                            body = "{\"status\":true,\"message\":\"OK\",\"data\":{}}",
+                            body = "{\"status\":true,\"message\":\"Pump config\",\"data\":{}}",
                             truncated = false,
                         ),
                     ),
                 ),
-                onProbeConfig = {},
-                onSaveCaptures = {},
-                onClearCaptures = {},
+                actions = ApiProbeActions(),
             )
         }
     }
+}
+
+/** Preview-only, using the values actually observed on 2026-09-16. */
+private object PreviewConfig {
+    val observed = app.balancee.smartpump.display.data.network.dto.PumpConfigResponse(
+        pumpId = "3727aebf-3c77-4180-a818-4254cbeeae72",
+        stationName = "Kachi",
+        fuelType = app.balancee.smartpump.display.domain.model.FuelType.PETROL,
+        pricePerUnit = 1490,
+        updatedAt = "2026-09-15T09:44:39.187Z",
+    )
 }

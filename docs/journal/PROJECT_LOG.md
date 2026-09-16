@@ -1473,3 +1473,54 @@ the one we had marked as most important and most urgent.
 **Next:**
 Steps 3–7 need stage 9d-2. Step 6's other half (clock skew, #15) and step 5 (status poll) need no
 transaction and can run as soon as they are built; steps 3, 4 and 7 create Paystack initialisations.
+
+---
+
+### Phase 9d-2 — the rest of the gate has buttons
+**Date:** 2026-09-16
+**Status:** done (built and green; unrun on the tablet)
+**Commit(s):** see branch `feature/api-probe-panel`
+
+**Summary (plain language):**
+Every remaining question we need to ask the server now has a button. Three of them are safe to press
+at any time — they only ask. The rest create real records, including a real payment request, so they
+sit behind a switch that has to be turned on deliberately and turns itself off again every time the
+screen is rebuilt.
+
+One of those questions answered itself before any button existed. The pump's price is ₦1,490 per
+litre, and the app can only send whole naira. Multiply 1,490 by most real litre figures and the
+answer is not a whole number: 2.35 litres is ₦3,501.50. The server checks that the amount matches
+litres times price **exactly**, so rounding it is not an approximation, it is a rejection. Any
+fill-up — where the customer stops when the tank is full, not on a tidy figure — will hit this. The
+panel now does that arithmetic before sending and says so instead of sending something that cannot
+work.
+
+**Technical notes:**
+- **Read-only probes:** `GET /transactions/{id}` (any id — an authenticated not-found envelope has
+  never been seen either), and a **clock-skew probe** that signs a `/config` ten minutes in the past.
+  The second is the only way to observe #15's strings: the server validates the API key first, so
+  from outside, a stale timestamp and a missing signature look identical.
+- **`ProbeClock` / `ProbeClockOffset`** apply the skew to **request signing only** — audit rows,
+  receipts and the fuel log keep the real clock — and `set()` is inert outside debug builds.
+  `shiftedBy` restores the offset in a `finally`, tested including the throwing path: a signing clock
+  left in the past would make every later request fail in a way that looks like a server fault.
+- **Write probes** (`/authorise`, `+1 naira`, decimal, upload) are gated on a switch that is not
+  remembered. `/authorise` returns a Paystack checkout URL, which on production is a real
+  initialisation.
+- **`AmountPlan` + `amountFor()`** is the substantive piece: `Exact` or `Fractional`, with a
+  tolerance rather than an equality test, because 1490 × 2.3 is 3426.9999999999995 in binary floating
+  point and a probe that called that fractional would be reporting its own arithmetic.
+- **`authoriseRaw(JsonObject)`** on the service and client, used only by the decimal probe: `amount`
+  is a `Long` on `AuthoriseRequest`, so the client cannot otherwise ask the one question whose answer
+  decides whether that type is right. It still goes through signing, the envelope and error mapping —
+  only the request DTO is bypassed, which is the thing under test.
+- **Summaries read backwards where the test does.** A refused stale timestamp and a refused
+  wrong-amount authorise are reported as **successes**; an *accepted* wrong amount is a caution,
+  because the exactness the Reference describes would not be enforced. Tested, since a composable
+  `when` is not.
+- Verified: JVM **283 tests / 32 classes** green (was 260 / 30); `compileDebugRealHwKotlin` and
+  `lintDebug` clean. `installDebugProd` failed only because the tablet was unplugged.
+
+**Next:**
+Reconnect the tablet, install, and run the read-only probes — they need no reply from anyone. The
+authorise steps wait on the Paystack question in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
