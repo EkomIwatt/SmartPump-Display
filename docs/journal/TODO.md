@@ -320,11 +320,15 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     reporting. The read-only subset — activate, `GET /config`, poll `/transactions/{id}` — is the most
     that should ever run against prod, and only with an explicit yes. Everything else waits on a dev
     code (**#31**).
-  - 🚩 **Steps 2–7 have no way to be pressed.** `activate()` is the only client method with an in-app
-    caller (`ActivationPanel`, from `OperatorConfigScreen.kt`). `config()`, `authorise()`,
-    `transactionStatus()` and `uploadTransaction()` are called from nowhere in `ui/`. Since the sitting
-    must be driven through `PumpApiClient` rather than curl, **a debug-only probe panel is a
-    prerequisite of the gate, not a nicety** — decided 2026-09-16, not yet built.
+  - ✅ **Stage 9d-1 BUILT 2026-09-16** (branch `feature/api-probe-panel`) — `debugProd` build type
+    (the debug app pointed at production, own applicationId) plus an **API probe panel** on the
+    operator screen that runs step 2 through the real client and keeps the literal bytes. Runbook:
+    [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md). **Steps 3-7 deliberately not built** — they create
+    transactions.
+  - _Superseded, kept for the reasoning:_ before 9d-1, `activate()` was the only client method with
+    an in-app caller, so `config()`, `authorise()`, `transactionStatus()` and `uploadTransaction()`
+    could not be driven at all — and #32 requires driving them through `PumpApiClient` rather than
+    curl. That is why the panel was a prerequisite of the gate rather than a nicety.
 - [ ] **39. `docs/api-probes/2026-09-12/probe.sh` is re-runnable** _(was a second #33, renumbered
   2026-09-15 at the merge; nothing referenced it by number)_ and sends no secrets. Re-run it
   after any backend deploy to see whether the 401s have grown a `code` field yet (#18f).

@@ -101,6 +101,24 @@ android {
             versionNameSuffix = "-realhw"
             buildConfigField("Boolean", "MOCK_HARDWARE", "false")
         }
+        // Same app as `debug` — mock hardware, debuggable, self-seeding config, debug hotspot —
+        // but pointed at PRODUCTION. It exists for one job: the activation gate (TODO #32) against
+        // a pump that only exists on the live backend, because the code we hold was minted there.
+        //
+        // The separate applicationId is the point. It installs beside the dev app, keeps its own
+        // credentials and deviceId, and can be uninstalled without touching either. A gradle
+        // property toggling the URL on `debug` would be smaller and worse: the next build without
+        // the flag silently points production credentials at dev, and nothing on screen would say
+        // so. (The probe panel prints the server for the same reason.)
+        //
+        // NOT a candidate for the parallel run — it is a debug build, with everything V1_BLOCKERS
+        // says disqualifies one: it seeds its own placeholder price and carries the debug hotspot.
+        create("debugProd") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".prod"
+            versionNameSuffix = "-prod"
+            buildConfigField("String", "PUMP_API_BASE_URL", "\"https://api.balancee.app/\"")
+        }
         release {
             // Null when the credentials are absent, which leaves the apk unsigned rather than
             // failing the build. Verify with `apksigner verify` before handing one over —

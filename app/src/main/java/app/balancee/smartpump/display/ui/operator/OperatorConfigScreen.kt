@@ -46,6 +46,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.OperationalEvent
@@ -55,6 +56,7 @@ import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.SelectableTile
+import app.balancee.smartpump.display.ui.probe.ApiProbePanel
 import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
@@ -212,6 +214,13 @@ fun OperatorConfigScreen(
         // debug build never shows onboarding at all. Behind the attendant PIN, like everything
         // else on this screen. It saves through its own repository, so it ignores "Save settings".
         ActivationPanel()
+
+        // Debug builds only, never compiled into a release: the gate sequence in TODO #32 has to
+        // be driven through PumpApiClient, and until this existed only activate() had a caller.
+        // Directly below activation because that is the order it gets used in - redeem, then probe.
+        if (BuildConfig.DEBUG) {
+            ApiProbePanel()
+        }
 
         FuelLogSection(entries = fuelLog)
 
