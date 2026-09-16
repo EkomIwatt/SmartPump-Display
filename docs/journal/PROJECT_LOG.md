@@ -1353,3 +1353,60 @@ has to exist before the code, whichever code it is, is worth spending.
 **Next:**
 Send the dev-code ask. Meanwhile build the debug-only API probe panel that drives the four uncalled
 client methods, so that whenever a usable code lands the whole of #32 can be run in one sitting.
+
+---
+
+### Phase 9d-1 — the gate gets a driver: API probe panel + a build that can reach production
+**Date:** 2026-09-16
+**Status:** done (built, verified green; not yet run on the tablet)
+**Commit(s):** `7e1e548` on `feature/api-probe-panel`
+
+**Summary (plain language):**
+The activation code we were given belongs to the live system, and until today nothing we could
+install on a tablet was able to talk to the live system at all. There is now a third version of the
+app that does — it installs alongside the other two, keeps its own login to the server, and can be
+removed without disturbing them.
+
+It also has a new panel, visible only in test builds and only behind the attendant PIN, that lets
+someone press a button and ask the server a question through exactly the same code the real app uses.
+That last part is the point: testing with a separate script would prove that the script works, not
+that the app does. The panel shows the server's answer word for word, not our tidied-up version of
+it, and can save it to a file that can be copied off the tablet.
+
+One deliberate piece of unhelpfulness: if the server answers "OK" but we understood none of it, the
+panel says so in amber rather than showing a green tick. That exact situation — everything looking
+fine while the app understood nothing — is the bug that went unnoticed for two months in July.
+
+**Technical notes:**
+- **`debugProd` build type:** `initWith(debug)`, `applicationIdSuffix = ".prod"`, base URL
+  `https://api.balancee.app/`. Mock hardware, so the USB port stays free for `adb` — the constraint
+  that made 7h's bench session so painful. **Not a parallel-run candidate:** it is a debug build with
+  everything `V1_BLOCKERS.md` says disqualifies one (self-seeding config, debug hotspot).
+- **Chose a variant over a `-P` gradle property on `debug`.** The property is fewer lines and fails
+  silently: the next build without the flag points production credentials at dev with nothing on
+  screen saying so. A separate applicationId also isolates credentials and `deviceId`.
+- **`ProbeCaptureInterceptor` + `ProbeResponseRecorder`** (`data/network/ProbeCapture.kt`): peeks
+  body-safe responses into a bounded in-memory list. **Reuses
+  `PumpLoggingInterceptor.bodyLoggingAllowed()`** instead of a second allowlist — one predicate, one
+  place to be wrong, and `/activate` is already deliberately absent from it (#12). `peekBody`, never
+  `body`, so Retrofit still receives the response: an instrument that changed the measurement would
+  break every call while the panel looked healthy. Tested both ways round.
+- **`ProbeCaptureFormat`**: plain text, not JSON — wrapping bodies in a JSON document would escape
+  them, and the file exists to preserve bytes. Every file names its server, because this project now
+  holds fixtures from dev and an activation code for production.
+- **`toConfigSummary()`** is a pure function so the judgement is unit-testable without a VM, a server
+  or a device. The case it exists for: `PumpConfigResponse.prices` defaults to `emptyMap()`, so a
+  renamed server field parses cleanly into nothing → reported as **caution**, pointing at the raw
+  bytes, not as success.
+- **Not built, deliberately:** #32 steps 3–7 (`/authorise`, amount mismatch, decimal amount, status
+  poll, upload). They create transactions; the only code we hold is for production.
+- **Runbook:** `docs/journal/GATE_32_RUNBOOK.md` — install, activate, verify against the dashboard's
+  Device ID column, restart to prove persistence, capture `/config`, `adb pull`.
+- Verified: JVM **254 tests / 30 classes** green (was 232 / 27); `compileDebugProdKotlin`,
+  `compileDebugRealHwKotlin` and `lintDebug` clean, no lint findings in the new files.
+- ⚠️ **Design-authority flag:** no probe/settings screen exists in `docs/Strict design screens/`.
+  Built from existing components and tokens, like the activation and error screens before it.
+
+**Next:**
+Run the runbook on the tablet against `SN-TEST-001`. Stage 9d-2 (the transaction-creating steps) only
+once it is settled which server may be dirtied — see the ask in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
