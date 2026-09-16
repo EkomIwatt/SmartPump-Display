@@ -1524,3 +1524,54 @@ work.
 **Next:**
 Reconnect the tablet, install, and run the read-only probes — they need no reply from anyone. The
 authorise steps wait on the Paystack question in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
+
+---
+
+### The gate — all seven steps, ending with a real paid transaction
+**Date:** 2026-09-16 / 17
+**Status:** done
+**Commit(s):** `e5f4ebe`, `b67a21c`, `8757996`, `868820a` on `feature/api-probe-panel`
+
+**Summary (plain language):**
+The app has now done a complete, real transaction with Balanceè's live system: it asked to start a
+sale, a customer (us) paid ₦149 at the Paystack checkout, the app noticed the payment had landed, and
+it reported the fuel dispensed. Every step worked. This is the thing that has been blocked since July,
+and it cost a hundred and forty-nine naira.
+
+The failures were as valuable as the successes. When we tried to report fuel for a sale nobody had
+paid for, the server refused — it will not record fuel against an unpaid transaction, and that
+protection is on their side, not ours. When we sent a deliberately wrong amount, it refused that too,
+with a proper error code rather than a sentence we would have to pattern-match.
+
+One thing to fix later: a dispense can be recorded once and never corrected. Uploading a corrected
+figure returns "recorded" and quietly changes nothing, so a wrong number could stick while everything
+in our logs says it went through. Two short questions have gone to the backend about that.
+
+**Technical notes:**
+- **Status set observed — `PENDING_PAYMENT` → `PAID` → `DISPENSED`**, the three strings the DTOs
+  guessed in July. **#18d closed.** Captures: `docs/api-probes/2026-09-16-prod-gate/`.
+- **Stable error codes exist on business failures** — `AMOUNT_MISMATCH`, `PAYMENT_NOT_CONFIRMED`,
+  `TRANSACTION_NOT_FOUND`, `INVALID_REQUEST` — and on **no** authentication failure. A rule, not an
+  inconsistency: match business errors on `code`, identify the auth family by 401. **#18f closed.**
+- **#15 closed:** a `/config` signed ten minutes in the past returns
+  `401 "Request timestamp is not fresh"` — the exact string the audit predicted, so the error copy
+  already drafted stands.
+- **#18c closed:** a decimal `amount` is accepted (3501.5 for 2.35 L), and the exact
+  `amount == litres × price` check passes on it. **#44:** `amount` must stop being a `Long`.
+- **#47 closed:** upload does not validate `actualLitresDispensed` against `expectedLitres`, so
+  partial dispenses, early ends (OQ #22) and 7h's recovered pulses can all be reported.
+- **#48 — recorded, then corrected the next morning.** The second upload's 200 was first written up as
+  "last-write-wins". The dashboard showed the record still at 0.1 L, so it is the opposite: first
+  write wins and the repeat is acknowledged and discarded. The 200 means *accepted*, not *stored*,
+  and `actualLitresDispensed` is not echoed anywhere (**#46**). A status code is not an observation of
+  state — the correction is kept in the file rather than tidied away, because that is the mistake.
+- **#49:** the dashboard surfaces uploaded dispenses per pump with their litres. That is the
+  counterpart the **14-day parallel run** must reconcile against, and nobody had confirmed it existed.
+- **#43:** the QR expiry is **20 minutes**, measured five times, against three places in the app that
+  say five. `TransactionState.kt:50` is the one that costs money.
+- Two questions to the backend (correction-or-refusal, and echoing the litres) are drafted in
+  `BOSS_CONFIRMATIONS_DRAFT.md`. Nothing is blocked on either.
+
+**Next:**
+Everything left on the API line is ours: **#43–#48**, all of which belong with the payment flows
+(**#8**). The branch is thirteen commits, green, and unmerged.
