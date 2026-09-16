@@ -153,32 +153,22 @@ class ApiProbeViewModel @Inject constructor(
  * The parsed outcome, in words. A pure function so the branch that matters can be tested without a
  * ViewModel, a server or a device.
  *
- * The case worth the most: a success carrying zero prices. PumpConfigResponse.prices defaults to an
- * empty map, so if the server names that field anything other than "prices", parsing succeeds and
- * the app quietly believes this pump sells nothing. That is defect #11's exact shape — a green
- * result agreeing with our own restatement — so it is reported as a caution, not a success, and it
- * points at the raw bytes.
+ * This used to carry a "200 OK, but zero prices parsed" caution, because the old DTO defaulted its
+ * only field and a wrong shape parsed into silence. **That caution did its job on 2026-09-16 and is
+ * now gone by construction:** `PumpConfigResponse` was rebuilt from the observed bytes with nothing
+ * defaulted, so a shape that does not match can no longer arrive as a success at all — it lands in
+ * the [ApiError.Serialization] branch below, which is the one that says to rebuild the fixture.
  */
 internal fun ApiResult<PumpConfigResponse>.toConfigSummary(): ProbeSummary = when (this) {
-    is ApiResult.Success -> when {
-        data.prices.isEmpty() -> ProbeSummary(
-            tone = ProbeTone.Caution,
-            headline = "200 OK, but zero prices parsed",
-            detail = "The envelope unwrapped and the body parsed, yet prices came out empty. " +
-                "Either this pump genuinely has no prices set, or the server's field name is not " +
-                "\"prices\" and our DTO defaulted it away. Read the raw body below before " +
-                "believing either.",
-        )
-
-        else -> ProbeSummary(
-            tone = ProbeTone.Success,
-            headline = "200 OK — ${data.prices.size} price(s)",
-            detail = data.prices.entries.joinToString("   ") { (fuel, price) ->
-                "${fuel.name} $price"
-            } + "\n\nPrinted exactly as parsed, with no unit applied — whether these are kobo or " +
-                "naira is still open (#18c).",
-        )
-    }
+    is ApiResult.Success -> ProbeSummary(
+        tone = ProbeTone.Success,
+        headline = "200 OK — ${data.fuelType.name} at ${data.pricePerUnit}",
+        detail = "station: ${data.stationName}\npump: ${data.pumpId}\n" +
+            "price/L: ${data.pricePerUnit} (naira — inferred from magnitude, never stated; #18c)\n" +
+            "updated: ${data.updatedAt}\n\n" +
+            "A 200 here also proves GET signing: we sign timestamp + \".\" + \"\" for a body-less " +
+            "request and the server accepted it.",
+    )
 
     is ApiResult.Failure -> when (val e = error) {
         is ApiError.Business -> ProbeSummary(

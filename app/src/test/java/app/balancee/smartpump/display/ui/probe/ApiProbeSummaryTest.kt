@@ -15,25 +15,41 @@ import java.io.IOException
 
 class ApiProbeSummaryTest {
 
-    @Test
-    fun `a 200 that parsed no prices is a caution, not a success`() {
-        val summary = ApiResult.Success(PumpConfigResponse(emptyMap())).toConfigSummary()
+    /** The values are the ones actually observed — docs/api-probes/2026-09-16-prod-config/. */
+    private val observedConfig = PumpConfigResponse(
+        pumpId = "3727aebf-3c77-4180-a818-4254cbeeae72",
+        stationName = "Kachi",
+        fuelType = FuelType.PETROL,
+        pricePerUnit = 1490,
+        updatedAt = "2026-09-15T09:44:39.187Z",
+    )
 
-        assertEquals(ProbeTone.Caution, summary.tone)
-        // The operator must be pointed at the bytes, not left to trust the parse.
-        assertTrue(summary.detail.contains("raw body"))
+    @Test
+    fun `a config success reports the fuel and price it actually received`() {
+        val summary = ApiResult.Success(observedConfig).toConfigSummary()
+
+        assertEquals(ProbeTone.Success, summary.tone)
+        assertTrue(summary.headline.contains("PETROL"))
+        assertTrue(summary.headline.contains("1490"))
+        assertTrue(summary.detail.contains("Kachi"))
     }
 
     @Test
-    fun `prices are printed as parsed, with no unit applied`() {
-        val summary = ApiResult.Success(
-            PumpConfigResponse(mapOf(FuelType.PETROL to 87000L)),
-        ).toConfigSummary()
+    fun `the price is not dressed up in a currency the server never stated`() {
+        // 1490 is naira by inference, not by contract (#18c). A panel that printed ₦1,490.00 would
+        // be asserting a unit nobody has confirmed — the same class of move that produced the
+        // Map<FuelType, Long> this DTO replaced.
+        val summary = ApiResult.Success(observedConfig).toConfigSummary()
 
-        assertEquals(ProbeTone.Success, summary.tone)
-        assertTrue(summary.detail.contains("PETROL 87000"))
-        // Whether that is kobo or naira is #18c and still open — the panel must not imply it knows.
         assertFalse(summary.detail.contains("₦"))
+        assertTrue(summary.detail.contains("inferred"))
+    }
+
+    @Test
+    fun `a 200 is reported as proof that GET signing is accepted`() {
+        val summary = ApiResult.Success(observedConfig).toConfigSummary()
+
+        assertTrue(summary.detail.contains("GET signing"))
     }
 
     @Test

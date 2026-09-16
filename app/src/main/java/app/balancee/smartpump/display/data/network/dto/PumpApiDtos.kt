@@ -90,12 +90,43 @@ data class TransactionStatusResponse(
 // ---- Config: GET /api/pump/config (signed) --------------------------------------------------
 
 /**
- * PROVISIONAL shape (backend hasn't finalised — blocker item 4). Modelled as a price-per-fuel-type
- * map; adjust once the real payload lands. Same UNIT caveat as [AuthoriseRequest.amount].
+ * OBSERVED shape. Copied field-for-field from the first authenticated `/config` response this
+ * project ever received — `docs/api-probes/2026-09-16-prod-config/`, production, 2026-09-16:
+ *
+ * ```
+ * {"status":true,"message":"Pump config","data":{"pumpId":"3727aebf-…","stationName":"Kachi",
+ *  "fuelType":"PETROL","pricePerUnit":1490,"updatedAt":"2026-09-15T09:44:39.187Z"}}
+ * ```
+ *
+ * It replaces a `Map<FuelType, Long>` invented in July from our summary of the Reference. There is
+ * no price list: `/config` describes **this pump** — the fuel it dispenses and the one price it
+ * charges. The endpoint therefore answers the ask recorded as "nothing in the API tells a pump what
+ * it sells or what to charge", which was true of the document and not of the server.
+ *
+ * **Nothing here is defaulted, and that is the point.** The old field defaulted to `emptyMap()`, so
+ * a completely wrong shape parsed cleanly into "this pump sells nothing" and no layer above could
+ * tell. A missing or renamed field must fail loudly as [ApiError.Serialization] instead — the same
+ * ruling as TODO #13 made for `pumpId`. A pump whose price is genuinely unset has never been
+ * observed; if the server answers `null` there, this throws, which is the correct outcome for a
+ * value that would otherwise become a wrong-price sale on every litre.
  */
 @Serializable
 data class PumpConfigResponse(
-    @SerialName("prices") val prices: Map<FuelType, Long> = emptyMap(),
+    @SerialName("pumpId") val pumpId: String,
+    @SerialName("stationName") val stationName: String,
+    /** Single fuel — one pump, one nozzle, one product. */
+    @SerialName("fuelType") val fuelType: FuelType,
+    /**
+     * Price per litre, as an integer. **Naira**, inferred rather than stated: the observed 1490 is a
+     * plausible pump price and 14.90 is not. Consistent with the `amount = naira` call in TODO #17,
+     * which was also ours to make. The app stores kobo, so the mapper owns the ×100.
+     *
+     * Typed `Long` deliberately. If the server ever sends a decimal this fails loudly instead of
+     * rounding money silently — which is the observation TODO #18c is still waiting for.
+     */
+    @SerialName("pricePerUnit") val pricePerUnit: Long,
+    /** ISO-8601 with millis. Unconsumed so far; this is what a freshness check would read. */
+    @SerialName("updatedAt") val updatedAt: String,
 )
 
 // ---- Dispense upload: POST /api/pump/transactions/upload (signed, idempotent) ---------------

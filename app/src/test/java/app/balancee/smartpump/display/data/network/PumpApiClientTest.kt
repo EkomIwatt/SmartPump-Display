@@ -344,6 +344,71 @@ class PumpApiClientTest {
     }
 
     /**
+     * VERBATIM from docs/api-probes/2026-09-16-prod-config/api-capture-20260916-171619.txt — the
+     * first authenticated /config response this project ever received, captured by the in-app probe
+     * panel on production and pulled off the tablet.
+     *
+     * The DTO this exercises replaced a `Map<FuelType, Long>` that was invented in July from our own
+     * summary. Its tests were green throughout. That is the entire reason this fixture is a copy of
+     * bytes rather than a description of them.
+     */
+    @Test
+    fun `the real config payload parses into the real shape`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"status":true,"message":"Pump config","data":{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","stationName":"Kachi","fuelType":"PETROL","pricePerUnit":1490,"updatedAt":"2026-09-15T09:44:39.187Z"}}""",
+            ),
+        )
+
+        val result = client.config()
+
+        assertTrue(result is ApiResult.Success)
+        val config = (result as ApiResult.Success).data
+        assertEquals("3727aebf-3c77-4180-a818-4254cbeeae72", config.pumpId)
+        assertEquals("Kachi", config.stationName)
+        assertEquals(FuelType.PETROL, config.fuelType)
+        assertEquals(1490L, config.pricePerUnit)
+        assertEquals("2026-09-15T09:44:39.187Z", config.updatedAt)
+    }
+
+    /**
+     * The failure the old shape could not have: nothing in PumpConfigResponse is defaulted, so a
+     * renamed or absent field is a parse error the operator sees, not a silent zero. `pricePerUnit`
+     * is the one that matters — a price defaulted to 0 is a wrong-price sale on every litre.
+     */
+    @Test
+    fun `a config missing the price fails loudly instead of defaulting`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"status":true,"message":"Pump config","data":{"pumpId":"P1","stationName":"Kachi","fuelType":"PETROL","updatedAt":"2026-09-15T09:44:39.187Z"}}""",
+            ),
+        )
+
+        val result = client.config()
+
+        assertTrue(result is ApiResult.Failure)
+        assertTrue((result as ApiResult.Failure).error is ApiError.Serialization)
+    }
+
+    /**
+     * A decimal price is TODO #18c's open question, observed from the other side: if it ever
+     * happens, this must not round money silently. Loud beats plausible.
+     */
+    @Test
+    fun `a decimal price fails loudly rather than rounding`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"status":true,"message":"Pump config","data":{"pumpId":"P1","stationName":"Kachi","fuelType":"PETROL","pricePerUnit":1490.50,"updatedAt":"2026-09-15T09:44:39.187Z"}}""",
+            ),
+        )
+
+        val result = client.config()
+
+        assertTrue(result is ApiResult.Failure)
+        assertTrue((result as ApiResult.Failure).error is ApiError.Serialization)
+    }
+
+    /**
      * A route the backend never built answers with an HTML error page, not an envelope — that is
      * what api.dev.balancee.app actually returns (the control capture). It must stay
      * [ApiError.Http] with the bytes intact, or a deployment mistake would read as the server
