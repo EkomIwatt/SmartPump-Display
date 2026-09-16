@@ -1410,3 +1410,66 @@ fine while the app understood nothing — is the bug that went unnoticed for two
 **Next:**
 Run the runbook on the tablet against `SN-TEST-001`. Stage 9d-2 (the transaction-creating steps) only
 once it is settled which server may be dirtied — see the ask in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
+
+---
+
+### The activation gate — steps 1 and 2 run on the tablet
+**Date:** 2026-09-16
+**Status:** partial (steps 1 and 2 passed; 3–7 not built)
+**Commit(s):** `ad838f8` (two defects fixed), `d2ace9f` (capture), `1c3dc26` (DTO rebuilt)
+
+**Summary (plain language):**
+The pump is activated. It is registered with Balanceè, it kept its keys through a force-stop, and it
+has successfully asked the server a question and been answered. That is the first time this app has
+ever talked to a real server in its life.
+
+Getting there took two fixes, both found by actually running it. The app had never been given
+permission to use the internet — a thing no test could have caught, because the tests run on a
+computer rather than on Android, where that permission does not exist. And the box you type the
+activation code into was silently changing what you typed: it forced capitals and threw away
+punctuation, so the correct code became a different code before it was sent.
+
+Then the useful part. The server's answer did not match what we had been building against **at all** —
+not a renamed field, a different idea entirely. We had modelled a price list for several fuels; the
+server describes one pump with one fuel and one price. Our version had a default value, so the wrong
+shape did not fail, it quietly said "this pump sells nothing" and everything above it would have
+believed that. It has been rebuilt from the bytes the server actually sent.
+
+The answer also settles two of the questions we were about to send to the backend team — one of them
+the one we had marked as most important and most urgent.
+
+**Technical notes:**
+- **Step 1 passed.** Activated on production against `SN-TEST-001`. `pumpId`
+  `3727aebf-3c77-4180-a818-4254cbeeae72`; `deviceId` `ae2b7a83-…`, matching the dashboard's Device ID
+  column — the echo check in `PumpActivationRepositoryImpl` passing against an independent source.
+  Credentials survived a force-stop and relaunch.
+- **Defect 1 — `android.permission.INTERNET` was never declared.** Not in main, not in the debug
+  overlay. Crash: `SecurityException: Permission denied (missing INTERNET permission?)` at
+  `Inet6AddressImpl.lookupHostByName`, on the OkHttp dispatcher. Invisible to 254 JVM tests because
+  MockWebServer runs off-device. **The code was not spent** — nothing left the device.
+- **Defect 2 — `setCode` uppercased and filtered the code**, reasoning from the Reference's uppercase
+  examples. The dashboard issues mixed case. It mangled silently, so the field looked right. The test
+  asserting the old behaviour is reversed, not deleted.
+- **`GET /config` returned 200**, and the payload bears no resemblance to `PumpConfigResponse`:
+  `{"pumpId","stationName","fuelType","pricePerUnit":1490,"updatedAt"}` — one pump, one fuel, one
+  price. No `prices` map. Captured verbatim at `docs/api-probes/2026-09-16-prod-config/` and rebuilt
+  from there with **nothing defaulted**, so the next shape mismatch is a loud
+  `ApiError.Serialization` rather than a silent zero.
+- **The probe panel's "zero prices parsed" caution is what made it visible**, and it is now removed as
+  impossible by construction. It existed for one day and paid for itself.
+- **Two asks are now obsolete before sending.** `BOSS_CONFIRMATIONS_DRAFT.md` item 1 — "nothing in the
+  API tells a pump what it sells or what to charge", marked highest and said to set the date — is
+  **built and deployed**: `/config` returns `fuelType`, `pricePerUnit` and `stationName`. And the
+  GET-signing question in item 3 is answered by the 200 itself: `timestamp + "." + ""` is verified.
+- **`pricePerUnit: 1490` is naira by inference**, not by contract — corroborating TODO #17, which was
+  our own call. #18c still deserves its one line.
+- **New #42:** a `RuntimeException` in the OkHttp chain kills the process (AsyncCall rethrows after
+  `onFailure`), which is how a missing permission became a crash instead of an error report.
+- **Bench note:** logcat **is** usable on this tablet when the Arduino is not attached —
+  `adb logcat -b crash -d` is how defect 1 was diagnosed. 7h's note applies only to the USB-host case.
+  Also: Git Bash rewrites a leading `/` in an `adb pull` path; prefix `MSYS_NO_PATHCONV=1`.
+- JVM **260 tests / 30 classes** green.
+
+**Next:**
+Steps 3–7 need stage 9d-2. Step 6's other half (clock skew, #15) and step 5 (status poll) need no
+transaction and can run as soon as they are built; steps 3, 4 and 7 create Paystack initialisations.
