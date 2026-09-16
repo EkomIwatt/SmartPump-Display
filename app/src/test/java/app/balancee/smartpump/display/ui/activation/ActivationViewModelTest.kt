@@ -54,11 +54,31 @@ class ActivationViewModelTest {
 
     // ---- what gets sent ----------------------------------------------------------
 
+    // This test used to assert the opposite — that the code was uppercased and stripped down to
+    // letters, digits and dashes — and it passed happily while making the real dashboard's
+    // mixed-case codes impossible to send. It is kept pointed the other way as the reminder: a
+    // green test proves the code does what we assumed, never that the assumption was right.
     @Test
-    fun `the code is uppercased and stripped of anything but letters digits and dashes`() {
+    fun `the code is sent as typed, case preserved`() {
         val vm = vm()
-        vm.setCode(" blc-act 7f19\" ")
-        assertEquals("BLC-ACT7F19", vm.ui.value.code)
+        vm.setCode("aB3-xY9z")
+        assertEquals("aB3-xY9z", vm.ui.value.code)
+    }
+
+    @Test
+    fun `only whitespace and control characters are removed — a paste artefact, not code`() {
+        val vm = vm()
+        vm.setCode(" blc-act 7f19\n")
+        assertEquals("blc-act7f19", vm.ui.value.code)
+    }
+
+    @Test
+    fun `punctuation we have never seen in a code is preserved, not silently dropped`() {
+        // The server decides what is valid. Mangling it here means the operator compares the field
+        // against the paperwork, sees a match, and cannot explain the refusal.
+        val vm = vm()
+        vm.setCode("blc.act+7f19/x")
+        assertEquals("blc.act+7f19/x", vm.ui.value.code)
     }
 
     @Test

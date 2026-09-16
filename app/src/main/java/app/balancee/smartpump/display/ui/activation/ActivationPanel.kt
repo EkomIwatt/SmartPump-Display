@@ -107,8 +107,11 @@ internal fun ActivationPanelContent(
                 singleLine = true,
                 enabled = !state.submitting,
                 modifier = Modifier.fillMaxWidth(),
+                // Explicitly NOT KeyboardCapitalization.Characters: the codes the dashboard issues
+                // are mixed case, and a keyboard locked to capitals makes the right code
+                // untypeable. Found on the tablet, 2026-09-16.
                 keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
+                    capitalization = KeyboardCapitalization.None,
                 ),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,

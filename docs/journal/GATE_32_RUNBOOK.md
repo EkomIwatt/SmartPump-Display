@@ -97,6 +97,20 @@ what that looks like.
 - [ ] Record whether the backend accepts a new `deviceId` for a pump that has already been activated
       once. That is TODO #31's second question, answered by observation rather than by asking.
 
+## When something goes wrong — logcat IS available here
+
+7h's notes say logcat is unusable on this tablet. That was true **with the Arduino attached**: the
+USB-C port cannot be an adb link and a USB host at the same time. This build mocks the hardware, so
+the port is free and the ordinary tools work:
+
+```bash
+adb logcat -b crash -d          # the crash buffer, after the fact — this is how #42 was found
+adb logcat -d | grep -i pump    # general
+```
+
+The crash buffer survives the app restarting, so it can be read calmly after the fact rather than
+being captured live.
+
 ## After
 
 Update **#32** in `TODO.md` with what each step returned, and log the sitting in `PROJECT_LOG.md`.

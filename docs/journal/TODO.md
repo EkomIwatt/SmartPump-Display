@@ -333,6 +333,22 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
 - [ ] **39. `docs/api-probes/2026-09-12/probe.sh` is re-runnable** _(was a second #33, renumbered
   2026-09-15 at the merge; nothing referenced it by number)_ and sends no secrets. Re-run it
   after any backend deploy to see whether the 401s have grown a `code` field yet (#18f).
+- [ ] **42. A RuntimeException inside the OkHttp chain kills the process, not just the call.**
+  Found 2026-09-16 when the missing INTERNET permission surfaced as
+  `SecurityException` at DNS lookup: the app died mid-activation rather than reporting a failure.
+  - **Why `safeApiCall` did not save us.** Retrofit's `suspend` path uses `enqueue`.
+    `RealCall.AsyncCall.run` catches `IOException` and calls `onFailure`; for any other `Throwable`
+    it calls `onFailure` **and then rethrows**, which reaches the default uncaught handler and takes
+    the process down. So the coroutine *was* told, and the app died anyway.
+  - **Why it matters beyond this bug.** The permission gap is fixed and DNS failures are
+    `UnknownHostException` (an `IOException`), so the trigger is gone. But this is a kiosk that must
+    not vanish mid-sale, and **activation is the worst possible moment to die**: the operator is left
+    unable to tell whether the code was spent, which is precisely the ambiguity
+    `ActivationOutcome.Unreachable` exists to make explicit.
+  - **Shape of a fix:** give OkHttp a `Dispatcher` backed by an `ExecutorService` whose thread
+    factory installs an `UncaughtExceptionHandler`. The call still fails, the coroutine still gets
+    its `IOException`, but the process survives. Small, and testable by throwing from a stub
+    interceptor.
 - [ ] **41. Credentials can only arrive by redeeming a code — and dev may not use codes.**
   `PumpActivationRepositoryImpl:54` is the **only** writer of `PumpCredentialsStore` in the app;
   everything else reads. So if dev hands over an `apiKey` + `signingSecret` + `pumpId` directly
