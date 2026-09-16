@@ -1,0 +1,16 @@
+# SmartPump API capture
+# server:     https://api.balancee.app/
+# written:    2026-09-16T23:13:14.291277Z
+# responses:  2 (newest first)
+# NOTE: bodies are verbatim. Build fixtures from these bytes, not from a restatement of them (TODO #11).
+
+---- POST /api/pump/authorise → 200
+---- at 2026-09-16T23:13:06.232474Z
+---- sent:
+{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","transactionId":"probe-1d6dc982-02e6-4961-b260-887239786117","amount":3501.5,"expectedLitres":2.35,"fuelType":"PETROL"}
+---- received:
+{"status":true,"message":"Transaction authorised","data":{"status":"PENDING_PAYMENT","transactionId":"probe-1d6dc982-02e6-4961-b260-887239786117","paymentReference":"BPM-791e5766f1aa419695506e9949dc3a8d","authorizationUrl":"https://checkout.paystack.com/r15ru028lccwuts","expiresAt":"2026-09-16T23:33:07.279Z"}}
+
+---- GET /api/pump/config → 200
+---- at 2026-09-16T23:12:47.912504Z
+{"status":true,"message":"Pump config","data":{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","stationName":"Kachi","fuelType":"PETROL","pricePerUnit":1490,"updatedAt":"2026-09-15T09:44:39.187Z"}}

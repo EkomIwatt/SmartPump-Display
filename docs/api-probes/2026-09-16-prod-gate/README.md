@@ -1,10 +1,10 @@
 # The gate sitting — nine authenticated responses from production
 
-**2026-09-16, 22:36–22:45 UTC**, `https://api.balancee.app`, pump `SN-TEST-001`. Captured by the
+**2026-09-16, 22:36–23:13 UTC**, `https://api.balancee.app`, pump `SN-TEST-001`. Captured by the
 in-app probe panel (stage 9d-2), driven through `PumpApiClient`, pulled with `adb`. The file beside
 this one is verbatim; everything below cites it.
 
-Five questions that have been open since August are answered here, and one assumption is wrong.
+Six questions that have been open since August are answered here, and one assumption is wrong.
 
 ---
 
@@ -72,12 +72,14 @@ unpaid.
 
 ## 5. ⚠️ The QR expiry is **20 minutes**, not 5
 
-Measured twice, from the capture's own timestamps:
+Measured four times, from the captures' own timestamps:
 
 | authorised at | expiresAt | window |
 |---|---|---|
 | 22:42:14.615 | 23:02:15.616 | 20 min 1 s |
 | 22:43:31.143 | 23:03:32.245 | 20 min 1 s |
+| 22:51:47.546 | 23:11:48.682 | 20 min 1 s |
+| 23:13:06.232 | 23:33:07.279 | 20 min 1 s |
 
 Three places in the app say five minutes:
 
@@ -89,18 +91,36 @@ Three places in the app say five minutes:
 The customer-facing one matters: a screen that gives up after five minutes abandons a sale the server
 would still have honoured for another fifteen. **Use the server's `expiresAt`, not a constant.**
 
-## 6. Still not settled: does `amount` accept a decimal? · **#18c**
+## 6. `amount` accepts decimals · **#18c — ANSWERED**
 
-The decimal probe returned `AMOUNT_MISMATCH`, which proves less than it looks like. With litres at
-2.0, `price × litres` is a whole 2980, so the probe sent **2980.5** — a value that is both decimal
-*and* wrong. The server compared it numerically and refused it on the amount, **not** on the type, so
-a decimal is at least syntactically acceptable. That is all this run shows.
+Re-run on 2026-09-16 at 23:13 with the capture format that records the request too, so this rests on
+bytes rather than on anyone's memory of a text box:
 
-**The decisive run, not yet done:** set litres to **2.35**, which makes the correct amount 3501.5, and
-press the decimal probe. The panel sends the exactly-correct fractional figure, so a 200 means
-decimals are fine and `amount` must become a decimal type before the payment flows (#8); another
-`AMOUNT_MISMATCH` means whole naira only, and station pricing has to be constrained so
-`price × litres` is never fractional.
+```
+sent:     {"pumpId":"3727aebf-…","transactionId":"probe-1d6dc982-…","amount":3501.5,
+           "expectedLitres":2.35,"fuelType":"PETROL"}
+received: 200 {"status":true,"message":"Transaction authorised","data":{"status":"PENDING_PAYMENT",
+           "transactionId":"probe-1d6dc982-…","paymentReference":"BPM-791e5766f1aa419695506e9949dc3a8d",
+           "authorizationUrl":"https://checkout.paystack.com/r15ru028lccwuts",
+           "expiresAt":"2026-09-16T23:33:07.279Z"}}
+```
+
+2.35 L × ₦1490 = ₦3,501.50, sent as `3501.5` and **accepted**. So the server takes a decimal `amount`,
+and its exact `amount == expectedLitres × pricePerUnit` check passes on a fractional product.
+
+**Consequence: `AuthoriseRequest.amount` must stop being a `Long`** before the payment flows (#8) are
+built — see TODO **#44**. Station pricing does **not** have to be constrained to whole naira, which was
+the alternative and the worse one.
+
+**The first attempt proved less than it looked.** With litres at 2.0 the correct amount is a whole
+2980, so the probe sent 2980.5 — decimal *and* wrong at once — and got `AMOUNT_MISMATCH`. That showed
+only that a decimal parses. It is recorded here because the trap is easy to fall into twice: a probe
+whose input is wrong in two ways at once cannot tell you which one the server objected to.
+
+**Still unmeasured: how many decimal places.** 3501.5 is one. The app carries money as kobo, so it
+cannot express more than two — yet `price × litres` can exceed two whenever the price is not a
+multiple of ten (₦1491 × 2.357 L = ₦3,514.287). With today's ₦1490 that cannot arise, so the question
+is dormant rather than answered. The probe for it is litres **2.3571** → 3512.079, three places.
 
 ## 7. Not run
 

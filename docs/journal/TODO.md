@@ -307,13 +307,21 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
      nothing we had: no `prices` map, one pump with one fuel and one price. DTO rebuilt from the
      bytes (`1c3dc26`). Capture: `docs/api-probes/2026-09-16-prod-config/`. **7b's second half is
      unblocked**, and it struck two items off the backend ask (see #31).
-  3. `/authorise` happy path, then a deliberate **amount mismatch** → confirms whether stable codes
-     arrived on that path (#18f).
-  4. Send a **decimal `amount`** → settles #18c by observation.
-  5. Poll `/transactions/{id}` → the real status set (#18d).
-  6. ~~Confirm **GET signing**~~ ✅ **ANSWERED 2026-09-16** by step 2's 200: `timestamp + "." + ""`
-     is what the server verifies. The **clock-skew** half (#15) is built and unrun.
-  7. `/transactions/upload` last.
+  3. ~~`/authorise` happy path, then a deliberate **amount mismatch**~~ ✅ **PASSED 2026-09-16.**
+     Both work, and stable codes DO arrive on that path: `AMOUNT_MISMATCH` (#18f). Auth 401s still
+     carry none — business failures have codes, authentication failures do not.
+  4. ~~Send a **decimal `amount`**~~ ✅ **ANSWERED 2026-09-16: accepted.** 3501.5 for 2.35 L at ₦1490,
+     request and response both captured. `amount` must stop being a `Long` — **#44**.
+  5. ~~Poll `/transactions/{id}`~~ ✅ **PARTLY.** An unknown id returns 404
+     `TRANSACTION_NOT_FOUND`; `PENDING_PAYMENT` observed on authorise. The rest of the status set
+     (#18d) needs a paid transaction, which needs someone to actually pay.
+  6. ~~Confirm **GET signing** and the **clock-skew** strings~~ ✅ **BOTH ANSWERED 2026-09-16.**
+     GET signing: step 2's 200 proves `timestamp + "." + ""` is what the server verifies. Clock skew
+     (**#15**): a `/config` signed ten minutes in the past returns
+     `401 {"status":false,"message":"Request timestamp is not fresh"}` — **the exact string the audit
+     predicted from the Reference's prose**, so the copy already drafted in `ERROR_COPY_DRAFT.md`
+     stands. No `code` on it, consistent with the auth-failure rule.
+  7. `/transactions/upload` last. **Still unrun** — it now has the ids it needs.
   - Drive it through `PumpApiClient`, **not curl** — what is under test is our signing, our envelope
     parsing and our credential store. A curl script would test a second implementation we do not
     ship.
@@ -358,6 +366,32 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     factory installs an `UncaughtExceptionHandler`. The call still fails, the coroutine still gets
     its `IOException`, but the process survives. Small, and testable by throwing from a stub
     interceptor.
+- [ ] **43. The QR expiry is 20 minutes, not 5 — three places in the app say otherwise.**
+  Measured four times on 2026-09-16, always 20 min 1 s between the authorise and its `expiresAt`
+  (`docs/api-probes/2026-09-16-prod-gate/`).
+  - `TransactionState.kt:50` — *"5-min expiry, then auto-cancel back to Idle"*. **This is the one that
+    costs money:** a screen that gives up at five minutes abandons a sale the server would still have
+    honoured for another fifteen, and the customer is standing at the pump while it does.
+  - `PumpApiDtos.kt:75` — the same claim in a comment on `expiresAt`.
+  - `PumpRequestSigner.kt:6` — *"within 5 min of server clock"*. A **different** five minutes: the
+    signing freshness window, still unmeasured. #15's probe only proves ten minutes is too old.
+  - **Fix is not a new constant.** `AuthoriseResponse.expiresAt` is a server timestamp and the expiry
+    countdown should read it, so the day the backend changes the window nothing here has to notice.
+    Ours to do, inside the payment flows (#8).
+- [ ] **44. `AuthoriseRequest.amount` must stop being a `Long`.** #18c is answered: the server accepts
+  a decimal amount and its exact `amount == expectedLitres × pricePerUnit` check passes on one
+  (3501.5 for 2.35 L at ₦1490, request and response both captured).
+  - **Why it cannot stay:** at any price, most metered litre figures produce a fractional naira amount.
+    A `Long` cannot carry it, and rounding is refused rather than tolerated, so every fill-up would be
+    unauthorisable. The alternative — constraining station prices to whole naira so the product is
+    always whole — is a business constraint we no longer have to ask for.
+  - **Not a `Double`.** Money through binary floating point is how a check for *exact* equality starts
+    failing on figures that look right. `BigDecimal` with a serializer, or an integer of kobo
+    serialised as a decimal — decide when #8 builds it, but decide deliberately.
+  - **Open, and dormant rather than answered: precision.** 3501.5 is one decimal place. The app carries
+    kobo, so it cannot express more than two — yet `price × litres` exceeds two whenever the price is
+    not a multiple of ten (₦1491 × 2.357 L = ₦3,514.287). Today's ₦1490 hides it. The probe is litres
+    **2.3571** → 3512.079.
 - [ ] **41. Credentials can only arrive by redeeming a code — and dev may not use codes.**
   `PumpActivationRepositoryImpl:54` is the **only** writer of `PumpCredentialsStore` in the app;
   everything else reads. So if dev hands over an `apiKey` + `signingSecret` + `pumpId` directly
