@@ -71,7 +71,8 @@ Probe panel → **GET /config**.
 - [ ] **Save to file**, then pull it:
 
 ```bash
-adb pull /sdcard/Android/data/app.balancee.smartpump.display.prod/files/api-captures/
+# Git Bash rewrites a leading slash into a Windows path — MSYS_NO_PATHCONV=1 stops it.
+MSYS_NO_PATHCONV=1 adb pull /sdcard/Android/data/app.balancee.smartpump.display.prod/files/api-captures/
 ```
 
 (The panel prints the exact path and the `adb pull` line after saving.)
