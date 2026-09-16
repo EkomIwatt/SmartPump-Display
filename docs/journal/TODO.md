@@ -440,21 +440,30 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     tank that fills before the target, an attendant ending a fixed sale early (OQ #22), and the pulses
     7h recovers after a restart. The under-counting posture in #28 and #36 survives contact.
   - **What it exposed:** the endpoint is an **upsert**, not a reject — see **#48**.
-- [ ] **48. `/transactions/upload` is last-write-wins, and the response does not say what it stored.**
-  - **Idempotent enough for `retryingApiCall`**: a repeated *identical* upload is harmless, which is
-    what that retry assumes. **Not** safe for a non-identical one: a replaying offline queue that
-    sends a stale record after a corrected one silently overwrites the correction, and the station's
-    record of fuel sold becomes whichever upload landed last.
-  - **The app cannot verify the outcome.** The reply carries `status`, `transactionId`,
-    `paymentReference`, `authorizationUrl`, `expiresAt` — **not** `actualLitresDispensed` (#46: it is
-    the same object every endpoint returns, and that field is not in it). So "recorded" is the most
-    the app can ever know.
-  - **Ours to handle in 7e:** never enqueue a second upload for a transactionId whose upload already
-    succeeded, and treat a queued upload as superseded by a later one for the same id rather than
-    sending both. **Theirs to consider:** whether a second upload with different litres should be
-    refused, or at least kept in an audit trail. A fifth item for **#18**.
-  - **Unverified:** whether the stored figure is now 0.1 or 0.2. The response cannot say; the
-    dashboard's per-pump **Transactions** view can, and it is worth one look while the pump exists.
+- [ ] **48. A dispense can be recorded once and never corrected — and the app is told otherwise.**
+  Corrected 2026-09-17 from "last-write-wins", which was read out of a 200 and was wrong in the more
+  dangerous direction.
+  - **Observed:** a second upload for an already-`DISPENSED` transaction, carrying 0.2 L instead of
+    0.1, returned `200 Transaction recorded` — and the dashboard still shows **0.1**. First write
+    wins; the repeat is acknowledged and discarded.
+  - **The retry is safe.** `retryingApiCall` repeats an identical upload, which is now demonstrably
+    harmless. That question is closed.
+  - **The hazard is correction, not duplication.** If a dispense is ever uploaded with the wrong
+    litres — a bug, a bad K-factor, a figure sent before 7h's reconciliation finished — re-uploading
+    the right one **succeeds loudly and changes nothing**. The station's record stays wrong while
+    every log in the app says "recorded".
+  - **Why it was invisible:** the reply does not echo `actualLitresDispensed` (#46), so a 200 is the
+    only signal the app gets, and it means "accepted", not "stored". Nothing in the API can read the
+    figure back; only the dashboard shows it.
+  - **Ours (7e):** upload once per transaction and never re-send a superseded figure, because the
+    first send is the only one that counts. **Theirs — a fifth item for #18:** either accept a
+    correction, or refuse the repeat with a code instead of a 200 that reads as success.
+- [x] **49. Uploaded dispenses ARE visible to an operator — confirmed 2026-09-17.** The dashboard's
+  per-pump Transactions view lists each transaction with its state and, for a dispensed one, the
+  litres recorded. That is the counterpart the **14-day parallel run** needs: something to reconcile
+  the app's litres against. Worth knowing it exists before the run, not during it.
+  - Caveat kept: the **API** cannot read that figure back (#46), so verification is a person opening
+    a web page. The app cannot check its own record.
 
 - [ ] **41. Credentials can only arrive by redeeming a code — and dev may not use codes.**
   `PumpActivationRepositoryImpl:54` is the **only** writer of `PumpCredentialsStore` in the app;

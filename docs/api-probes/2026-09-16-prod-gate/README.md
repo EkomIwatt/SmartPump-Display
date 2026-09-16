@@ -197,7 +197,7 @@ Our three DTOs are three **partial** views of it. `TransactionStatusResponse` an
 under `ignoreUnknownKeys`. Not a defect — but `expiresAt` on a status poll is exactly what a countdown
 should be reading (**#43**), and it is being discarded. See TODO **#46**.
 
-## 10. Upload does not validate litres, and it is an upsert · **#47 ANSWERED**
+## 10. Upload takes any litres, but ignores a second one · **#47 ANSWERED**
 
 Pressed again on the **same, already-dispensed** transaction with a different figure — 0.2 L against a
 sale authorised and paid for 0.1 L:
@@ -209,19 +209,31 @@ sent:     {"pumpId":"3727aebf-…","transactionId":"probe-9c729d97-…",
 received: 200 {"status":true,"message":"Transaction recorded","data":{"status":"DISPENSED",…}}
 ```
 
-**The good half — litres are not checked against `expectedLitres`.** Every case where the two
-legitimately differ can therefore be reported: a tank that fills before the target, an attendant
-ending a fixed sale early (OQ #22), and the pulses 7h recovers after a restart. The app's
-under-counting posture (#28, #36) survives contact with the server.
+**Litres are not checked against `expectedLitres`.** The first upload's 0.1 was accepted for a sale
+whose expectation it matched, and the second's 0.2 was accepted for one it did not. So every case
+where actual and expected legitimately differ can be reported: a tank that fills before the target, an
+attendant ending a fixed sale early (OQ #22), and the pulses 7h recovers after a restart. The
+under-counting posture in #28 and #36 survives contact with the server.
 
-**The half that needs care — it is an upsert, not a reject.** A second upload carrying *different*
-data is accepted with another 200, so the endpoint is "idempotent" in the sense our retry logic needs
-(a repeated identical call is harmless) but **last-write-wins** for a call that is not identical.
-A replaying offline queue that sends a stale record after a corrected one would silently overwrite the
-corrected figure, and the station's record of how much fuel it sold would be whichever upload arrived
-last. See TODO **#48**.
+**But the second upload did not take effect.** The dashboard's per-pump Transactions view shows the
+record still reading **0.1 L**. The endpoint acknowledged a repeat with `200 Transaction recorded` and
+discarded the new figure — **first write wins, and the caller is told otherwise.**
 
-**And it cannot be checked from the response.** The upload reply echoes `status`, `transactionId`,
-`paymentReference`, `authorizationUrl` and `expiresAt` — **not** `actualLitresDispensed`. So the app
-has no way to confirm what was actually stored, and this capture cannot say whether the record now
-reads 0.1 or 0.2. The dashboard's per-pump **Transactions** view can.
+> **Corrected 2026-09-17.** This section first concluded "last-write-wins" from the 200 alone. That was
+> wrong, and wrong in the more dangerous direction: it is the *response* that is misleading, not the
+> storage. The 200 was read as evidence of a write because nothing in the reply says otherwise —
+> `actualLitresDispensed` is not echoed (§9). Checking the dashboard is what settled it, and the
+> lesson is the same one this whole directory exists for: a status code is not an observation of
+> state.
+
+**What that means for the app (TODO #48).** The retry in `retryingApiCall` is safe — a repeated
+identical upload is harmless, and now demonstrably so. The hazard is the opposite of the one first
+recorded: **a correction cannot be applied.** If a dispense is ever uploaded with the wrong litres —
+a bug, a bad K-factor, a figure sent before 7h's reconciliation finished — re-uploading the right one
+succeeds loudly and changes nothing, and no one downstream can tell. The station's record would be
+permanently wrong while every log says "recorded".
+
+**Good news alongside it:** the dashboard *does* surface uploaded dispense records, with the litres
+figure, per pump. That is the counterpart the 14-day parallel run needs to reconcile against. The API
+still cannot read the figure back (§9), so verification is an operator opening a web page, not
+something the app can do for itself.
