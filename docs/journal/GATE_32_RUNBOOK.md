@@ -4,8 +4,8 @@ How to run the gate on a tablet, and what to do with what comes back. Written 20
 only code we hold is a **production** one for `Test Pump 1` / `SN-TEST-001` on a dummy business
 account created by the backend team.
 
-**Read first:** TODO **#31** (why the environment matters), **#32** (the steps and why they must go
-through `PumpApiClient`), **#41** (what is still missing if dev ever issues a key pair instead).
+**Read first:** TODO **#31** (settled — why production is the right target here), **#32** (the steps,
+and why they must go through `PumpApiClient`).
 
 ---
 
@@ -21,8 +21,10 @@ through `PumpApiClient`), **#41** (what is still missing if dev ever issues a ke
   rather than logcat — which this tablet has already proved unreliable (7h).
 
 Steps 3–7 of #32 (`/authorise`, the deliberate mismatch, the decimal amount, the status poll, the
-upload) are **not built**. They create transactions, and nothing should create one until it is
-settled which server is acceptable to dirty.
+upload) are **not built yet** — stage 9d-2. Building them is cleared; **pressing** the authorise
+button waits on one question, because `/authorise` returns a Paystack checkout URL and on production
+that is presumably the live Paystack (item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`). Nothing in the steps
+below is affected.
 
 ---
 
@@ -77,6 +79,23 @@ adb pull /sdcard/Android/data/app.balancee.smartpump.display.prod/files/api-capt
 - [ ] Commit the capture under `docs/api-probes/<date>-prod-config/` **as bytes**. Build the fixture
       from that file, never from a restatement of it — restating the shape is how #11 survived a
       green suite for two months.
+
+## Optional, and worth it while the pump is throwaway — revoke and re-activate
+
+The dashboard has a **Revoke** button beside **Get code**. Nobody has ever tested what happens after
+one, and the answer matters beyond this sitting: the **signing cutover is a planned reinstall**,
+which wipes `device_identity` prefs and mints a new `deviceId`, so the production build will
+activate as a stranger to whatever the run build registered. This is the cheapest chance to find out
+what that looks like.
+
+- [ ] Revoke on the dashboard, then `GET /config` again from the app. Expect a 401 — record the exact
+      message, because this is the first time we will have seen a **revoked** credential rather than
+      an absent or invalid one.
+- [ ] **Get code**, redeem it in the panel. The app refuses a second activation **locally** while it
+      still holds credentials (`PumpActivationRepositoryImpl`), so clear the app data first — that
+      also mints a fresh `deviceId`, which is exactly the cutover scenario.
+- [ ] Record whether the backend accepts a new `deviceId` for a pump that has already been activated
+      once. That is TODO #31's second question, answered by observation rather than by asking.
 
 ## After
 

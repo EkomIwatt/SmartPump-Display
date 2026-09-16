@@ -1,6 +1,8 @@
 # What is still blocking V1
 
-_Compiled 2026-09-12. Refreshed 2026-09-16 after an activation code arrived — minted against production._
+_Compiled 2026-09-12. Refreshed 2026-09-16: the activation code is redeemable against a throwaway
+production pump, and phase 9d-1 built the way to reach it — so the API line is no longer waiting on
+the backend._
 
 **This file is a view, not a second source of truth.** Every item points at its real entry in
 [`TODO.md`](TODO.md) (work items, `#n`) or [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) (decisions,
@@ -125,19 +127,21 @@ prerequisite *of the run*, which is why it is deferred rather than dropped.
 
 ## 4. Blocked on the backend
 
-- [ ] **The activation code — one arrived 2026-09-16, and it is a _production_ code.** Still the single
-  gate on the API line, but the shape of the wait changed. Codes **are re-issuable** (so #31's one-way
-  door is narrow), and production's `/api/pump/*` routes are deployed and answer byte-identically to
-  dev (`docs/api-probes/2026-09-16-prod/`). What blocks now: no installable build reaches production,
-  and **#32's sequence writes real transactions**, so it cannot be run there as written. Two things
-  move it — **a way to authenticate against dev** (item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`; note we
-  were told 2026-09-16 that **dev does not require an activation code**, which our own dev 401s do not
-  obviously support, so the ask is form-agnostic: code, pre-issued key pair, or documented bypass) and
-  the **in-app probe panel** without which steps 2–7 have no button to press. If the answer is a key
-  pair, **#41** is needed too — activation is currently the only writer of the credential store. See
-  **#31**, **#32**, **#41**.
-  Everything in the probe's "cannot reach" list is still behind it: the `/config` payload shape, GET
-  signing, clock skew (**#15**), the decimals question and the real status set (**#18c–e**).
+- [~] **The activation code — NO LONGER BLOCKED ON THE BACKEND (2026-09-16).** It sat in this section
+  since July; it does not belong here any more. The code we hold is a production one, and the pump it
+  belongs to — `Test Pump 1` / `SN-TEST-001` — is a throwaway on a **dummy business account** the
+  backend dev created for us, with self-service **Get code** and **Revoke** buttons. Codes are
+  re-issuable, production's `/api/pump/*` answers byte-identically to dev
+  (`docs/api-probes/2026-09-16-prod/`), and phase 9d-1 built both the way in (`debugProd`) and the
+  thing to press (the API probe panel). **#31** (settled), **#32**, `GATE_32_RUNBOOK.md`.
+  - **What is left is ours to do, not theirs:** run the sitting, and build #32 steps 3–7.
+  - **One narrow question remains, and it gates only step 3:** `/authorise` returns a Paystack
+    checkout URL, and on production that is presumably the live Paystack. Item 4 of
+    `BOSS_CONFIRMATIONS_DRAFT.md`, now one paragraph. It does not gate activation, `/config`, or
+    building anything.
+  - Still behind the sitting, and now reachable by **observation** rather than by a reply: the
+    `/config` payload shape, GET signing, clock skew (**#15**), the decimals question and the real
+    status set (**#18c–e**).
 - [ ] **Transaction upload job (7e).** Not built; the `workmanager` dependency is not even in the
   project. Needs the ingest endpoint confirmed.
 - [ ] **#29 — the `events` table has no backend home.** 7h writes operator-visible fuel-log rows and

@@ -269,38 +269,38 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - Guards: already-activated is refused **locally** (a valid second code would overwrite and
     abandon the backend's `pumpId`); the `deviceId` echo is checked and a mismatch **keeps** the
     credentials while reporting the disagreement.
-- [~] **31. The two pre-flight questions — half answered, and the answer moved the problem.**
-  - ✅ **Are dev activation codes re-issuable? YES** (confirmed 2026-09-16). The "single-use" claim in
-    `API_CONFORMANCE_AUDIT.md` was our own assumption carried forward without a quoted Reference line,
-    and it was wrong about scarcity: a code is single-use, but another can be issued. The one-way door
-    this item existed to shrink is now narrow.
-  - [ ] **Can a dev pump be reset and re-activated against the same `deviceId`?** Still unanswered.
-    Less urgent now that codes are re-issuable, but not moot: the signing cutover is a **planned
-    reinstall**, which wipes `device_identity` prefs and mints a new `deviceId`, so the production
-    build activates as a stranger to whatever the run build registered.
-  - 🚩 **The new blocker, found 2026-09-16: the code we hold is a PRODUCTION code.** It was issued from
-    the operator dashboard at `smartpump.balancee.app/dashboard/pumps`, which devtools shows posting
-    GraphQL to `api.balancee.app`. Consequences:
-    - **No installable build can redeem it today.** `debug`/`debugRealHw` hard-wire
-      `api.dev.balancee.app` in `buildConfigField`; only `release` points at production, and there is
-      no signed release build. Reaching prod from a debuggable build needs a new variant or a gradle
-      property — small, but deliberate.
-    - **#32 cannot run there as written** — see the note under it.
-    - **The REST surface itself is fine on prod.** An unauthenticated, no-credentials probe
-      (`docs/api-probes/2026-09-16-prod/`) confirms `/api/pump/config`, `/api/pump/transactions/[id]`
-      and `/api/pump/activate` are all deployed on production and answer **byte-identically** to dev,
-      including the inconsistent `code` field (#18f). The GraphQL dashboard sits alongside the REST
-      pump API, it does not replace it.
-  - 🚩 **And dev may not use codes at all.** Told 2026-09-16: "dev does not require an activation
-    code". Our own dev probe contradicts the simplest reading of that — `/api/pump/config` answers
-    `401 Missing pump authentication headers` with no headers and `401 Invalid API key` with filler
-    ones — so it likely means credentials are issued directly, or activation is a formality on dev,
-    or it was about the dashboard GraphQL API rather than the pump REST API. **The ask is therefore
-    form-agnostic** (item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`, rewritten): what is the way to make one
-    authenticated request against `api.dev.balancee.app`? A code, a pre-issued key pair, or a
-    documented bypass — any of the three. Fallback ladder named there too.
-- [ ] **32. THE GATE — redeem one code on dev.** Everything left on the API line is behind it, and
-  it should all be done in one sitting while the server is in a known state:
+- [x] **31. The pre-flight questions — SETTLED 2026-09-16. We are going to production, on purpose.**
+  Kept rather than deleted because it moved three times in one day and the reasoning is the useful
+  part.
+  - ✅ **Are codes re-issuable? YES.** The dashboard has a self-service **Get code** button, and a
+    **Revoke** button beside it. Our "single-use, so we cannot proceed on a borrowed one" framing was
+    asserted in `API_CONFORMANCE_AUDIT.md` without a quoted Reference line — it was our own
+    assumption. A code is single-use; another is one click away.
+  - ✅ **Can a pump be reset and re-activated?** The **Revoke** button says yes. Whether the same
+    `deviceId` can then re-activate is answerable **by observation** during the sitting rather than
+    by asking anyone — worth doing while the pump is throwaway, because the signing cutover's planned
+    reinstall mints a new `deviceId` and nobody has tested that path.
+  - ✅ **Which environment?** Production. The code came from `smartpump.balancee.app/dashboard/pumps`,
+    which posts GraphQL to `api.balancee.app`. The REST pump surface is deployed there and answers
+    **byte-identically** to dev (`docs/api-probes/2026-09-16-prod/`), including the inconsistent
+    `code` field (#18f) — a contract gap, not a deployment gap.
+  - ✅ **Is production acceptable to dirty?** For this pump, yes. `Test Pump 1` / `SN-TEST-001` sits on
+    a **dummy business account** the backend dev created for us. The pump record is not precious,
+    junk transactions pollute nobody's reconciliation, and repeat runs are free — which matters,
+    because a gate exists to be run, to disagree, and to be run again.
+  - ✅ **Reaching it from an installable build** — solved by the `debugProd` variant (phase 9d-1).
+  - 🚩 **The one thing that did NOT dissolve, and it is not about the pump.** `/authorise` returns
+    `authorizationUrl`, a **Paystack checkout URL** (`PumpApiDtos.kt`). On production that is
+    presumably Balancee's **live** Paystack integration, so a test pump on a dummy business still
+    initialises real payments through the real processor. Nothing moves unless a QR is scanned and we
+    will not scan one — but it is worth saying beforehand. **One question, in item 4 of
+    `BOSS_CONFIRMATIONS_DRAFT.md`.** It gates *pressing* the authorise button, not *building* it, and
+    it gates nothing in steps 1, 2 or 5.
+  - ~~Ask for a dev code / a dev authentication path~~ — **dropped.** We were told dev needs no
+    activation code (which our own dev 401s do not obviously support, and which no longer matters),
+    and we are not going to dev.
+- [ ] **32. THE GATE — redeem the code, on production, against the throwaway pump (#31).**
+  Everything left on the API line is behind it, and it should be done in one sitting while the server is in a known state:
   1. Activate once. Confirm the credentials survive a process restart.
   2. `GET /config` → **capture the literal payload** and build its fixture from those bytes, not
      from our restatement (that is how #11 got in). Unblocks 7b's second half.
@@ -315,16 +315,17 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     ship.
   - **Do not loosen `PumpLoggingInterceptor`** to see the `/activate` response (#12): assert on the
     parsed object and redact before anything reaches disk.
-  - 🚩 **2026-09-16: as written, this is a DEV sequence and the code we hold is for PRODUCTION.**
-    Steps 3, 4 and 7 create real transaction records and push fabricated rows into production
-    reporting. The read-only subset — activate, `GET /config`, poll `/transactions/{id}` — is the most
-    that should ever run against prod, and only with an explicit yes. Everything else waits on a dev
-    code (**#31**).
+  - 🚩 **Step 3 is the only one that waits on anything.** `/authorise` returns a **Paystack checkout
+    URL**, and on production that is presumably the live Paystack integration — so pressing it
+    creates real payment initialisations, on a dummy business or not. One question to the backend
+    covers it (item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`); it gates *pressing* the button, not
+    *building* it, and steps 1, 2 and 5 are unaffected. Superseded: the earlier reading that the
+    whole sequence needed a dev server — the pump is a throwaway on a dummy business (#31).
   - ✅ **Stage 9d-1 BUILT 2026-09-16** (branch `feature/api-probe-panel`) — `debugProd` build type
     (the debug app pointed at production, own applicationId) plus an **API probe panel** on the
     operator screen that runs step 2 through the real client and keeps the literal bytes. Runbook:
-    [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md). **Steps 3-7 deliberately not built** — they create
-    transactions.
+    [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md). **Steps 3-7 not built yet** — cleared to build (#31); step 3 is cleared to *press* once
+    the Paystack question comes back.
   - _Superseded, kept for the reasoning:_ before 9d-1, `activate()` was the only client method with
     an in-app caller, so `config()`, `authorise()`, `transactionStatus()` and `uploadTransaction()`
     could not be driven at all — and #32 requires driving them through `PumpApiClient` rather than

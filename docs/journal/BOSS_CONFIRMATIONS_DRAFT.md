@@ -21,8 +21,8 @@ the reply.
 - **Item 2 (Play Services / push channel) — ANSWERED 2026-08-04: FCM.** Tablets will ship with Play
   Services. Now a ratification, not a question; kept below only as a one-line confirmation.
 - **Item 5 (staging URLs) — RECEIVED 2026-07-04.** Prod `api.balancee.app`, dev `api.dev.balancee.app`,
-  both wired into the build. A code finally arrived 2026-09-16 — but minted against **production**, not
-  dev, so the ask narrows rather than closes. See item 4.
+  both wired into the build. A code arrived 2026-09-16, minted against **production** — and the pump
+  it belongs to is a throwaway on a dummy business, so this is now settled. See item 4.
 - **Money unit on `amount` — we decided it ourselves (naira) rather than blocking on it.** Still worth
   one line of confirmation, but it is no longer a blocker: the server's exact
   `amount === expectedLitres × pricePerUnit` check makes a wrong unit fail closed at `/authorise`
@@ -169,96 +169,51 @@ we'd rather not guess at the others.
 
 ---
 
-### 4. How do we make one authenticated pump request against **dev**? _(rewritten 2026-09-16)_
+### 4. One question, and only before the authorise step: does `/authorise` hit live Paystack? _(narrowed 2026-09-16, third revision)_
 
-**Where this stands.** A code arrived on 2026-09-16 from the operator dashboard
-(`smartpump.balancee.app/dashboard/pumps`). That dashboard posts GraphQL to **`api.balancee.app`**, so
-the pump it created is a **production** pump. Separately, we were told **dev does not require an
-activation code**. Both of those may be true and neither unblocks us yet, so this item is no longer
-"send us a code" — it is one question about dev, with the form of the answer left open.
+**What this item used to be, and why it shrank twice in one day.** It began as "send us a test
+activation code". A code then arrived — minted on **production**, from the operator dashboard at
+`smartpump.balancee.app/dashboard/pumps`, which posts GraphQL to `api.balancee.app`. That turned the
+item into "how do we authenticate against dev instead", on the grounds that #32's sequence creates
+deliberate junk: an amount mismatch, a decimal amount, and an upload of a fabricated dispense.
 
-**What we need, stated once:** the ability to make a **signed, authenticated request to
-`api.dev.balancee.app/api/pump/*`**. Any of these does it:
+**That reasoning is now mostly dead, and the item is written down rather than quietly deleted so the
+argument is not re-run in three weeks.** The pump we were given is `Test Pump 1` / `SN-TEST-001` on a
+**dummy business account** the backend dev created for this purpose. So:
 
-- **a dev activation code**, if such a thing exists; or
-- **a pre-issued dev credential set** — `apiKey`, `signingSecret`, `pumpId`, and whether it is bound to
-  a particular `deviceId` (we send one on every request and the server echoes it at activation); or
-- **the documented way dev skips authentication**, if that is what "does not require a code" means —
-  which endpoints, and what should we send instead of the four headers.
+- the pump record is not precious — the dashboard has **Get code** (codes are re-issuable on demand)
+  and **Revoke** buttons, both self-service;
+- junk transactions land on a dummy business and pollute nobody's reconciliation;
+- repeat runs are free, which matters because the gate's whole point is to run, find a disagreement,
+  fix it and run again.
 
-Any one of the three is equally good. We do not need it to be a code.
+**What survives is not about the pump at all.** `/authorise` returns `authorizationUrl`, a **Paystack
+checkout URL** (`PumpApiDtos.kt`), which the app renders as the customer's QR. On the production
+backend that is presumably Balancee's **live** Paystack integration. A test pump on a dummy business
+still initialises real payments through the real processor. Nothing moves unless a QR is scanned, and
+we will not be scanning them — but that is a thing to say beforehand, not afterwards.
 
-**One observation, in case it changes the answer.** We probed dev on 2026-09-12 with no credentials at
-all, and dev does appear to enforce authentication on the pump REST routes:
+**So the whole of this item is now one question, and it is not urgent:**
 
-- `GET /api/pump/config` with no headers → `401 {"status":false,"message":"Missing pump authentication headers"}`
-- the same request with filler values in the four headers → `401 {"status":false,"message":"Invalid API key"}`
+> Before I run the authorise step against Test Pump 1 — does `/authorise` on production hit your live
+> Paystack, or is that pump wired to a test key? I won't be scanning the QRs, but it will create
+> payment initialisations.
 
-So "dev does not require an activation code" probably means *credentials are handed over directly
-rather than redeemed*, or *activation is a formality on dev* — or it was about the dashboard's GraphQL
-API rather than the pump REST API, which is a different surface. We would rather ask which than assume
-and build the wrong path. Captures: `docs/api-probes/2026-09-12/`.
+**What no longer needs asking at all:**
 
-**Why dev and not the production code we already hold.** Four separate reasons, in descending order:
+- ~~A dev activation code~~ — we have a working code and a throwaway pump. (Also: we were told dev
+  does not require an activation code, which our own dev 401s do not obviously support — see #31. It
+  no longer matters, because we are not going to dev.)
+- ~~Permission to create a pump on production~~ — already created, by them, for us.
+- ~~A test-marked pump they delete afterwards~~ — that is exactly what `SN-TEST-001` is.
 
-1. **The run is mostly deliberate failures.** It is not one call. It is activation, `/config`, an
-   `/authorise` happy path, a **deliberate amount mismatch**, a **decimal amount**, a status poll and a
-   **`/transactions/upload` of a fabricated record** — we need to see how the server answers when we
-   get it wrong, because that is the half of the contract the Reference does not print. On production
-   those land in the station's real transaction history.
-2. **It gets run more than once.** The first pass exists to find where our fixtures disagree with the
-   server; we fix and re-run. Repeating that on production multiplies the junk.
-3. **Our build cannot reach production anyway, and the build we would make for it is the wrong one.**
-   Only the release build points at `api.balancee.app`, and no signed release build exists. A
-   debuggable build pointed at production would be one that **seeds its own placeholder price and
-   station config** on first run and carries a **hidden debug panel with live price editing and
-   payment force-resolve**. Pointing that at the live system is a worse idea than the test
-   transactions.
-4. **A production pump is a real asset.** It has an identity on your side, and its credentials would
-   then live on a bench tablet indefinitely. Nobody chose that.
-
-**If the answer is that dev cannot authenticate us at all** — fine, and here is the ladder we would
-take, in order, so you can just pick one:
-
-- **(a)** A **production pump explicitly marked as a test pump**, which you delete afterwards. We run
-  the whole sequence on it and you bin it. Tell us the marking convention and we will follow it.
-- **(b)** A **read-only subset on production**: activate, `GET /config`, poll `/transactions/{id}`.
-  Three calls; only the activation writes anything, and what it writes is one pump we would ask you to
-  delete. This settles the `/config` payload shape, GET signing and the clock-skew window, and leaves
-  every transaction-creating step unrun.
-- **(c)** **Nothing, and we keep building against our own assumptions.** Worth being plain about the
-  cost: that is exactly how the response-envelope defect got in — our fixtures were written from a
-  summary rather than from real bytes, and a fully green test suite agreed with them for two months.
-  We would rather not repeat it, but it is a survivable answer if the others are impossible.
-
-**One thing on our side, whichever way this goes.** The app can only obtain credentials by redeeming a
-code — `PumpActivationRepositoryImpl` is the single writer of the credential store. If dev issues a key
-pair directly, we need a small debug-only path to load one (TODO #41). That is our work, not yours; it
-is listed here only so the answer "here is a key and secret" does not look like it bounced.
+**And what this unblocks without any reply:** activation and `GET /config` create nothing and can run
+today (`GATE_32_RUNBOOK.md`). Several of the asks elsewhere in this message get answered **by
+observation** once the gate runs rather than by anyone writing back: the decimal `amount` question
+(#18c), the real status set (#18d), and the clock-skew strings (#15). Running the gate is therefore
+the fastest way to shrink the rest of this document.
 
 ---
-
-#### Ready to send on its own
-
-_The above is the full item for the bundled message. If this is going out as a single short message
-today, this is the whole of it:_
-
-> We finally have an activation code, but it came from the operator dashboard, which talks to
-> `api.balancee.app` — so it is a production pump. Before spending it I want to check the dev path,
-> because the end-to-end run we need to do is mostly deliberate failures: an amount mismatch, a decimal
-> amount, and an upload of a fabricated transaction, so we can see how the API answers when we get it
-> wrong. On production those become real rows in the station's records, and we would need to repeat the
-> run each time we fix something.
->
-> You mentioned dev does not require an activation code. What is the way to make an authenticated pump
-> request against `api.dev.balancee.app` — is there a key and signing secret you can issue directly, or
-> a documented way dev skips auth? Asking because when we probed dev with no credentials it did answer
-> `401 Missing pump authentication headers`, and with filler values `401 Invalid API key`, so I want to
-> make sure I am asking for the right thing rather than guessing.
->
-> If dev cannot authenticate us at all, the alternative that works for us is a production pump marked
-> as a test pump that you delete afterwards — or, at minimum, your okay to run just the three read-only
-> calls (activate, `/config`, status poll) on the code we have.
 
 ### 5. Two confirmations, no action needed if we've got it right.
 
