@@ -4,7 +4,8 @@
 in-app probe panel (stage 9d-2), driven through `PumpApiClient`, pulled with `adb`. The file beside
 this one is verbatim; everything below cites it.
 
-Seven questions that have been open since August are answered here, and one assumption is wrong.
+Eight questions that have been open since August are answered here, one assumption is wrong,
+and one new hazard turned up that nobody had thought to ask about.
 
 ---
 
@@ -196,15 +197,31 @@ Our three DTOs are three **partial** views of it. `TransactionStatusResponse` an
 under `ignoreUnknownKeys`. Not a defect — but `expiresAt` on a status poll is exactly what a countdown
 should be reading (**#43**), and it is being discarded. See TODO **#46**.
 
-## 10. Still unknown, and now cheap to find out
+## 10. Upload does not validate litres, and it is an upsert · **#47 ANSWERED**
 
-**Does upload validate `actualLitresDispensed` against `expectedLitres`?** This run sent 0.1 for 0.1 —
-a perfect match — so the question is untouched, and it is not academic. Every case where the two
-legitimately differ is one the app already produces: a tank that fills before the target, an attendant
-ending a fixed sale early (OQ #22), the pulses 7h recovers after a restart. If the server refuses a
-mismatch, none of those can be reported.
+Pressed again on the **same, already-dispensed** transaction with a different figure — 0.2 L against a
+sale authorised and paid for 0.1 L:
 
-**The probe costs nothing.** The transaction above is already paid and dispensed, so pressing upload
-again with a different litres figure needs no payment and answers two questions at once: whether the
-endpoint validates litres, and whether it is really idempotent on `transactionId` the way our retry
-logic assumes.
+```
+sent:     {"pumpId":"3727aebf-…","transactionId":"probe-9c729d97-…",
+           "paymentReference":"BPM-4777712b…","actualLitresDispensed":0.2,
+           "startedAt":"2026-09-16T23:36:19.657847Z","completedAt":"2026-09-16T23:39:19.657847Z"}
+received: 200 {"status":true,"message":"Transaction recorded","data":{"status":"DISPENSED",…}}
+```
+
+**The good half — litres are not checked against `expectedLitres`.** Every case where the two
+legitimately differ can therefore be reported: a tank that fills before the target, an attendant
+ending a fixed sale early (OQ #22), and the pulses 7h recovers after a restart. The app's
+under-counting posture (#28, #36) survives contact with the server.
+
+**The half that needs care — it is an upsert, not a reject.** A second upload carrying *different*
+data is accepted with another 200, so the endpoint is "idempotent" in the sense our retry logic needs
+(a repeated identical call is harmless) but **last-write-wins** for a call that is not identical.
+A replaying offline queue that sends a stale record after a corrected one would silently overwrite the
+corrected figure, and the station's record of how much fuel it sold would be whichever upload arrived
+last. See TODO **#48**.
+
+**And it cannot be checked from the response.** The upload reply echoes `status`, `transactionId`,
+`paymentReference`, `authorizationUrl` and `expiresAt` — **not** `actualLitresDispensed`. So the app
+has no way to confirm what was actually stored, and this capture cannot say whether the record now
+reads 0.1 or 0.2. The dashboard's per-pump **Transactions** view can.

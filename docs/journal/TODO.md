@@ -434,16 +434,28 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - **Fix:** one `PumpTransactionResponse` behind the three names, or the two thin ones gaining the
     missing fields. Cheap now, and it removes a class of "why does the poll know less than the
     authorise did" confusion later. Do it with #8, from the captured bytes.
-- [ ] **47. Does `/transactions/upload` validate `actualLitresDispensed` against `expectedLitres`?**
-  Unknown — the 2026-09-16 run sent 0.1 for 0.1, a perfect match, so the question was never put.
-  - **Not academic.** Every case where the two legitimately differ is one the app already produces: a
+- [x] **47. Upload does NOT validate `actualLitresDispensed` — ANSWERED 2026-09-16.** 0.2 L was
+  accepted against a sale authorised and paid for 0.1 L, with a second `200 Transaction recorded`.
+  - **What that buys:** every case where actual and expected legitimately differ can be reported — a
     tank that fills before the target, an attendant ending a fixed sale early (OQ #22), and the pulses
-    7h recovers after a restart. If the server refuses a mismatch, **none of those can be reported**,
-    and the app's whole under-counting posture (#28, #36) assumes they can.
-  - **The probe is free.** Transaction `probe-9c729d97-…` is already paid and dispensed, so pressing
-    upload again with a different litres figure needs no payment. It answers two things at once:
-    whether litres are validated, and whether the endpoint is really **idempotent on
-    `transactionId`** the way `retryingApiCall` already assumes when it retries an upload.
+    7h recovers after a restart. The under-counting posture in #28 and #36 survives contact.
+  - **What it exposed:** the endpoint is an **upsert**, not a reject — see **#48**.
+- [ ] **48. `/transactions/upload` is last-write-wins, and the response does not say what it stored.**
+  - **Idempotent enough for `retryingApiCall`**: a repeated *identical* upload is harmless, which is
+    what that retry assumes. **Not** safe for a non-identical one: a replaying offline queue that
+    sends a stale record after a corrected one silently overwrites the correction, and the station's
+    record of fuel sold becomes whichever upload landed last.
+  - **The app cannot verify the outcome.** The reply carries `status`, `transactionId`,
+    `paymentReference`, `authorizationUrl`, `expiresAt` — **not** `actualLitresDispensed` (#46: it is
+    the same object every endpoint returns, and that field is not in it). So "recorded" is the most
+    the app can ever know.
+  - **Ours to handle in 7e:** never enqueue a second upload for a transactionId whose upload already
+    succeeded, and treat a queued upload as superseded by a later one for the same id rather than
+    sending both. **Theirs to consider:** whether a second upload with different litres should be
+    refused, or at least kept in an audit trail. A fifth item for **#18**.
+  - **Unverified:** whether the stored figure is now 0.1 or 0.2. The response cannot say; the
+    dashboard's per-pump **Transactions** view can, and it is worth one look while the pump exists.
+
 - [ ] **41. Credentials can only arrive by redeeming a code — and dev may not use codes.**
   `PumpActivationRepositoryImpl:54` is the **only** writer of `PumpCredentialsStore` in the app;
   everything else reads. So if dev hands over an `apiKey` + `signingSecret` + `pumpId` directly
