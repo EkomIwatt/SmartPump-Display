@@ -291,8 +291,14 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
       and `/api/pump/activate` are all deployed on production and answer **byte-identically** to dev,
       including the inconsistent `code` field (#18f). The GraphQL dashboard sits alongside the REST
       pump API, it does not replace it.
-  - **The ask this generates** is written up as item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`: can the
-    dashboard mint a **dev** code, or is there a dev dashboard? With a named fallback if it cannot.
+  - 🚩 **And dev may not use codes at all.** Told 2026-09-16: "dev does not require an activation
+    code". Our own dev probe contradicts the simplest reading of that — `/api/pump/config` answers
+    `401 Missing pump authentication headers` with no headers and `401 Invalid API key` with filler
+    ones — so it likely means credentials are issued directly, or activation is a formality on dev,
+    or it was about the dashboard GraphQL API rather than the pump REST API. **The ask is therefore
+    form-agnostic** (item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`, rewritten): what is the way to make one
+    authenticated request against `api.dev.balancee.app`? A code, a pre-issued key pair, or a
+    documented bypass — any of the three. Fallback ladder named there too.
 - [ ] **32. THE GATE — redeem one code on dev.** Everything left on the API line is behind it, and
   it should all be done in one sitting while the server is in a known state:
   1. Activate once. Confirm the credentials survive a process restart.
@@ -322,6 +328,20 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
 - [ ] **39. `docs/api-probes/2026-09-12/probe.sh` is re-runnable** _(was a second #33, renumbered
   2026-09-15 at the merge; nothing referenced it by number)_ and sends no secrets. Re-run it
   after any backend deploy to see whether the 401s have grown a `code` field yet (#18f).
+- [ ] **41. Credentials can only arrive by redeeming a code — and dev may not use codes.**
+  `PumpActivationRepositoryImpl:54` is the **only** writer of `PumpCredentialsStore` in the app;
+  everything else reads. So if dev hands over an `apiKey` + `signingSecret` + `pumpId` directly
+  (which is the most likely reading of "dev does not require an activation code" — see **#31**),
+  there is nowhere to put them and the whole dev path is unreachable.
+  - **Shape:** a debug-only load path, sensibly part of the probe panel (**#32**) rather than a
+    second screen. It must go through `PumpCredentialsStore.save()` and then **read back**, for the
+    same reason `persist()` does — a Keystore blob that cannot be decrypted is discarded silently,
+    so a write that returns is not a write that worked.
+  - **Guards to keep:** `BuildConfig.DEBUG` only; never log the secret (the `/activate` allowlist in
+    `PumpLoggingInterceptor` and the redacting `toString()` on `PumpCredentials` both stay, #12); and
+    it must not become a way to hand-edit credentials on a live pump.
+  - **Do not build speculatively.** It is cheap, but which of the three forms dev answers with
+    decides whether it is needed at all.
 
 ---
 

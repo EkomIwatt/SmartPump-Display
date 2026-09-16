@@ -130,8 +130,12 @@ prerequisite *of the run*, which is why it is deferred rather than dropped.
   door is narrow), and production's `/api/pump/*` routes are deployed and answer byte-identically to
   dev (`docs/api-probes/2026-09-16-prod/`). What blocks now: no installable build reaches production,
   and **#32's sequence writes real transactions**, so it cannot be run there as written. Two things
-  move it — a **dev code** (asked for in item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`) and the **in-app
-  probe panel** without which steps 2–7 have no button to press. See **#31** and **#32**.
+  move it — **a way to authenticate against dev** (item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`; note we
+  were told 2026-09-16 that **dev does not require an activation code**, which our own dev 401s do not
+  obviously support, so the ask is form-agnostic: code, pre-issued key pair, or documented bypass) and
+  the **in-app probe panel** without which steps 2–7 have no button to press. If the answer is a key
+  pair, **#41** is needed too — activation is currently the only writer of the credential store. See
+  **#31**, **#32**, **#41**.
   Everything in the probe's "cannot reach" list is still behind it: the `/config` payload shape, GET
   signing, clock skew (**#15**), the decimals question and the real status set (**#18c–e**).
 - [ ] **Transaction upload job (7e).** Not built; the `workmanager` dependency is not even in the
