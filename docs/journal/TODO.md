@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-15 (Phase 9/9b/9c merged to `main` on top of 7h)_
+_Last updated: 2026-09-16 (an activation code arrived — production, not dev; see #31)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -269,10 +269,30 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - Guards: already-activated is refused **locally** (a valid second code would overwrite and
     abandon the backend's `pumpId`); the `deviceId` echo is checked and a mismatch **keeps** the
     credentials while reporting the disagreement.
-- [ ] **31. Two questions to the backend before the code is used.** Both shrink a one-way door to
-  nothing: **are dev activation codes re-issuable** (our "single-use" claim is asserted in
-  `API_CONFORMANCE_AUDIT.md` **without a quoted Reference line** — it may be our own assumption
-  carried forward), and **can a dev pump be reset and re-activated** against the same deviceId.
+- [~] **31. The two pre-flight questions — half answered, and the answer moved the problem.**
+  - ✅ **Are dev activation codes re-issuable? YES** (confirmed 2026-09-16). The "single-use" claim in
+    `API_CONFORMANCE_AUDIT.md` was our own assumption carried forward without a quoted Reference line,
+    and it was wrong about scarcity: a code is single-use, but another can be issued. The one-way door
+    this item existed to shrink is now narrow.
+  - [ ] **Can a dev pump be reset and re-activated against the same `deviceId`?** Still unanswered.
+    Less urgent now that codes are re-issuable, but not moot: the signing cutover is a **planned
+    reinstall**, which wipes `device_identity` prefs and mints a new `deviceId`, so the production
+    build activates as a stranger to whatever the run build registered.
+  - 🚩 **The new blocker, found 2026-09-16: the code we hold is a PRODUCTION code.** It was issued from
+    the operator dashboard at `smartpump.balancee.app/dashboard/pumps`, which devtools shows posting
+    GraphQL to `api.balancee.app`. Consequences:
+    - **No installable build can redeem it today.** `debug`/`debugRealHw` hard-wire
+      `api.dev.balancee.app` in `buildConfigField`; only `release` points at production, and there is
+      no signed release build. Reaching prod from a debuggable build needs a new variant or a gradle
+      property — small, but deliberate.
+    - **#32 cannot run there as written** — see the note under it.
+    - **The REST surface itself is fine on prod.** An unauthenticated, no-credentials probe
+      (`docs/api-probes/2026-09-16-prod/`) confirms `/api/pump/config`, `/api/pump/transactions/[id]`
+      and `/api/pump/activate` are all deployed on production and answer **byte-identically** to dev,
+      including the inconsistent `code` field (#18f). The GraphQL dashboard sits alongside the REST
+      pump API, it does not replace it.
+  - **The ask this generates** is written up as item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`: can the
+    dashboard mint a **dev** code, or is there a dev dashboard? With a named fallback if it cannot.
 - [ ] **32. THE GATE — redeem one code on dev.** Everything left on the API line is behind it, and
   it should all be done in one sitting while the server is in a known state:
   1. Activate once. Confirm the credentials survive a process restart.
@@ -289,6 +309,16 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     ship.
   - **Do not loosen `PumpLoggingInterceptor`** to see the `/activate` response (#12): assert on the
     parsed object and redact before anything reaches disk.
+  - 🚩 **2026-09-16: as written, this is a DEV sequence and the code we hold is for PRODUCTION.**
+    Steps 3, 4 and 7 create real transaction records and push fabricated rows into production
+    reporting. The read-only subset — activate, `GET /config`, poll `/transactions/{id}` — is the most
+    that should ever run against prod, and only with an explicit yes. Everything else waits on a dev
+    code (**#31**).
+  - 🚩 **Steps 2–7 have no way to be pressed.** `activate()` is the only client method with an in-app
+    caller (`ActivationPanel`, from `OperatorConfigScreen.kt`). `config()`, `authorise()`,
+    `transactionStatus()` and `uploadTransaction()` are called from nowhere in `ui/`. Since the sitting
+    must be driven through `PumpApiClient` rather than curl, **a debug-only probe panel is a
+    prerequisite of the gate, not a nicety** — decided 2026-09-16, not yet built.
 - [ ] **39. `docs/api-probes/2026-09-12/probe.sh` is re-runnable** _(was a second #33, renumbered
   2026-09-15 at the merge; nothing referenced it by number)_ and sends no secrets. Re-run it
   after any backend deploy to see whether the 401s have grown a `code` field yet (#18f).

@@ -1,6 +1,6 @@
 # What is still blocking V1
 
-_Compiled 2026-09-12. Refreshed 2026-09-15 after 7h and the Phase 9 line were both merged to `main`._
+_Compiled 2026-09-12. Refreshed 2026-09-16 after an activation code arrived — minted against production._
 
 **This file is a view, not a second source of truth.** Every item points at its real entry in
 [`TODO.md`](TODO.md) (work items, `#n`) or [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) (decisions,
@@ -125,11 +125,15 @@ prerequisite *of the run*, which is why it is deferred rather than dropped.
 
 ## 4. Blocked on the backend
 
-- [ ] **The activation code.** Now the single gate on the whole API line — see **#31** (two questions
-  that shrink the one-way door) and **#32** (the full sequence to run in one sitting once a code
-  exists). **#32 is now runnable the moment a code lands** — since `ce4a0b8` the operator settings
-  screen can redeem one, which is the only entry a debug build has. Everything in the probe's "cannot reach" list is behind it: the `/config` payload shape,
-  GET signing, clock skew (**#15**), the decimals question and the real status set (**#18c–e**).
+- [ ] **The activation code — one arrived 2026-09-16, and it is a _production_ code.** Still the single
+  gate on the API line, but the shape of the wait changed. Codes **are re-issuable** (so #31's one-way
+  door is narrow), and production's `/api/pump/*` routes are deployed and answer byte-identically to
+  dev (`docs/api-probes/2026-09-16-prod/`). What blocks now: no installable build reaches production,
+  and **#32's sequence writes real transactions**, so it cannot be run there as written. Two things
+  move it — a **dev code** (asked for in item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`) and the **in-app
+  probe panel** without which steps 2–7 have no button to press. See **#31** and **#32**.
+  Everything in the probe's "cannot reach" list is still behind it: the `/config` payload shape, GET
+  signing, clock skew (**#15**), the decimals question and the real status set (**#18c–e**).
 - [ ] **Transaction upload job (7e).** Not built; the `workmanager` dependency is not even in the
   project. Needs the ingest endpoint confirmed.
 - [ ] **#29 — the `events` table has no backend home.** 7h writes operator-visible fuel-log rows and

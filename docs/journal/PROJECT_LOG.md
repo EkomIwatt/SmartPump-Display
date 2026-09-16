@@ -1300,3 +1300,56 @@ difference.
 **Next:**
 Try the button on the tablet with the rig (a pre-pay stopped short by holding the nozzle). Then
 #40 before any parallel run, the 7g bench gate, and the activation-code line.
+
+---
+
+### Pre-gate — the activation code arrived, and it is a production one
+**Date:** 2026-09-16
+**Status:** done (investigation + evidence; no app code changed)
+**Commit(s):** see below
+
+**Summary (plain language):**
+The activation code we have been waiting on since July finally arrived — but it turns out to belong to
+the **live** system, not the test one. That matters because the plan for using it was a seven-step
+run-through that deliberately creates a few junk transactions to see how the server answers; doing
+that on the live system would put fake sales into the station's real records. So the code has not been
+used. Instead we checked, without sending anything secret or using the code, that the live server
+really does speak the same language our app was built for — and it does, exactly, down to the byte. We
+have written the request for a test-system code and recorded what we found.
+
+Two other things came out of it. The app as built cannot reach the live server at all except through a
+release build, which does not exist yet. And of the seven steps in the plan, only the first has a
+button anywhere in the app — the other six call functions nothing presses. A small debug-only panel
+has to exist before the code, whichever code it is, is worth spending.
+
+**Technical notes:**
+- **Environment identified by devtools, not guesswork:** the dashboard at
+  `smartpump.balancee.app/dashboard/pumps` that minted the code posts **GraphQL to
+  `api.balancee.app`** — production.
+- **New evidence directory `docs/api-probes/2026-09-16-prod/`.** `probe.sh` re-run with a base-URL
+  argument against production; captures written to a **new** directory so the 2026-09-12 dev captures
+  on `main` are untouched. No credentials sent (filler key, all-zero device id, `deadbeef` signature),
+  activation probed with an empty body so it cannot redeem.
+- **Production is byte-identical to dev** on all four bodies (`diff` clean) and every `X-Matched-Path`
+  resolves to the same handler: `/api/pump/config`, `/api/pump/transactions/[id]`,
+  `/api/pump/activate`, plus the `/404` HTML control. The REST pump surface is deployed on production
+  and the GraphQL dashboard sits alongside it.
+- **#18f is a contract gap, not a deployment gap:** the top-level `code` field is present on the 400
+  and absent from all three 401s on production too, exactly as on dev.
+- **Codes are re-issuable** (confirmed with the user). The "single-use, so we cannot proceed on a
+  borrowed one" framing in `API_CONFORMANCE_AUDIT.md` was our own assumption without a quoted
+  Reference line. A code is single-use; another can be issued. #31's one-way door is now narrow.
+- **Two blockers this exposed, both recorded rather than worked around:**
+  - `debug`/`debugRealHw` hard-wire `api.dev.balancee.app` via `buildConfigField`; only `release`
+    points at production, and there is no signed release build. A prod code has nothing to redeem it.
+  - `activate()` is the only `PumpApiClient` method with an in-app caller (`ActivationPanel` via
+    `OperatorConfigScreen.kt:214`). `config()`, `authorise()`, `transactionStatus()` and
+    `uploadTransaction()` are called from nowhere in `ui/`, so #32 steps 2–7 cannot be driven at all —
+    and #32 requires driving them through the client rather than curl.
+- **Docs updated:** `BOSS_CONFIRMATIONS_DRAFT.md` item 4 rewritten from "we need a test code" to "a
+  production code arrived, can the dashboard mint a dev one", with a named read-only fallback if it
+  cannot; `TODO.md` #31 (now `[~]`) and #32; `V1_BLOCKERS.md` §4.
+
+**Next:**
+Send the dev-code ask. Meanwhile build the debug-only API probe panel that drives the four uncalled
+client methods, so that whenever a usable code lands the whole of #32 can be run in one sitting.

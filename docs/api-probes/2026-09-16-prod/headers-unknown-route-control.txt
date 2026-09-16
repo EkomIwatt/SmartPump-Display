@@ -1,0 +1,17 @@
+HTTP/1.1 404 Not Found
+Accept-Ranges: bytes
+Access-Control-Allow-Origin: *
+Age: 0
+Cache-Control: public, max-age=0, must-revalidate
+Content-Disposition: inline; filename="404"
+Content-Length: 20914
+Content-Type: text/html; charset=utf-8
+Date: Wed, 16 Sep 2026 12:20:46 GMT
+Etag: "89f1811bf80eea8b4981932b8948b6a3"
+Last-Modified: Wed, 16 Sep 2026 12:20:46 GMT
+Server: Vercel
+Strict-Transport-Security: max-age=63072000
+X-Matched-Path: /404
+X-Vercel-Cache: MISS
+X-Vercel-Id: cpt1::xr4m5-1789561246000-9e670763665e
+

@@ -21,7 +21,8 @@ the reply.
 - **Item 2 (Play Services / push channel) — ANSWERED 2026-08-04: FCM.** Tablets will ship with Play
   Services. Now a ratification, not a question; kept below only as a one-line confirmation.
 - **Item 5 (staging URLs) — RECEIVED 2026-07-04.** Prod `api.balancee.app`, dev `api.dev.balancee.app`,
-  both wired into the build. The **test activation code** is still outstanding and stays in the ask.
+  both wired into the build. A code finally arrived 2026-09-16 — but minted against **production**, not
+  dev, so the ask narrows rather than closes. See item 4.
 - **Money unit on `amount` — we decided it ourselves (naira) rather than blocking on it.** Still worth
   one line of confirmation, but it is no longer a blocker: the server's exact
   `amount === expectedLitres × pricePerUnit` check makes a wrong unit fail closed at `/authorise`
@@ -168,15 +169,37 @@ we'd rather not guess at the others.
 
 ---
 
-### 4. Still needed to test end-to-end: a test activation code.
+### 4. A code arrived — but it is a production one. We need a dev one. _(updated 2026-09-16)_
 
-We have both URLs (`api.balancee.app`, `api.dev.balancee.app`) wired in. We need **one redeemable
-activation code against dev** to exercise the activation flow. Activation codes are single-use, so we
-can't proceed on a borrowed one.
+**What changed.** A code was issued from the operator dashboard at
+`smartpump.balancee.app/dashboard/pumps` on 2026-09-16. That dashboard talks to **`api.balancee.app`**,
+so the pump record it created lives in **production**. We also confirmed, with an unauthenticated probe
+that sent no credentials, that the `/api/pump/*` REST routes are deployed on production and answer
+byte-identically to dev (`docs/api-probes/2026-09-16-prod/`).
 
-Worth flagging: **activation is the one irreversible step.** It issues the pump's credentials once,
-and it fixes the pump's permanent identity. We've built it so a mistake there is recoverable, but it's
-the reason we haven't run it against anything real yet.
+**Why that is not the code we can use.** The end-to-end sequence we need to run is not a single call —
+it is activation, then `/config`, then an `/authorise` happy path, a deliberate amount mismatch, a
+decimal amount, a status poll and an upload, all in one sitting while the server is in a known state.
+Run against production, four of those steps create **real transaction records** and push fabricated
+rows into the station's reporting. On dev they are experiments; on production they are dirt in the live
+system, and we would rather not be the ones who put it there.
+
+**The ask, in one line:** can the dashboard mint an activation code against **dev**
+(`api.dev.balancee.app`) — or is there a dev instance of the dashboard we should be using instead?
+
+**If dev codes are not possible**, the fallback we would run instead, and would want an explicit yes to:
+activate the production pump, `GET /config`, and poll `/transactions/{id}` — three calls, of which only
+the activation writes anything, and it writes one pump we would then ask you to delete. Everything that
+creates a transaction stays unrun until a dev code exists.
+
+_(Superseded by the above: the original "activation codes are single-use so we can't proceed on a
+borrowed one" framing. Codes are re-issuable — confirmed 2026-09-16 — so the one-way door this item
+used to be worried about is much narrower than it was. What remains is the environment, not the
+scarcity.)_
+
+Worth keeping from the original: **activation is still the one irreversible step per code.** It issues
+the pump's credentials once and fixes that pump's identity. We have built it so a mistake is
+recoverable, which is why we are asking rather than experimenting.
 
 ---
 

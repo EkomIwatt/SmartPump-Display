@@ -1,0 +1,12 @@
+HTTP/1.1 401 Unauthorized
+Age: 0
+Cache-Control: public, max-age=0, must-revalidate
+Content-Type: application/json
+Date: Wed, 16 Sep 2026 12:20:45 GMT
+Server: Vercel
+Strict-Transport-Security: max-age=63072000
+X-Matched-Path: /api/pump/config
+X-Vercel-Cache: MISS
+X-Vercel-Id: cpt1::iad1::d7xcp-1789561245172-8837b96077ac
+Transfer-Encoding: chunked
+
