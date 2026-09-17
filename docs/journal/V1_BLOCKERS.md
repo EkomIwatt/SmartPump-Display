@@ -1,8 +1,9 @@
 # What is still blocking V1
 
-_Compiled 2026-09-12. Refreshed 2026-09-16: the activation code is redeemable against a throwaway
-production pump, and phase 9d-1 built the way to reach it — so the API line is no longer waiting on
-the backend._
+_Compiled 2026-09-12. Refreshed 2026-09-17, after the gate (#32) closed: the app has completed a
+real paid transaction against production end to end, so **section 4 is empty of anything that blocks
+V1** — nothing on the API line is waiting on the backend any more. What is left there is ours to
+build (**#8**) and the backend asks that remain are improvements, not gates._
 
 **This file is a view, not a second source of truth.** Every item points at its real entry in
 [`TODO.md`](TODO.md) (work items, `#n`) or [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) (decisions,
@@ -19,9 +20,10 @@ work sorted by a different question: **who is holding it up, and what can move t
 
 | | |
 |---|---|
-| Built and merged | all 5 flows, real Arduino pulse + relay, operator config, persistence/boot-resume, signed network layer, encrypted credentials, device identity, 7h pulse continuity, Phase 9 API work + the activation step |
+| Built and merged | all 5 flows, real Arduino pulse + relay, operator config, persistence/boot-resume, signed network layer, encrypted credentials, device identity, 7h pulse continuity, Phase 9 API work + the activation step, the API probe panel |
+| Proven against production | the whole paid lifecycle — activate → `/config` → authorise → Paystack → `PAID` → dispense upload, by observation, on a real ₦149 sale (**#32**, 2026-09-16/17) |
 | Built, unmerged | 7g firmware (bench gate) |
-| Not built | transaction upload job, release signing, the payment feature flows |
+| Not built | the payment feature flows (**#8**), the upload job that rides on them, release signing |
 | Never measured | the meter K-factor — every litre figure runs on a placeholder |
 
 ---
@@ -41,7 +43,9 @@ Two candidates that need no rig, no reply and no decision. Sized roughly.
    `UploadTransactionRequest` needs a server `transactionId` and `paymentReference`, and only
    `/authorise` issues them, so a cash sale has nothing to upload and a digital one has nothing
    until the payment flows exist. Also missing: `workmanager` (not in `gradle/libs.versions.toml`)
-   and anything that sets `syncedAt`.
+   and anything that sets `syncedAt`. **The gate confirmed the endpoint accepts any litres figure
+   (#47) and that the server refuses to record fuel against an unpaid sale (#45)** — so this is now
+   a sub-deliverable of #8, not a separate candidate.
 2. ~~**Draft the OQ #22 options**~~ — **done and decided 2026-09-15** (see section 5).
 
 ## 1. Blocked on nobody — movable today
@@ -125,31 +129,47 @@ prerequisite *of the run*, which is why it is deferred rather than dropped.
 - **#26 is the substantive one:** the fixed-dispense stop is currently a **USB round trip**, not a
   decision the firmware can make on its own.
 
-## 4. Blocked on the backend
+## 4. Was blocked on the backend — NOTHING HERE BLOCKS V1 ANY MORE
 
-- [~] **The activation code — NO LONGER BLOCKED ON THE BACKEND (2026-09-16).** It sat in this section
-  since July; it does not belong here any more. The code we hold is a production one, and the pump it
-  belongs to — `Test Pump 1` / `SN-TEST-001` — is a throwaway on a **dummy business account** the
-  backend dev created for us, with self-service **Get code** and **Revoke** buttons. Codes are
-  re-issuable, production's `/api/pump/*` answers byte-identically to dev
-  (`docs/api-probes/2026-09-16-prod/`), and phase 9d-1 built both the way in (`debugProd`) and the
-  thing to press (the API probe panel). **#31** (settled), **#32**, `GATE_32_RUNBOOK.md`.
-  - **What is left is ours to do, not theirs:** run the sitting, and build #32 steps 3–7.
-  - **One narrow question remains, and it gates only step 3:** `/authorise` returns a Paystack
-    checkout URL, and on production that is presumably the live Paystack. Item 4 of
-    `BOSS_CONFIRMATIONS_DRAFT.md`, now one paragraph. It does not gate activation, `/config`, or
-    building anything.
-  - Still behind the sitting, and now reachable by **observation** rather than by a reply: the
-    `/config` payload shape, GET signing, clock skew (**#15**), the decimals question and the real
-    status set (**#18c–e**).
-- [ ] **Transaction upload job (7e).** Not built; the `workmanager` dependency is not even in the
-  project. Needs the ingest endpoint confirmed.
+**Closed 2026-09-17 by the gate (#32).** This section carried the API line since July. It no longer
+holds anything up: the app activated against production, read `/config`, authorised a sale, was paid
+through live Paystack, polled to `PAID` and uploaded the dispense. Every question this section was
+waiting on was answered **by observation** rather than by a reply. See the PROJECT_LOG entry for
+2026-09-16/17 and `docs/api-probes/2026-09-16-prod-gate/`.
+
+- [x] **The activation code — SETTLED.** `Test Pump 1` / `SN-TEST-001`, a throwaway on a dummy
+  business, with self-service **Get code** / **Revoke**. **#31**, **#32**, `GATE_32_RUNBOOK.md`.
+- [x] **`/config` exists and is deployed** — and its real shape is nothing like what was modelled:
+  one pump, one fuel, one price (`pumpId`, `stationName`, `fuelType`, `pricePerUnit`, `updatedAt`).
+  Rebuilt from captured bytes with nothing defaulted. This retired `BOSS_CONFIRMATIONS_DRAFT.md`
+  item 1 — the ask marked *highest*, and said to set the date — **before it was ever sent**.
+- [x] **`GET /transactions/{id}` exists**, and the status set is `PENDING_PAYMENT` → `PAID` →
+  `DISPENSED` (**#18d**). Item 2 retired. The poll can carry PAID detection on its own.
+- [x] **Decimal `amount` accepted; stable error codes exist** on business failures and on no auth
+  failure (**#18c**, **#18f**). GET signing confirmed by a 200. Item 3 retired.
+- [x] **#15 closed** — a `/config` signed ten minutes late returns `401 "Request timestamp is not
+  fresh"`, the exact string the audit predicted, so the drafted copy stands.
+- [x] **Live Paystack, answered by doing it** (item 4). The ₦149 was real.
+
+**What remains on the backend is genuinely optional — none of it gates V1:**
+
 - [ ] **#29 — the `events` table has no backend home.** 7h writes operator-visible fuel-log rows and
-  nothing on the server accepts them. This was never added to the asks; it is a fifth item for
-  **#18**.
-- [ ] **Payment feature flows (#8)** — activate, authorise → Paystack QR, PAID via push + poll,
-  config fetcher, upload job. The transport half is built and now safe to activate; the feature half
-  is not.
+  nothing on the server accepts them. A fifth item for **#18**; the rows stay device-local until then.
+- [ ] **#48's other half — correction-or-refusal on upload.** First write wins and the repeat returns
+  a `200` that reads as success. Ours is to upload once (**7e**); theirs is to accept a correction or
+  refuse the repeat with a code. Asked, not blocking.
+- [ ] **#46 — the reply never echoes `actualLitresDispensed`**, so the app cannot read its own record
+  back; only the dashboard shows it (**#49**). That makes parallel-run verification a person opening
+  a web page. Worth asking; not a gate.
+- [·] **Push (FCM) has no server side and no client side.** There is no device-token registration
+  endpoint anywhere in the API and no Firebase code in the app. **This does not block #8**: OQ #8
+  already rules that push is a *freshness optimisation only* and the **poll carries the correctness
+  guarantee** — and the poll is now proven. Build poll-only; leave the seam.
+
+- [ ] **Payment feature flows (#8) — now the whole of the API line, and entirely ours.** Authorise →
+  Paystack QR, `PAID` by poll, the config fetcher, and the upload job (7e) that rides on it. The
+  transport half is built, merged and now *demonstrated*; the feature half is not started. Carries
+  **#43–#46** and **#48** with it.
 
 ## 5. Blocked on decisions that are ours
 
@@ -184,21 +204,27 @@ Listed so they are not rediscovered as surprises.
 
 ## Suggested order
 
-Sorted by value per hour, given that section 4 is waiting on a reply either way.
+Rewritten 2026-09-17. The old ordering was built around section 4 waiting on a reply; it is not
+waiting any more, which promotes **#8** from "gated/later" to the largest movable thing on the board.
 
-1. **The 7g bench gate (#19).** Needs only the rig, and removes a live trap on `main`. ~~#27~~
-   passed 2026-09-13.
-2. **Chase Kelvin for the meter output type and voltage (#22)** — it is the long pole in front of the
-   K-factor, which is in front of the parallel run, which is in front of live money.
-3. **Send Olonade the three protocol questions** as one message.
-4. ~~**Decide OQ #22**~~ — settled and built 2026-09-15 (Option 1). ~~OQ #17~~ settled 2026-09-12.
-5. ~~**Ask the boss about the signing key**~~ — answered 2026-09-15: dummy key for the run,
-   Balancee's for production, planned reinstall between them.
-6. **Release signing, last (#34).** The build side is done; the dummy run key can be generated any
-   time and no longer waits on anyone. Still last because the run waits on the K-factor. **#40**
-   (getting records off a release build) has to exist before the run ends.
+1. **Payment feature flows (#8)** — now unblocked and the biggest remaining build. Every contract
+   question it needed has been answered by observation, and the whole lifecycle has been driven once
+   by hand through the probe panel, so this is implementing against *demonstrated* behaviour rather
+   than against a PDF. Build **poll-only**; push has no server side and is not needed for
+   correctness. Carries **#43–#46**, **#48** and the upload job (7e).
+2. **Chase Kelvin for the meter output type and voltage (#22)** — unchanged, and still the long pole
+   in front of the K-factor → parallel run → live money. It runs in parallel with #8 because it
+   costs a message, not a day.
+3. **The 7g bench gate (#19).** Needs only the rig, and removes a live trap on `main` — `hardware/*.ino`
+   there is the pre-7g sketch. ~~#27~~ passed 2026-09-13.
+4. **Send Olonade the three protocol questions** (OQ #23 / #24 / #26) as one message.
+5. **Release signing, last (#34).** The build side is done and the dummy run key waits on nobody.
+   Still last because the run waits on the K-factor. **#40** (getting records off a release build)
+   has to exist before the run ends.
 
-Done and off this list: **receipt sharing (#35)** and the **activation step (#33)**, both
-2026-09-12. **#21**, the third `Missing` case,
-turned out **not** to be movable and has gone to section 3 — the K-factor is a compile-time
-constant, not a configurable field, so there is no absent state for a guard to detect.
+Done and off this list: **the gate (#32)**, closed 2026-09-16/17 — which is what reordered
+everything above it. **Receipt sharing (#35)** and the **activation step (#33)**, both 2026-09-12.
+~~Decide OQ #22~~ settled and built 2026-09-15 (Option 1); ~~OQ #17~~ settled 2026-09-12; ~~the
+signing-key question~~ answered 2026-09-15. **#21**, the third `Missing` case, turned out **not** to
+be movable and has gone to section 3 — the K-factor is a compile-time constant, not a configurable
+field, so there is no absent state for a guard to detect.

@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-16 (an activation code arrived — production, not dev; see #31)_
+_Last updated: 2026-09-17 (the gate (#32) closed on a real paid transaction; #8 is unblocked and is now the top of the board — see the new Phase 10 section)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -197,7 +197,29 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
 - [x] **17. `amount` money unit — DECIDED 2026-08-05: NAIRA.** Reference example `amount 7000 /
   expectedLitres 10` → ₦700/L. App stays kobo; repository mapper owns the ÷100. Fails closed at
   `/authorise` if wrong. Recorded in `PumpApiDtos.kt`. _(Decimals still open — see #18.)_
-- [~] **18. Backend/spec asks — SENT; partly answered by the wire itself (2026-09-12).** Probing
+- [~] **18. Backend/spec asks — MOSTLY ANSWERED BY OBSERVATION; what is left does not block V1.**
+  **Updated 2026-09-17 after the gate.** (a)–(f) below were written against the 2026-09-12 dev probe,
+  when the shapes were still unverified. The gate verified all of them on production against real
+  credentials — see `docs/api-probes/2026-09-16-prod-config/` and `…-prod-gate/`:
+  - **(a) `/config` — shape now KNOWN and wholly unlike what was modelled.** One pump, one fuel, one
+    price. Rebuilt from bytes in `1c3dc26`. This retired `BOSS_CONFIRMATIONS_DRAFT.md` item 1, the
+    ask marked *highest*, before it was sent.
+  - **(b) `/transactions/{id}` — shape KNOWN**, and it is the same object `/authorise` returns (#46).
+  - **(c) decimals — ANSWERED: accepted**, and the exact `amount == litres × price` check passes on
+    one. Forces **#44**.
+  - **(d) status set — ANSWERED:** `PENDING_PAYMENT` → `PAID` → `DISPENSED`.
+  - **(e) GET signing — ANSWERED** by a 200: `timestamp + "." + ""` is what the server verifies.
+  - **(f) stable error codes — ANSWERED, and the half-built reading was the right one.** They exist
+    on business failures (`AMOUNT_MISMATCH`, `PAYMENT_NOT_CONFIRMED`, `TRANSACTION_NOT_FOUND`,
+    `INVALID_REQUEST`) and on **no** authentication failure. That is a rule, not an inconsistency:
+    match business errors on `code`, identify the auth family by 401.
+  - **Still genuinely open, and none of it gates V1:** **#29** (no backend home for the `events`
+    table), **#48**'s other half (accept a correction, or refuse the repeat with a code instead of a
+    200 that reads as success), and **#46** (echo `actualLitresDispensed` so the app can read its own
+    record back). Drafted in `BOSS_CONFIRMATIONS_DRAFT.md`.
+
+  _Original 2026-09-12 dev-probe findings, kept because they are how the routes were found at all:_
+  Probing
   `api.dev.balancee.app` answered more than the reply did. Evidence: `docs/api-probes/2026-09-12/`.
   - ~~(a) `GET /api/pump/config` doesn't exist~~ — **DEPLOYED.** 401 `Missing pump authentication
     headers` with `X-Matched-Path: /api/pump/config`; an undeployed route returns an HTML 404 with
@@ -219,7 +241,7 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
     `X-Timestamp` / `X-Signature`) are correct — sending them moves the server off "missing headers"
     onto "Invalid API key". That was previously only our reading of Reference §3.
 
-## 🟢 Phase 9 — first contact with the real backend (BUILT, unmerged)
+## ✅ Phase 9 — first contact with the real backend — MERGED + PUSHED
 
 Branch `feature/api-live-probe`, three commits off `main` at `3aea28c`. `f77cfb3` probe evidence,
 `4970c4e` error-envelope parsing (#14 half), `5a378fe` activation persistence. Verified: JVM **155
@@ -686,6 +708,107 @@ original five, plus `15dee70` from the bench gate.
   measured in step 8. One-line firmware change, so it belongs with **#19**'s firmware work rather
   than on its own. Not a substitute for **OQ #26** — see there.
 
+## 🔼 Phase 10 — payment feature flows (#8) — PLANNED, NOT STARTED
+
+_Planned 2026-09-17, immediately after the gate (#32) closed. **Awaiting an explicit go.**_
+
+Branch `feature/phase-10-payments` off `main` (`84d6f49`). Committed sub-deliverable by
+sub-deliverable, 3a-style. Every commit leaves the build green.
+
+**What makes this different from every previous attempt at #8:** it is implemented against
+*observed* behaviour, not against a PDF. The whole lifecycle has already been driven by hand through
+the probe panel on production, and the bytes are in `docs/api-probes/2026-09-16-prod-gate/`. Those
+captures are the test fixtures.
+
+**Two facts that shape the whole design, both confirmed at the gate:**
+- `transactionId` is **ours** — client-generated, sent on `/authorise`, echoed back unchanged. The
+  app owns the id *before* the call, which is what makes resuming a poll after a restart possible
+  rather than a second sale.
+- The server enforces the payment gate itself (**#45**): it refuses to record fuel against an unpaid
+  transaction. That safety property does not depend on the app behaving.
+
+### Scope boundary — what is deliberately NOT in this phase
+
+- **FCM push.** No device-token registration endpoint exists anywhere in the API, and there is no
+  Firebase code in the project. **OQ #8 already rules push is a freshness optimisation only and the
+  poll carries the correctness guarantee** — so poll-only is not a shortcut, it is the design.
+  Leave the seam; add push when there is a server side to add it to.
+- **Flow 5 offline USSD** — boss-deferred (**#9**).
+- **Cash flows** — no API involvement. `/upload` demands a `paymentReference` only `/authorise`
+  issues, so a cash sale has nothing to upload and must not enqueue one.
+- **Turning live money on.** This phase makes digital payment *work*. It stays gated behind the
+  K-factor and the 14-day parallel run.
+
+### Sub-deliverables
+
+- [ ] **10a — Widen the payment seam.** The blocker in front of everything else.
+  `PaymentProcessor.process(method, amountKobo)` cannot express what `/authorise` requires
+  (`expectedLitres`, `fuelType`, `pumpId`), and `PaymentResult.Pending(transactionRef, method)`
+  cannot carry what the screen needs (`authorizationUrl`, `expiresAt`, the server-side ids).
+  Widen both. `MockPaymentProcessor` keeps working — it fabricates a URL and a 20-minute expiry —
+  so the debug path and all existing tests stay green. **No behaviour change**; committed alone so
+  the real processor's diff is readable against it.
+- [ ] **10b — Money representation (#44).** `AuthoriseRequest.amount` stops being a `Long`.
+  Fixtures from the gate: `3501.5` for 2.35 L at ₦1490, request and response both captured.
+  **Decision to confirm at go:** `BigDecimal` + serializer (recommended — the wire value is decimal
+  naira, the server's check is *exact*, and a float makes an exact-equality check rot on figures
+  that look right) vs. kobo-`Long` serialised as a decimal. Cap at 2dp and refuse to send more: the
+  app carries kobo so it cannot express a third decimal, and a rounded one is a **rejection**, not
+  an approximation. Precision beyond 2dp stays open (#44) — ₦1490 hides it.
+- [ ] **10c — `BalanceePaymentProcessor`: `/config` → `/authorise` → a QR that can actually be paid.**
+  Fetch-before-authorise is the correctness guarantee (OQ #8), then authorise, then emit `Pending`
+  carrying the real checkout URL and the server's `expiresAt`.
+  - **The QR today renders a fabricated payload** — `balancee://pay?txn=…`,
+    `PrepayAwaitingPaymentScreen.kt:353`. **Nobody can pay it.** It must become the Paystack
+    `authorizationUrl` (`https://checkout.paystack.com/…`). This is the single most user-visible
+    change in the phase.
+  - Carries **#43**: the expiry countdown reads `expiresAt` off the response rather than a constant,
+    so the day the backend changes the window nothing here has to notice. Correct the stale
+    5-minute claims at `TransactionState.kt:50` and `PumpApiDtos.kt:75`. **Leave
+    `PumpRequestSigner.kt:6` alone except to disambiguate it** — that is a *different* five minutes
+    (the signing freshness window) and is still unmeasured; #15's probe only proves ten is too old.
+  - Carries **#46**: one `PumpTransactionResponse` behind the three names, built from the captured
+    bytes, so the poll stops silently discarding the `expiresAt` that #43 needs.
+- [ ] **10d — PAID detection by poll.** ~10 s poll over `GET /transactions/{id}` across the
+  `PENDING_PAYMENT` window, terminating on `PAID`, on `expiresAt`, or on cancel.
+  - **The boot-resume trap, and the reason this is its own deliverable.**
+    `CustomerViewModel:1095` already restarts a `process()` call after a restart. Against a mock
+    that is free; against a real server it would **authorise a second sale** for a customer who has
+    already paid for the first. Because `transactionId` is ours, the correct behaviour is to resume
+    polling the existing id. Tests first, on that path specifically.
+- [ ] **10e — Error mapping (#14's mapping half, #45).**
+  - **#45 — the taxonomy needs a third outcome.** `PAYMENT_NOT_CONFIRMED` is a 409 that parses as
+    `ApiError.Business`, and `ApiResult.kt:52` makes every `Business` non-retryable — documented as
+    "a considered refusal". This one is not: it is true now and false in a minute. Add *retry later,
+    not now*, keyed on `code` and never on prose. An upload job that treats it as final **drops the
+    record permanently**, which is the one outcome the upload job exists to prevent.
+  - Wire `ERROR_COPY_DRAFT.md` Catalogue A into the customer's one plain line and the attendant
+    panel's detail. This is the half that was blocked on #8 — unblocked now, because something
+    finally produces an `ApiError` a customer can see.
+- [ ] **10f — Upload job (7e).** Add `workmanager` (confirmed absent from
+  `gradle/libs.versions.toml`), a `TransactionUploadWorker`, and the thing that finally sets
+  `syncedAt`.
+  - Carries **#48**: upload **once** per transaction, and never re-send a superseded figure. An
+    identical retry is proven harmless; a *corrected* one returns `200 Transaction recorded` and
+    changes nothing, so a wrong figure sticks while every log in the app says it went through.
+  - **#47** confirmed the endpoint accepts any litres figure, so partial dispenses, OQ #22 early
+    ends and 7h's recovered pulses can all be reported honestly.
+- [ ] **10g — Gate: run it on the tablet against production.** The probe panel proved the
+  *endpoints*; this proves the *app*. A real small sale end to end through the customer UI against
+  `SN-TEST-001`, scanning the QR with a phone. Sized like the #32 sitting. Nothing merges until it
+  passes.
+
+### Risks worth naming before starting
+
+- **10c and 10d change money-handling code paths that 23 `CustomerViewModel` tests already cover.**
+  Expect the suite to go red honestly rather than quietly — that is what those tests are for.
+- **The QR change is irreversible in the field in one direction:** a build that renders the old
+  fabricated payload cannot take a payment, so there is no half-shipped state worth having.
+- **Live Paystack.** Every `/authorise` in 10g creates a real payment initialisation, as the gate
+  did. Small amounts, dummy business, but real.
+
+---
+
 ## Now — unblocked, high value
 
 - [~] **34. Release signing — BUILD SIDE DONE 2026-09-12, keystore still owed.** Was: no
@@ -799,8 +922,12 @@ original five, plus `15dee70` from the bench gate.
   already satisfies it. Ask becomes a ratification, not an open question — see OQ #8; (3) GET
   `/transactions/{id}` exists; (4) GET `/config` exists + final payload/units (incl. money unit on
   `amount` — naira vs kobo); (5) confirm offline-USSD 7d deferral; (6) late-payment policy; (7) hosted
-  staging URL + test activation code. **Draft ready → `BOSS_CONFIRMATIONS_DRAFT.md`.** Awaiting send +
-  answers; on reply → reconcile into `OPEN_QUESTIONS.md` + unblock #8.
+  staging URL + test activation code. **Draft ready → `BOSS_CONFIRMATIONS_DRAFT.md`.**
+  - **NO LONGER BLOCKS #8 — updated 2026-09-17.** The gate answered (3), (4) and the money unit by
+    observation, and item 4 of the draft (live Paystack?) by paying ₦149 through it. (1) is moot now
+    that behaviour has been observed directly: **the wire outranks the Reference**, and where they
+    disagreed the wire was right. What is still worth sending is (5), (6) and the three remaining
+    backend asks under **#18** — all improvements, none of them gates.
 
 ## Gated / later
 
@@ -818,9 +945,10 @@ original five, plus `15dee70` from the bench gate.
   **deferred** to stay pure-JVM. Full suite green at **81 tests**. **MERGED to `main` 2026-08-04**
   (merge commit `d2c4283`); post-merge verify on `main` green — 81 tests / 0 failures +
   `compileDebugRealHwKotlin` clean. _(PROJECT_LOG entry filed.)_
-- [ ] **8. Payment feature flows** — activate → persist creds; authorise → Paystack QR; PAID via
-  push + 10 s poll; price config fetcher; WorkManager upload job (re-add `workmanager`).
-  **Blocked by #3, #4, #6.** Sandbox-testable; live money gated behind the 14-day parallel run.
+- [~] **8. Payment feature flows — UNBLOCKED 2026-09-17. Moved to its own section: see
+  “Phase 10” below.** Was: *blocked by #3, #4, #6*. All three are stale — #3 (transport client) and
+  #4 (credentials store) shipped in July, and the gate answered #6's blocking items by observation
+  rather than by reply. Kept here as a pointer so the old cross-references still land somewhere.
 
 ## Deferred (parked, not dropped)
 
