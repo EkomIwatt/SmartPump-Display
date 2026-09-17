@@ -815,6 +815,22 @@ captures are the test fixtures.
     - Unaffected either way: what the pump physically stops at (a pulse boundary, and the real
       K-factor will not be round) — **#47** confirmed the upload accepts whatever actually flowed.
       The authorise is a quote; the upload reports reality.
+  - **✅ PROBE RUN 2026-09-17 — ACCEPTED, and it moved the answer.** Capture:
+    `docs/api-probes/2026-09-17-prod-precision/`. `expectedLitres: 2.3536` with `amount: 3506.864`
+    returned 200 `PENDING_PAYMENT`, so **the server's parser is not the constraint** — 4dp litres and
+    a 3dp amount both pass the exact check. (Sixth independent measurement of the 20-minute
+    `expiresAt`, too.)
+    - **But the accepted amount cannot be paid.** ₦3,506.864 is **350,686.4 kobo**, and Paystack
+      charges in whole kobo. The server accepted an amount the rail underneath it cannot collect and
+      said nothing. Nothing was scanned, so what checkout does with the fractional kobo is
+      **unobserved on purpose** — the fix is to never send one, not to go and find out. Same shape as
+      **#48**: a 200 means *this endpoint accepted it*, not *this is correct end to end*.
+    - **So the rule is not "quote at 4dp".** It is **"quote at the finest scale whose product is an
+      exact number of kobo"**, and that scale moves with the price — 3dp at ₦1,490, only 2dp at
+      ₦1,491 or ₦870.50, any scale at ₦1,250. A fixed scale is wrong at some price, which is the same
+      fragility the tendered-amount option was rejected for. **10c computes it per price.**
+    - At today's ₦1,490 the shortfall falls **₦5.50 → ₦1.03** on a ₦3,507 tender; at ₦1,250 it is zero.
+    - No further sitting needed: 3dp is strictly coarser than the 4dp just accepted.
   - Verified: JVM **306 tests / 35 classes** green (was 297 / 34); `compileDebugRealHwKotlin` and
     `lintDebug` clean.
 - [ ] **10c — `BalanceePaymentProcessor`: `/config` → `/authorise` → a QR that can actually be paid.**
