@@ -27,6 +27,7 @@ import app.balancee.smartpump.display.data.network.ProbeClockOffset
 import app.balancee.smartpump.display.data.network.ProbeResponseRecorder
 import app.balancee.smartpump.display.data.network.PumpApiClient
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
+import app.balancee.smartpump.display.data.network.dto.nairaForSale
 import app.balancee.smartpump.display.data.network.dto.AuthoriseResponse
 import app.balancee.smartpump.display.data.network.dto.PumpConfigResponse
 import app.balancee.smartpump.display.data.network.dto.TransactionStatusResponse
@@ -48,6 +49,7 @@ import java.io.File
 import java.time.Clock
 import java.time.Duration
 import java.time.format.DateTimeFormatter
+import java.math.BigDecimal
 import java.util.UUID
 import javax.inject.Inject
 import kotlin.math.abs
@@ -85,6 +87,17 @@ enum class AuthoriseVariant {
 sealed interface AmountPlan {
     data class Exact(val naira: Long) : AmountPlan
     data class Fractional(val naira: Double) : AmountPlan
+
+    /**
+     * What actually goes on the wire. Both branches are now sendable — `amount` is a `BigDecimal`
+     * since TODO #44 — so the distinction survives only to *tell the operator* which case a litre
+     * figure lands on, which is still worth seeing on a probe screen. It is no longer a gate.
+     */
+    val wireAmount: BigDecimal
+        get() = when (this) {
+            is Exact -> BigDecimal.valueOf(naira)
+            is Fractional -> BigDecimal.valueOf(naira)
+        }
 }
 
 internal fun amountFor(litres: Double, pricePerUnit: Long): AmountPlan {
@@ -203,38 +216,34 @@ class ApiProbeViewModel @Inject constructor(
         val transactionId = "probe-${UUID.randomUUID()}"
 
         val result = when (variant) {
-            AuthoriseVariant.Happy -> when (plan) {
-                is AmountPlan.Exact -> client.authorise(
-                    AuthoriseRequest(
-                        pumpId = config.pumpId,
-                        transactionId = transactionId,
-                        amount = plan.naira,
-                        expectedLitres = litres,
-                        fuelType = config.fuelType,
-                    ),
-                )
-                // Not a failure to report as an error: it is the answer to #18c, arrived at before
-                // sending anything. These litres cannot be expressed in whole naira, so the happy
-                // path IS the decimal case.
-                is AmountPlan.Fractional -> return@probe fractionalSummary(plan, litres, config)
-            }
+            // Both branches send now. Until #44 this refused on a fractional amount, because
+            // `amount` was a Long and the sale genuinely could not be expressed — that refusal is
+            // how #18c was first answered, and it is kept in the log rather than in the code.
+            AuthoriseVariant.Happy -> client.authorise(
+                AuthoriseRequest(
+                    pumpId = config.pumpId,
+                    transactionId = transactionId,
+                    amount = nairaForSale(litres, config.pricePerUnit * 100),
+                    expectedLitres = litres,
+                    fuelType = config.fuelType,
+                ),
+            )
 
-            AuthoriseVariant.Mismatch -> {
-                val base = when (plan) {
-                    is AmountPlan.Exact -> plan.naira
-                    is AmountPlan.Fractional -> Math.round(plan.naira)
-                }
-                client.authorise(
-                    AuthoriseRequest(
-                        pumpId = config.pumpId,
-                        transactionId = transactionId,
-                        amount = base + 1,
-                        expectedLitres = litres,
-                        fuelType = config.fuelType,
-                    ),
-                )
-            }
+            AuthoriseVariant.Mismatch -> client.authorise(
+                AuthoriseRequest(
+                    pumpId = config.pumpId,
+                    transactionId = transactionId,
+                    // Deliberately one naira off the exact product, so the server's own check is
+                    // what refuses it rather than anything of ours.
+                    amount = nairaForSale(litres, config.pricePerUnit * 100).add(BigDecimal.ONE),
+                    expectedLitres = litres,
+                    fuelType = config.fuelType,
+                ),
+            )
 
+            // Kept on authoriseRaw even though the typed client can now carry a decimal: this probe
+            // exists to ask what the SERVER does with a body we would never build, and routing it
+            // through the DTO would only ever re-test our own serializer.
             AuthoriseVariant.Decimal -> client.authoriseRaw(
                 JsonObject(
                     mapOf(
@@ -360,21 +369,6 @@ private fun notReadySummary(missing: String): ProbeSummary = ProbeSummary(
     tone = ProbeTone.Caution,
     headline = "Nothing sent",
     detail = "This probe needs $missing first. Nothing left the device.",
-)
-
-private fun fractionalSummary(
-    plan: AmountPlan.Fractional,
-    litres: Double,
-    config: PumpConfigResponse,
-): ProbeSummary = ProbeSummary(
-    tone = ProbeTone.Caution,
-    headline = "Cannot be expressed in whole naira — #18c, answered by arithmetic",
-    detail = "$litres L x ${config.pricePerUnit} = ${plan.naira}, which `amount: Long` cannot " +
-        "carry. The server checks amount == expectedLitres x pricePerUnit exactly, so a rounded " +
-        "figure is refused rather than accepted a few kobo out.\n\nNothing was sent. Use the " +
-        "decimal probe to find out whether the server takes a fractional amount — if it does not, " +
-        "every fill-up whose litres do not land on a whole naira is unauthorisable, and station " +
-        "pricing has to be constrained to make that impossible.",
 )
 
 internal fun ApiResult<PumpConfigResponse>.toConfigSummary(): ProbeSummary = when (this) {

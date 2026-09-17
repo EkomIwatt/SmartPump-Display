@@ -380,9 +380,10 @@ private fun AmountLine(state: ApiProbeUiState) {
         )
 
         is AmountPlan.Fractional -> Text(
-            text = "${state.litres} L × ${state.config?.pricePerUnit} = ${plan.naira} — not a " +
-                "whole naira, so `amount: Long` cannot carry it. Use the decimal probe: this is " +
-                "#18c, and on this arithmetic every fill-up hits it.",
+            text = "${state.litres} L × ${state.config?.pricePerUnit} = ${plan.naira} — a " +
+                "fractional naira amount, which is the ordinary case for a metered fill-up rather " +
+                "than the exotic one. Sendable since #44 made `amount` a BigDecimal; before that " +
+                "this was the wall #18c ran into.",
             style = MaterialTheme.typography.bodySmall,
             color = PrimaryGold,
         )

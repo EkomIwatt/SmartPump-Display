@@ -404,7 +404,12 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - **Fix is not a new constant.** `AuthoriseResponse.expiresAt` is a server timestamp and the expiry
     countdown should read it, so the day the backend changes the window nothing here has to notice.
     Ours to do, inside the payment flows (#8).
-- [ ] **44. `AuthoriseRequest.amount` must stop being a `Long`.** #18c is answered: the server accepts
+- [x] **44. `AuthoriseRequest.amount` must stop being a `Long` — DONE 2026-09-17 in phase 10b.**
+  `BigDecimal` + `NairaAmountSerializer`. The precision sub-question below is **still open** and is
+  now sharper than when it was written: see the pre-pay finding under 10b, which is a different
+  problem from the one this item anticipated and bites at a whole-naira price too.
+  _(original entry follows)_
+- [~] **44 (original). `AuthoriseRequest.amount` must stop being a `Long`.** #18c is answered: the server accepts
   a decimal amount and its exact `amount == expectedLitres × pricePerUnit` check passes on one
   (3501.5 for 2.35 L at ₦1490, request and response both captured).
   - **Why it cannot stay:** at any price, most metered litre figures produce a fractional naira amount.
@@ -765,13 +770,33 @@ captures are the test fixtures.
     authoritative** — left as a comment at the site rather than silently unified.
   - Verified: JVM **297 tests / 34 classes** green (was 287 / 32); `compileDebugRealHwKotlin` and
     `lintDebug` clean.
-- [ ] **10b — Money representation (#44).** `AuthoriseRequest.amount` stops being a `Long`.
+- [x] **10b — Money representation (#44). DONE 2026-09-17.** `AuthoriseRequest.amount` stops being a `Long`.
   Fixtures from the gate: `3501.5` for 2.35 L at ₦1490, request and response both captured.
   **Decision to confirm at go:** `BigDecimal` + serializer (recommended — the wire value is decimal
   naira, the server's check is *exact*, and a float makes an exact-equality check rot on figures
   that look right) vs. kobo-`Long` serialised as a decimal. Cap at 2dp and refuse to send more: the
   app carries kobo so it cannot express a third decimal, and a rounded one is a **rejection**, not
   an approximation. Precision beyond 2dp stays open (#44) — ₦1490 hides it.
+  - **Built:** `BigDecimal` (user-confirmed), with `NairaAmountSerializer` emitting a **bare JSON
+    number in plain notation with trailing zeros stripped**. All three properties are load-bearing:
+    the signature is computed over these exact bytes, so a quoted string is a different request;
+    `stripTrailingZeros()` alone renders 3500.00 as `3.5E+3`, which is valid JSON and absurd in a
+    payment; and stripping is what sends `2980` rather than `2980.00`.
+  - **`nairaFromKobo(kobo)`** (exact — scale set, never divided) and **`nairaForSale(litres,
+    koboPerLitre)`**, the latter being the server's own check computed the same way it computes it.
+  - **The probe's "cannot be expressed" refusal is gone**, because it is no longer true. It is how
+    #18c was first answered and it now lives in the log rather than in the code. `AmountPlan` stays
+    as a *label* on the probe screen — telling the operator which case a litre figure lands on is
+    still worth seeing — but it no longer gates what can be sent. `authoriseRaw` is kept and its
+    comment corrected: it exists to ask what the **server** does with a body we would never build.
+  - **⚠ Finding for 10c, pinned in a test so it cannot be rediscovered as a surprise:
+    pre-pay's tendered amount and the exact product disagree.** Litres are floored to 2dp, so at
+    ₦1490/L a ₦5,000 pre-pay buys 3.35 L — worth ₦4,991.50. The server's check is exact, so sending
+    the ₦5,000 the customer actually handed over is a **refused sale**, not a 50-kobo discrepancy.
+    Charge for the litres, or quote unfloored litres: a product decision, and **10c must make it**.
+    Test: `pre-pay amount and the exact product disagree when the price does not divide evenly`.
+  - Verified: JVM **306 tests / 35 classes** green (was 297 / 34); `compileDebugRealHwKotlin` and
+    `lintDebug` clean.
 - [ ] **10c — `BalanceePaymentProcessor`: `/config` → `/authorise` → a QR that can actually be paid.**
   Fetch-before-authorise is the correctness guarantee (OQ #8), then authorise, then emit `Pending`
   carrying the real checkout URL and the server's `expiresAt`.
