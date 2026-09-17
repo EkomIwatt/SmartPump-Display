@@ -109,9 +109,17 @@ class PumpSigningInterceptorTest {
         assertNull(recorded.getHeader("X-Signature"))
     }
 
+    // The body here is only scaffolding — this test is about the headers — but it is the observed
+    // /config payload rather than a plausible-looking stub. The invented one that used to sit here
+    // (`{"prices":{"PETROL":87050}}`) was a small copy of the same mistake the DTO itself made, and
+    // it kept passing until the shape it described turned out never to have existed.
     @Test
     fun `signed GET with no body signs over timestamp and empty body`() = runBlocking {
-        server.enqueue(MockResponse().setBody("""{"status":true,"data":{"prices":{"PETROL":87050}}}"""))
+        server.enqueue(
+            MockResponse().setBody(
+                """{"status":true,"message":"Pump config","data":{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","stationName":"Kachi","fuelType":"PETROL","pricePerUnit":1490,"updatedAt":"2026-09-15T09:44:39.187Z"}}""",
+            ),
+        )
 
         service.config()
 

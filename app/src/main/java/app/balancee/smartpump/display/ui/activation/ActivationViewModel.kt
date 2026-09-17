@@ -93,10 +93,20 @@ class ActivationViewModel @Inject constructor(
     val ui: StateFlow<ActivationUiState> = _ui.asStateFlow()
 
     fun setCode(value: String) {
-        // Codes are quoted uppercase in the Reference and dashes are the only punctuation seen.
-        // Strip everything else so a paste carrying a stray space or quote still sends cleanly.
-        val cleaned = value.uppercase()
-            .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+        // Sent as typed, case and all.
+        //
+        // This used to uppercase the code and drop every character that was not a letter, digit,
+        // dash or underscore — reasoning from the Reference PDF, which happens to quote its example
+        // codes in uppercase. The codes the operator dashboard actually issues are mixed case, so
+        // the app could not send the code it was given, and it mangled it silently: the field
+        // showed something plausible while the server was refusing a string the operator never
+        // typed. Found on the tablet, 2026-09-16.
+        //
+        // Whitespace and control characters are still removed, because those arrive from a paste
+        // rather than from the code. Everything else is the server's business to judge, not ours —
+        // that is the whole lesson of #11, applied to a text field.
+        val cleaned = value
+            .filterNot { it.isWhitespace() || it.isISOControl() }
             .take(MAX_CODE_LENGTH)
         _ui.update { it.copy(code = cleaned) }
     }

@@ -269,65 +269,202 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - Guards: already-activated is refused **locally** (a valid second code would overwrite and
     abandon the backend's `pumpId`); the `deviceId` echo is checked and a mismatch **keeps** the
     credentials while reporting the disagreement.
-- [~] **31. The two pre-flight questions — half answered, and the answer moved the problem.**
-  - ✅ **Are dev activation codes re-issuable? YES** (confirmed 2026-09-16). The "single-use" claim in
-    `API_CONFORMANCE_AUDIT.md` was our own assumption carried forward without a quoted Reference line,
-    and it was wrong about scarcity: a code is single-use, but another can be issued. The one-way door
-    this item existed to shrink is now narrow.
-  - [ ] **Can a dev pump be reset and re-activated against the same `deviceId`?** Still unanswered.
-    Less urgent now that codes are re-issuable, but not moot: the signing cutover is a **planned
-    reinstall**, which wipes `device_identity` prefs and mints a new `deviceId`, so the production
-    build activates as a stranger to whatever the run build registered.
-  - 🚩 **The new blocker, found 2026-09-16: the code we hold is a PRODUCTION code.** It was issued from
-    the operator dashboard at `smartpump.balancee.app/dashboard/pumps`, which devtools shows posting
-    GraphQL to `api.balancee.app`. Consequences:
-    - **No installable build can redeem it today.** `debug`/`debugRealHw` hard-wire
-      `api.dev.balancee.app` in `buildConfigField`; only `release` points at production, and there is
-      no signed release build. Reaching prod from a debuggable build needs a new variant or a gradle
-      property — small, but deliberate.
-    - **#32 cannot run there as written** — see the note under it.
-    - **The REST surface itself is fine on prod.** An unauthenticated, no-credentials probe
-      (`docs/api-probes/2026-09-16-prod/`) confirms `/api/pump/config`, `/api/pump/transactions/[id]`
-      and `/api/pump/activate` are all deployed on production and answer **byte-identically** to dev,
-      including the inconsistent `code` field (#18f). The GraphQL dashboard sits alongside the REST
-      pump API, it does not replace it.
-  - 🚩 **And dev may not use codes at all.** Told 2026-09-16: "dev does not require an activation
-    code". Our own dev probe contradicts the simplest reading of that — `/api/pump/config` answers
-    `401 Missing pump authentication headers` with no headers and `401 Invalid API key` with filler
-    ones — so it likely means credentials are issued directly, or activation is a formality on dev,
-    or it was about the dashboard GraphQL API rather than the pump REST API. **The ask is therefore
-    form-agnostic** (item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`, rewritten): what is the way to make one
-    authenticated request against `api.dev.balancee.app`? A code, a pre-issued key pair, or a
-    documented bypass — any of the three. Fallback ladder named there too.
-- [ ] **32. THE GATE — redeem one code on dev.** Everything left on the API line is behind it, and
-  it should all be done in one sitting while the server is in a known state:
-  1. Activate once. Confirm the credentials survive a process restart.
-  2. `GET /config` → **capture the literal payload** and build its fixture from those bytes, not
-     from our restatement (that is how #11 got in). Unblocks 7b's second half.
-  3. `/authorise` happy path, then a deliberate **amount mismatch** → confirms whether stable codes
-     arrived on that path (#18f).
-  4. Send a **decimal `amount`** → settles #18c by observation.
-  5. Poll `/transactions/{id}` → the real status set (#18d).
-  6. Confirm **GET signing** (we send `timestamp + "." + ""`) and the **clock-skew** strings (#15).
-  7. `/transactions/upload` last.
+- [x] **31. The pre-flight questions — SETTLED 2026-09-16. We are going to production, on purpose.**
+  Kept rather than deleted because it moved three times in one day and the reasoning is the useful
+  part.
+  - ✅ **Are codes re-issuable? YES.** The dashboard has a self-service **Get code** button, and a
+    **Revoke** button beside it. Our "single-use, so we cannot proceed on a borrowed one" framing was
+    asserted in `API_CONFORMANCE_AUDIT.md` without a quoted Reference line — it was our own
+    assumption. A code is single-use; another is one click away.
+  - ✅ **Can a pump be reset and re-activated?** The **Revoke** button says yes. Whether the same
+    `deviceId` can then re-activate is answerable **by observation** during the sitting rather than
+    by asking anyone — worth doing while the pump is throwaway, because the signing cutover's planned
+    reinstall mints a new `deviceId` and nobody has tested that path.
+  - ✅ **Which environment?** Production. The code came from `smartpump.balancee.app/dashboard/pumps`,
+    which posts GraphQL to `api.balancee.app`. The REST pump surface is deployed there and answers
+    **byte-identically** to dev (`docs/api-probes/2026-09-16-prod/`), including the inconsistent
+    `code` field (#18f) — a contract gap, not a deployment gap.
+  - ✅ **Is production acceptable to dirty?** For this pump, yes. `Test Pump 1` / `SN-TEST-001` sits on
+    a **dummy business account** the backend dev created for us. The pump record is not precious,
+    junk transactions pollute nobody's reconciliation, and repeat runs are free — which matters,
+    because a gate exists to be run, to disagree, and to be run again.
+  - ✅ **Reaching it from an installable build** — solved by the `debugProd` variant (phase 9d-1).
+  - 🚩 **The one thing that did NOT dissolve, and it is not about the pump.** `/authorise` returns
+    `authorizationUrl`, a **Paystack checkout URL** (`PumpApiDtos.kt`). On production that is
+    presumably Balancee's **live** Paystack integration, so a test pump on a dummy business still
+    initialises real payments through the real processor. Nothing moves unless a QR is scanned and we
+    will not scan one — but it is worth saying beforehand. **One question, in item 4 of
+    `BOSS_CONFIRMATIONS_DRAFT.md`.** It gates *pressing* the authorise button, not *building* it, and
+    it gates nothing in steps 1, 2 or 5.
+  - ~~Ask for a dev code / a dev authentication path~~ — **dropped.** We were told dev needs no
+    activation code (which our own dev 401s do not obviously support, and which no longer matters),
+    and we are not going to dev.
+- [x] **32. THE GATE — ALL SEVEN STEPS RUN, 2026-09-16.** On production, against the throwaway pump (#31).
+  Everything left on the API line is behind it, and it should be done in one sitting while the server is in a known state:
+  1. ~~Activate once. Confirm the credentials survive a process restart.~~ ✅ **PASSED 2026-09-16**
+     — pump `3727aebf-…`, deviceId echo matched the dashboard, survived a force-stop.
+  2. ~~`GET /config` → capture the literal payload~~ ✅ **PASSED 2026-09-16.** The payload matched
+     nothing we had: no `prices` map, one pump with one fuel and one price. DTO rebuilt from the
+     bytes (`1c3dc26`). Capture: `docs/api-probes/2026-09-16-prod-config/`. **7b's second half is
+     unblocked**, and it struck two items off the backend ask (see #31).
+  3. ~~`/authorise` happy path, then a deliberate **amount mismatch**~~ ✅ **PASSED 2026-09-16.**
+     Both work, and stable codes DO arrive on that path: `AMOUNT_MISMATCH` (#18f). Auth 401s still
+     carry none — business failures have codes, authentication failures do not.
+  4. ~~Send a **decimal `amount`**~~ ✅ **ANSWERED 2026-09-16: accepted.** 3501.5 for 2.35 L at ₦1490,
+     request and response both captured. `amount` must stop being a `Long` — **#44**.
+  5. ~~Poll `/transactions/{id}` → the real status set (#18d)~~ ✅ **PASSED 2026-09-16, including a
+     paid transaction.** The set is `PENDING_PAYMENT` → `PAID` → `DISPENSED` — the three strings the
+     DTOs guessed in July, now observed. An unknown id returns 404 `TRANSACTION_NOT_FOUND`. **#18d
+     is closed.**
+  6. ~~Confirm **GET signing** and the **clock-skew** strings~~ ✅ **BOTH ANSWERED 2026-09-16.**
+     GET signing: step 2's 200 proves `timestamp + "." + ""` is what the server verifies. Clock skew
+     (**#15**): a `/config` signed ten minutes in the past returns
+     `401 {"status":false,"message":"Request timestamp is not fresh"}` — **the exact string the audit
+     predicted from the Reference's prose**, so the copy already drafted in `ERROR_COPY_DRAFT.md`
+     stands. No `code` on it, consistent with the auth-failure rule.
+  7. ~~`/transactions/upload` last~~ ✅ **PASSED 2026-09-16** — against a genuinely paid transaction
+     (0.1 L, ₦149, paid for real). Returns `DISPENSED`. Against an **unpaid** one it returns 409
+     `PAYMENT_NOT_CONFIRMED` — the payment gate is enforced server-side, which is the better finding
+     of the two (**#45**).
   - Drive it through `PumpApiClient`, **not curl** — what is under test is our signing, our envelope
     parsing and our credential store. A curl script would test a second implementation we do not
     ship.
   - **Do not loosen `PumpLoggingInterceptor`** to see the `/activate` response (#12): assert on the
     parsed object and redact before anything reaches disk.
-  - 🚩 **2026-09-16: as written, this is a DEV sequence and the code we hold is for PRODUCTION.**
-    Steps 3, 4 and 7 create real transaction records and push fabricated rows into production
-    reporting. The read-only subset — activate, `GET /config`, poll `/transactions/{id}` — is the most
-    that should ever run against prod, and only with an explicit yes. Everything else waits on a dev
-    code (**#31**).
-  - 🚩 **Steps 2–7 have no way to be pressed.** `activate()` is the only client method with an in-app
-    caller (`ActivationPanel`, from `OperatorConfigScreen.kt`). `config()`, `authorise()`,
-    `transactionStatus()` and `uploadTransaction()` are called from nowhere in `ui/`. Since the sitting
-    must be driven through `PumpApiClient` rather than curl, **a debug-only probe panel is a
-    prerequisite of the gate, not a nicety** — decided 2026-09-16, not yet built.
+  - 🚩 **Step 3 is the only one that waits on anything.** `/authorise` returns a **Paystack checkout
+    URL**, and on production that is presumably the live Paystack integration — so pressing it
+    creates real payment initialisations, on a dummy business or not. One question to the backend
+    covers it (item 4 of `BOSS_CONFIRMATIONS_DRAFT.md`); it gates *pressing* the button, not
+    *building* it, and steps 1, 2 and 5 are unaffected. Superseded: the earlier reading that the
+    whole sequence needed a dev server — the pump is a throwaway on a dummy business (#31).
+  - ✅ **Stage 9d-1 BUILT 2026-09-16** (branch `feature/api-probe-panel`) — `debugProd` build type
+    (the debug app pointed at production, own applicationId) plus an **API probe panel** on the
+    operator screen that runs step 2 through the real client and keeps the literal bytes. Runbook:
+    [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md).
+  - ✅ **Stage 9d-2 BUILT 2026-09-16** — every remaining step has a button. Read-only ones
+    (`/transactions/{id}`, and a `/config` signed ten minutes in the past for #15) press freely;
+    `/authorise` and upload sit behind an acknowledgement switch that resets each time the panel is
+    rebuilt. The panel does the amount arithmetic **before** sending and refuses to send a fractional
+    naira amount, which is #18c answered by arithmetic: at ₦1490/L, every metered fill-up produces
+    one. Runbook: [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md).
+  - _Superseded, kept for the reasoning:_ before 9d-1, `activate()` was the only client method with
+    an in-app caller, so `config()`, `authorise()`, `transactionStatus()` and `uploadTransaction()`
+    could not be driven at all — and #32 requires driving them through `PumpApiClient` rather than
+    curl. That is why the panel was a prerequisite of the gate rather than a nicety.
 - [ ] **39. `docs/api-probes/2026-09-12/probe.sh` is re-runnable** _(was a second #33, renumbered
   2026-09-15 at the merge; nothing referenced it by number)_ and sends no secrets. Re-run it
   after any backend deploy to see whether the 401s have grown a `code` field yet (#18f).
+- [ ] **42. A RuntimeException inside the OkHttp chain kills the process, not just the call.**
+  Found 2026-09-16 when the missing INTERNET permission surfaced as
+  `SecurityException` at DNS lookup: the app died mid-activation rather than reporting a failure.
+  - **Why `safeApiCall` did not save us.** Retrofit's `suspend` path uses `enqueue`.
+    `RealCall.AsyncCall.run` catches `IOException` and calls `onFailure`; for any other `Throwable`
+    it calls `onFailure` **and then rethrows**, which reaches the default uncaught handler and takes
+    the process down. So the coroutine *was* told, and the app died anyway.
+  - **Why it matters beyond this bug.** The permission gap is fixed and DNS failures are
+    `UnknownHostException` (an `IOException`), so the trigger is gone. But this is a kiosk that must
+    not vanish mid-sale, and **activation is the worst possible moment to die**: the operator is left
+    unable to tell whether the code was spent, which is precisely the ambiguity
+    `ActivationOutcome.Unreachable` exists to make explicit.
+  - **Shape of a fix:** give OkHttp a `Dispatcher` backed by an `ExecutorService` whose thread
+    factory installs an `UncaughtExceptionHandler`. The call still fails, the coroutine still gets
+    its `IOException`, but the process survives. Small, and testable by throwing from a stub
+    interceptor.
+- [ ] **43. The QR expiry is 20 minutes, not 5 — three places in the app say otherwise.**
+  Measured four times on 2026-09-16, always 20 min 1 s between the authorise and its `expiresAt`
+  (`docs/api-probes/2026-09-16-prod-gate/`).
+  - `TransactionState.kt:50` — *"5-min expiry, then auto-cancel back to Idle"*. **This is the one that
+    costs money:** a screen that gives up at five minutes abandons a sale the server would still have
+    honoured for another fifteen, and the customer is standing at the pump while it does.
+  - `PumpApiDtos.kt:75` — the same claim in a comment on `expiresAt`.
+  - `PumpRequestSigner.kt:6` — *"within 5 min of server clock"*. A **different** five minutes: the
+    signing freshness window, still unmeasured. #15's probe only proves ten minutes is too old.
+  - **Fix is not a new constant.** `AuthoriseResponse.expiresAt` is a server timestamp and the expiry
+    countdown should read it, so the day the backend changes the window nothing here has to notice.
+    Ours to do, inside the payment flows (#8).
+- [ ] **44. `AuthoriseRequest.amount` must stop being a `Long`.** #18c is answered: the server accepts
+  a decimal amount and its exact `amount == expectedLitres × pricePerUnit` check passes on one
+  (3501.5 for 2.35 L at ₦1490, request and response both captured).
+  - **Why it cannot stay:** at any price, most metered litre figures produce a fractional naira amount.
+    A `Long` cannot carry it, and rounding is refused rather than tolerated, so every fill-up would be
+    unauthorisable. The alternative — constraining station prices to whole naira so the product is
+    always whole — is a business constraint we no longer have to ask for.
+  - **Not a `Double`.** Money through binary floating point is how a check for *exact* equality starts
+    failing on figures that look right. `BigDecimal` with a serializer, or an integer of kobo
+    serialised as a decimal — decide when #8 builds it, but decide deliberately.
+  - **Open, and dormant rather than answered: precision.** 3501.5 is one decimal place. The app carries
+    kobo, so it cannot express more than two — yet `price × litres` exceeds two whenever the price is
+    not a multiple of ten (₦1491 × 2.357 L = ₦3,514.287). Today's ₦1490 hides it. The probe is litres
+    **2.3571** → 3512.079.
+- [ ] **45. `PAYMENT_NOT_CONFIRMED` is a refusal that can become a success — and our taxonomy has no
+  word for that.** Observed 2026-09-16 (`docs/api-probes/2026-09-16-prod-gate/`):
+  ```
+  POST /api/pump/transactions/upload → 409
+  {"status":false,"message":"Payment has not been confirmed for this transaction. Do not dispense
+   until payment is confirmed.","code":"PAYMENT_NOT_CONFIRMED"}
+  ```
+  - **The good half:** the server enforces the payment gate itself. It will not record fuel against an
+    unpaid sale, which is a safety property nobody had verified and which does not depend on the app
+    behaving.
+  - **The defect-in-waiting:** a 409 with an envelope parses as `ApiError.Business`, and
+    `ApiResult.kt:52` makes every `Business` **not retryable** — documented as "a considered refusal".
+    This one is not. It is true *now* and may be false in a minute, once payment confirms. An upload
+    job that treats it as final **drops the record permanently**, and a dispense that never reaches
+    the backend is the one outcome the upload job exists to prevent.
+  - **Where it bites:** not the ordinary pre-pay flow, where money lands before fuel does. It bites
+    when an upload fires before the server has confirmed payment — a missed `PAID` push, a poll that
+    timed out, a queued upload replayed early after a restart.
+  - **Shape of a fix:** a third outcome beside retryable/terminal — *retry later, not now* — keyed on
+    the `code` rather than the prose. `isRetryable` is the wrong question for it; WorkManager needs
+    "reschedule with backoff" while the operator needs to not be told the sale failed. Decide when 7e
+    is built, but it must be decided, not discovered.
+  - **Unrelated but adjacent:** this endpoint cannot be the home for **cash** sales either — it demands
+    a `paymentReference` only `/authorise` issues. `V1_BLOCKERS.md` already says a cash sale has
+    nothing to upload; this is the server agreeing.
+- [ ] **46. Three DTOs are three partial views of one resource.** Observed 2026-09-16 (§9 of
+  `docs/api-probes/2026-09-16-prod-gate/`): `/authorise`, `/transactions/{id}` and
+  `/transactions/upload` all return the **same object** — `{status, transactionId, paymentReference,
+  authorizationUrl, expiresAt}` — differing only in `status` and the envelope's `message`.
+  - `AuthoriseResponse` has all five. `TransactionStatusResponse` and `UploadTransactionResponse`
+    have three, so `authorizationUrl` and `expiresAt` **parse away silently** under
+    `ignoreUnknownKeys`.
+  - **The one that matters is `expiresAt` on a status poll.** #43 says the expiry countdown must read
+    the server's value rather than a 5-minute constant; the poll is where a running screen would
+    refresh it, and today it is discarded before any caller sees it.
+  - **Fix:** one `PumpTransactionResponse` behind the three names, or the two thin ones gaining the
+    missing fields. Cheap now, and it removes a class of "why does the poll know less than the
+    authorise did" confusion later. Do it with #8, from the captured bytes.
+- [x] **47. Upload does NOT validate `actualLitresDispensed` — ANSWERED 2026-09-16.** 0.2 L was
+  accepted against a sale authorised and paid for 0.1 L, with a second `200 Transaction recorded`.
+  - **What that buys:** every case where actual and expected legitimately differ can be reported — a
+    tank that fills before the target, an attendant ending a fixed sale early (OQ #22), and the pulses
+    7h recovers after a restart. The under-counting posture in #28 and #36 survives contact.
+  - **What it exposed:** the endpoint is an **upsert**, not a reject — see **#48**.
+- [ ] **48. A dispense can be recorded once and never corrected — and the app is told otherwise.**
+  Corrected 2026-09-17 from "last-write-wins", which was read out of a 200 and was wrong in the more
+  dangerous direction.
+  - **Observed:** a second upload for an already-`DISPENSED` transaction, carrying 0.2 L instead of
+    0.1, returned `200 Transaction recorded` — and the dashboard still shows **0.1**. First write
+    wins; the repeat is acknowledged and discarded.
+  - **The retry is safe.** `retryingApiCall` repeats an identical upload, which is now demonstrably
+    harmless. That question is closed.
+  - **The hazard is correction, not duplication.** If a dispense is ever uploaded with the wrong
+    litres — a bug, a bad K-factor, a figure sent before 7h's reconciliation finished — re-uploading
+    the right one **succeeds loudly and changes nothing**. The station's record stays wrong while
+    every log in the app says "recorded".
+  - **Why it was invisible:** the reply does not echo `actualLitresDispensed` (#46), so a 200 is the
+    only signal the app gets, and it means "accepted", not "stored". Nothing in the API can read the
+    figure back; only the dashboard shows it.
+  - **Ours (7e):** upload once per transaction and never re-send a superseded figure, because the
+    first send is the only one that counts. **Theirs — a fifth item for #18:** either accept a
+    correction, or refuse the repeat with a code instead of a 200 that reads as success.
+- [x] **49. Uploaded dispenses ARE visible to an operator — confirmed 2026-09-17.** The dashboard's
+  per-pump Transactions view lists each transaction with its state and, for a dispensed one, the
+  litres recorded. That is the counterpart the **14-day parallel run** needs: something to reconcile
+  the app's litres against. Worth knowing it exists before the run, not during it.
+  - Caveat kept: the **API** cannot read that figure back (#46), so verification is a person opening
+    a web page. The app cannot check its own record.
+
 - [ ] **41. Credentials can only arrive by redeeming a code — and dev may not use codes.**
   `PumpActivationRepositoryImpl:54` is the **only** writer of `PumpCredentialsStore` in the app;
   everything else reads. So if dev hands over an `apiKey` + `signingSecret` + `pumpId` directly

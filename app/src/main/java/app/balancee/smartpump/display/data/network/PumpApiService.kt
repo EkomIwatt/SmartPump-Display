@@ -16,6 +16,7 @@ import app.balancee.smartpump.display.data.network.dto.PumpConfigResponse
 import app.balancee.smartpump.display.data.network.dto.TransactionStatusResponse
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionRequest
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionResponse
+import kotlinx.serialization.json.JsonObject
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -31,6 +32,19 @@ interface PumpApiService {
     /** Start a sale → returns the Paystack authorizationUrl to render as a QR. */
     @POST("api/pump/authorise")
     suspend fun authorise(@Body body: AuthoriseRequest): ApiEnvelope<AuthoriseResponse>
+
+    /**
+     * The same endpoint with a hand-built body. Used only by the debug probe panel, for the one
+     * question our own types make unaskable: [AuthoriseRequest.amount] is a `Long`, so the client
+     * physically cannot send the decimal amount that TODO #18c is about — and the answer decides
+     * whether a fill-up can be authorised at all, since `price × litres` is fractional for most
+     * litre values (₦1490 × 2.35 L = ₦3,501.50).
+     *
+     * It still goes through the signing interceptor, the envelope and our error mapping. The only
+     * thing it bypasses is the request DTO, which is the thing under test.
+     */
+    @POST("api/pump/authorise")
+    suspend fun authoriseRaw(@Body body: JsonObject): ApiEnvelope<AuthoriseResponse>
 
     /** Poll payment status during the PENDING_PAYMENT window (fallback to the PAID push). */
     @GET("api/pump/transactions/{id}")

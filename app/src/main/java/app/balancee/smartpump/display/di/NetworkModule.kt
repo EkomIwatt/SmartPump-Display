@@ -6,6 +6,10 @@ package app.balancee.smartpump.display.di
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.data.network.KeystorePumpCredentialsStore
 import app.balancee.smartpump.display.data.network.PersistentDeviceIdProvider
+import app.balancee.smartpump.display.data.network.ProbeClock
+import app.balancee.smartpump.display.data.network.ProbeClockOffset
+import app.balancee.smartpump.display.data.network.ProbeCaptureInterceptor
+import app.balancee.smartpump.display.data.network.ProbeResponseRecorder
 import app.balancee.smartpump.display.data.network.PumpApiService
 import app.balancee.smartpump.display.data.network.PumpLoggingInterceptor
 import app.balancee.smartpump.display.data.network.PumpSigningInterceptor
@@ -55,11 +59,20 @@ object NetworkModule {
     fun provideSigningInterceptor(
         credentialsStore: PumpCredentialsStore,
         clock: Clock,
-    ): PumpSigningInterceptor = PumpSigningInterceptor(credentialsStore, clock)
+        probeOffset: ProbeClockOffset,
+    ): PumpSigningInterceptor =
+        // ProbeClock, not the bare clock: the debug probe panel can shift request signing into the
+        // past to see what a stale timestamp actually returns (#15). The shift reaches signing and
+        // nothing else — audit rows, receipts and the fuel log keep the real clock — and
+        // ProbeClockOffset.set() is inert in release.
+        PumpSigningInterceptor(credentialsStore, ProbeClock(clock, probeOffset))
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(signing: PumpSigningInterceptor): OkHttpClient {
+    fun provideOkHttpClient(
+        signing: PumpSigningInterceptor,
+        recorder: ProbeResponseRecorder,
+    ): OkHttpClient {
         // Never print credential material, even in debug logs. PumpLoggingInterceptor redacts the
         // credential HEADERS and — the part plain redactHeader() cannot do — withholds the BODY of
         // /api/pump/activate, which is where apiKey and signingSecret actually arrive (TODO #12).
@@ -67,6 +80,11 @@ object NetworkModule {
         return OkHttpClient.Builder()
             .addInterceptor(signing)   // signs first…
             .addInterceptor(logging)   // …so the log shows the final signed request
+            // Keeps the literal response bytes of body-safe calls for the API probe panel (TODO
+            // #32). Debug-only, and it reuses the logging interceptor's allowlist, so /activate —
+            // the one response carrying apiKey and signingSecret — is excluded by the very same
+            // predicate that keeps it out of the log (#12).
+            .addInterceptor(ProbeCaptureInterceptor(recorder, enabled = BuildConfig.DEBUG))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)

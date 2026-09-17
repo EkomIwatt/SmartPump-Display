@@ -8,6 +8,15 @@
     <!-- Keep screen on — kiosk tablet is always-on -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!--
+      Balancee Pump API. Added 2026-09-16, the first time the app ever tried to reach a real
+      server: every request before that was MockWebServer on the JVM, where Android's permission
+      model does not exist, so a network layer built in July and audited in August had never once
+      been able to open a socket. Activation crashed with
+      `SecurityException: Permission denied (missing INTERNET permission?)` at DNS lookup.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".SmartPumpApplication"
         android:allowBackup="false"

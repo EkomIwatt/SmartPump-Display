@@ -1353,3 +1353,225 @@ has to exist before the code, whichever code it is, is worth spending.
 **Next:**
 Send the dev-code ask. Meanwhile build the debug-only API probe panel that drives the four uncalled
 client methods, so that whenever a usable code lands the whole of #32 can be run in one sitting.
+
+---
+
+### Phase 9d-1 — the gate gets a driver: API probe panel + a build that can reach production
+**Date:** 2026-09-16
+**Status:** done (built, verified green; not yet run on the tablet)
+**Commit(s):** `7e1e548` on `feature/api-probe-panel`
+
+**Summary (plain language):**
+The activation code we were given belongs to the live system, and until today nothing we could
+install on a tablet was able to talk to the live system at all. There is now a third version of the
+app that does — it installs alongside the other two, keeps its own login to the server, and can be
+removed without disturbing them.
+
+It also has a new panel, visible only in test builds and only behind the attendant PIN, that lets
+someone press a button and ask the server a question through exactly the same code the real app uses.
+That last part is the point: testing with a separate script would prove that the script works, not
+that the app does. The panel shows the server's answer word for word, not our tidied-up version of
+it, and can save it to a file that can be copied off the tablet.
+
+One deliberate piece of unhelpfulness: if the server answers "OK" but we understood none of it, the
+panel says so in amber rather than showing a green tick. That exact situation — everything looking
+fine while the app understood nothing — is the bug that went unnoticed for two months in July.
+
+**Technical notes:**
+- **`debugProd` build type:** `initWith(debug)`, `applicationIdSuffix = ".prod"`, base URL
+  `https://api.balancee.app/`. Mock hardware, so the USB port stays free for `adb` — the constraint
+  that made 7h's bench session so painful. **Not a parallel-run candidate:** it is a debug build with
+  everything `V1_BLOCKERS.md` says disqualifies one (self-seeding config, debug hotspot).
+- **Chose a variant over a `-P` gradle property on `debug`.** The property is fewer lines and fails
+  silently: the next build without the flag points production credentials at dev with nothing on
+  screen saying so. A separate applicationId also isolates credentials and `deviceId`.
+- **`ProbeCaptureInterceptor` + `ProbeResponseRecorder`** (`data/network/ProbeCapture.kt`): peeks
+  body-safe responses into a bounded in-memory list. **Reuses
+  `PumpLoggingInterceptor.bodyLoggingAllowed()`** instead of a second allowlist — one predicate, one
+  place to be wrong, and `/activate` is already deliberately absent from it (#12). `peekBody`, never
+  `body`, so Retrofit still receives the response: an instrument that changed the measurement would
+  break every call while the panel looked healthy. Tested both ways round.
+- **`ProbeCaptureFormat`**: plain text, not JSON — wrapping bodies in a JSON document would escape
+  them, and the file exists to preserve bytes. Every file names its server, because this project now
+  holds fixtures from dev and an activation code for production.
+- **`toConfigSummary()`** is a pure function so the judgement is unit-testable without a VM, a server
+  or a device. The case it exists for: `PumpConfigResponse.prices` defaults to `emptyMap()`, so a
+  renamed server field parses cleanly into nothing → reported as **caution**, pointing at the raw
+  bytes, not as success.
+- **Not built, deliberately:** #32 steps 3–7 (`/authorise`, amount mismatch, decimal amount, status
+  poll, upload). They create transactions; the only code we hold is for production.
+- **Runbook:** `docs/journal/GATE_32_RUNBOOK.md` — install, activate, verify against the dashboard's
+  Device ID column, restart to prove persistence, capture `/config`, `adb pull`.
+- Verified: JVM **254 tests / 30 classes** green (was 232 / 27); `compileDebugProdKotlin`,
+  `compileDebugRealHwKotlin` and `lintDebug` clean, no lint findings in the new files.
+- ⚠️ **Design-authority flag:** no probe/settings screen exists in `docs/Strict design screens/`.
+  Built from existing components and tokens, like the activation and error screens before it.
+
+**Next:**
+Run the runbook on the tablet against `SN-TEST-001`. Stage 9d-2 (the transaction-creating steps) only
+once it is settled which server may be dirtied — see the ask in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
+
+---
+
+### The activation gate — steps 1 and 2 run on the tablet
+**Date:** 2026-09-16
+**Status:** partial (steps 1 and 2 passed; 3–7 not built)
+**Commit(s):** `ad838f8` (two defects fixed), `d2ace9f` (capture), `1c3dc26` (DTO rebuilt)
+
+**Summary (plain language):**
+The pump is activated. It is registered with Balanceè, it kept its keys through a force-stop, and it
+has successfully asked the server a question and been answered. That is the first time this app has
+ever talked to a real server in its life.
+
+Getting there took two fixes, both found by actually running it. The app had never been given
+permission to use the internet — a thing no test could have caught, because the tests run on a
+computer rather than on Android, where that permission does not exist. And the box you type the
+activation code into was silently changing what you typed: it forced capitals and threw away
+punctuation, so the correct code became a different code before it was sent.
+
+Then the useful part. The server's answer did not match what we had been building against **at all** —
+not a renamed field, a different idea entirely. We had modelled a price list for several fuels; the
+server describes one pump with one fuel and one price. Our version had a default value, so the wrong
+shape did not fail, it quietly said "this pump sells nothing" and everything above it would have
+believed that. It has been rebuilt from the bytes the server actually sent.
+
+The answer also settles two of the questions we were about to send to the backend team — one of them
+the one we had marked as most important and most urgent.
+
+**Technical notes:**
+- **Step 1 passed.** Activated on production against `SN-TEST-001`. `pumpId`
+  `3727aebf-3c77-4180-a818-4254cbeeae72`; `deviceId` `ae2b7a83-…`, matching the dashboard's Device ID
+  column — the echo check in `PumpActivationRepositoryImpl` passing against an independent source.
+  Credentials survived a force-stop and relaunch.
+- **Defect 1 — `android.permission.INTERNET` was never declared.** Not in main, not in the debug
+  overlay. Crash: `SecurityException: Permission denied (missing INTERNET permission?)` at
+  `Inet6AddressImpl.lookupHostByName`, on the OkHttp dispatcher. Invisible to 254 JVM tests because
+  MockWebServer runs off-device. **The code was not spent** — nothing left the device.
+- **Defect 2 — `setCode` uppercased and filtered the code**, reasoning from the Reference's uppercase
+  examples. The dashboard issues mixed case. It mangled silently, so the field looked right. The test
+  asserting the old behaviour is reversed, not deleted.
+- **`GET /config` returned 200**, and the payload bears no resemblance to `PumpConfigResponse`:
+  `{"pumpId","stationName","fuelType","pricePerUnit":1490,"updatedAt"}` — one pump, one fuel, one
+  price. No `prices` map. Captured verbatim at `docs/api-probes/2026-09-16-prod-config/` and rebuilt
+  from there with **nothing defaulted**, so the next shape mismatch is a loud
+  `ApiError.Serialization` rather than a silent zero.
+- **The probe panel's "zero prices parsed" caution is what made it visible**, and it is now removed as
+  impossible by construction. It existed for one day and paid for itself.
+- **Two asks are now obsolete before sending.** `BOSS_CONFIRMATIONS_DRAFT.md` item 1 — "nothing in the
+  API tells a pump what it sells or what to charge", marked highest and said to set the date — is
+  **built and deployed**: `/config` returns `fuelType`, `pricePerUnit` and `stationName`. And the
+  GET-signing question in item 3 is answered by the 200 itself: `timestamp + "." + ""` is verified.
+- **`pricePerUnit: 1490` is naira by inference**, not by contract — corroborating TODO #17, which was
+  our own call. #18c still deserves its one line.
+- **New #42:** a `RuntimeException` in the OkHttp chain kills the process (AsyncCall rethrows after
+  `onFailure`), which is how a missing permission became a crash instead of an error report.
+- **Bench note:** logcat **is** usable on this tablet when the Arduino is not attached —
+  `adb logcat -b crash -d` is how defect 1 was diagnosed. 7h's note applies only to the USB-host case.
+  Also: Git Bash rewrites a leading `/` in an `adb pull` path; prefix `MSYS_NO_PATHCONV=1`.
+- JVM **260 tests / 30 classes** green.
+
+**Next:**
+Steps 3–7 need stage 9d-2. Step 6's other half (clock skew, #15) and step 5 (status poll) need no
+transaction and can run as soon as they are built; steps 3, 4 and 7 create Paystack initialisations.
+
+---
+
+### Phase 9d-2 — the rest of the gate has buttons
+**Date:** 2026-09-16
+**Status:** done (built and green; unrun on the tablet)
+**Commit(s):** see branch `feature/api-probe-panel`
+
+**Summary (plain language):**
+Every remaining question we need to ask the server now has a button. Three of them are safe to press
+at any time — they only ask. The rest create real records, including a real payment request, so they
+sit behind a switch that has to be turned on deliberately and turns itself off again every time the
+screen is rebuilt.
+
+One of those questions answered itself before any button existed. The pump's price is ₦1,490 per
+litre, and the app can only send whole naira. Multiply 1,490 by most real litre figures and the
+answer is not a whole number: 2.35 litres is ₦3,501.50. The server checks that the amount matches
+litres times price **exactly**, so rounding it is not an approximation, it is a rejection. Any
+fill-up — where the customer stops when the tank is full, not on a tidy figure — will hit this. The
+panel now does that arithmetic before sending and says so instead of sending something that cannot
+work.
+
+**Technical notes:**
+- **Read-only probes:** `GET /transactions/{id}` (any id — an authenticated not-found envelope has
+  never been seen either), and a **clock-skew probe** that signs a `/config` ten minutes in the past.
+  The second is the only way to observe #15's strings: the server validates the API key first, so
+  from outside, a stale timestamp and a missing signature look identical.
+- **`ProbeClock` / `ProbeClockOffset`** apply the skew to **request signing only** — audit rows,
+  receipts and the fuel log keep the real clock — and `set()` is inert outside debug builds.
+  `shiftedBy` restores the offset in a `finally`, tested including the throwing path: a signing clock
+  left in the past would make every later request fail in a way that looks like a server fault.
+- **Write probes** (`/authorise`, `+1 naira`, decimal, upload) are gated on a switch that is not
+  remembered. `/authorise` returns a Paystack checkout URL, which on production is a real
+  initialisation.
+- **`AmountPlan` + `amountFor()`** is the substantive piece: `Exact` or `Fractional`, with a
+  tolerance rather than an equality test, because 1490 × 2.3 is 3426.9999999999995 in binary floating
+  point and a probe that called that fractional would be reporting its own arithmetic.
+- **`authoriseRaw(JsonObject)`** on the service and client, used only by the decimal probe: `amount`
+  is a `Long` on `AuthoriseRequest`, so the client cannot otherwise ask the one question whose answer
+  decides whether that type is right. It still goes through signing, the envelope and error mapping —
+  only the request DTO is bypassed, which is the thing under test.
+- **Summaries read backwards where the test does.** A refused stale timestamp and a refused
+  wrong-amount authorise are reported as **successes**; an *accepted* wrong amount is a caution,
+  because the exactness the Reference describes would not be enforced. Tested, since a composable
+  `when` is not.
+- Verified: JVM **283 tests / 32 classes** green (was 260 / 30); `compileDebugRealHwKotlin` and
+  `lintDebug` clean. `installDebugProd` failed only because the tablet was unplugged.
+
+**Next:**
+Reconnect the tablet, install, and run the read-only probes — they need no reply from anyone. The
+authorise steps wait on the Paystack question in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
+
+---
+
+### The gate — all seven steps, ending with a real paid transaction
+**Date:** 2026-09-16 / 17
+**Status:** done
+**Commit(s):** `e5f4ebe`, `b67a21c`, `8757996`, `868820a` on `feature/api-probe-panel`
+
+**Summary (plain language):**
+The app has now done a complete, real transaction with Balanceè's live system: it asked to start a
+sale, a customer (us) paid ₦149 at the Paystack checkout, the app noticed the payment had landed, and
+it reported the fuel dispensed. Every step worked. This is the thing that has been blocked since July,
+and it cost a hundred and forty-nine naira.
+
+The failures were as valuable as the successes. When we tried to report fuel for a sale nobody had
+paid for, the server refused — it will not record fuel against an unpaid transaction, and that
+protection is on their side, not ours. When we sent a deliberately wrong amount, it refused that too,
+with a proper error code rather than a sentence we would have to pattern-match.
+
+One thing to fix later: a dispense can be recorded once and never corrected. Uploading a corrected
+figure returns "recorded" and quietly changes nothing, so a wrong number could stick while everything
+in our logs says it went through. Two short questions have gone to the backend about that.
+
+**Technical notes:**
+- **Status set observed — `PENDING_PAYMENT` → `PAID` → `DISPENSED`**, the three strings the DTOs
+  guessed in July. **#18d closed.** Captures: `docs/api-probes/2026-09-16-prod-gate/`.
+- **Stable error codes exist on business failures** — `AMOUNT_MISMATCH`, `PAYMENT_NOT_CONFIRMED`,
+  `TRANSACTION_NOT_FOUND`, `INVALID_REQUEST` — and on **no** authentication failure. A rule, not an
+  inconsistency: match business errors on `code`, identify the auth family by 401. **#18f closed.**
+- **#15 closed:** a `/config` signed ten minutes in the past returns
+  `401 "Request timestamp is not fresh"` — the exact string the audit predicted, so the error copy
+  already drafted stands.
+- **#18c closed:** a decimal `amount` is accepted (3501.5 for 2.35 L), and the exact
+  `amount == litres × price` check passes on it. **#44:** `amount` must stop being a `Long`.
+- **#47 closed:** upload does not validate `actualLitresDispensed` against `expectedLitres`, so
+  partial dispenses, early ends (OQ #22) and 7h's recovered pulses can all be reported.
+- **#48 — recorded, then corrected the next morning.** The second upload's 200 was first written up as
+  "last-write-wins". The dashboard showed the record still at 0.1 L, so it is the opposite: first
+  write wins and the repeat is acknowledged and discarded. The 200 means *accepted*, not *stored*,
+  and `actualLitresDispensed` is not echoed anywhere (**#46**). A status code is not an observation of
+  state — the correction is kept in the file rather than tidied away, because that is the mistake.
+- **#49:** the dashboard surfaces uploaded dispenses per pump with their litres. That is the
+  counterpart the **14-day parallel run** must reconcile against, and nobody had confirmed it existed.
+- **#43:** the QR expiry is **20 minutes**, measured five times, against three places in the app that
+  say five. `TransactionState.kt:50` is the one that costs money.
+- Two questions to the backend (correction-or-refusal, and echoing the litres) are drafted in
+  `BOSS_CONFIRMATIONS_DRAFT.md`. Nothing is blocked on either.
+
+**Next:**
+Everything left on the API line is ours: **#43–#48**, all of which belong with the payment flows
+(**#8**). The branch is thirteen commits, green, and unmerged.

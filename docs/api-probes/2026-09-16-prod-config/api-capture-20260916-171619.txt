@@ -1,0 +1,9 @@
+# SmartPump API capture
+# server:     https://api.balancee.app/
+# written:    2026-09-16T17:16:19.965265Z
+# responses:  1 (newest first)
+# NOTE: bodies are verbatim. Build fixtures from these bytes, not from a restatement of them (TODO #11).
+
+---- GET /api/pump/config → 200
+---- at 2026-09-16T17:15:36.550471Z
+{"status":true,"message":"Pump config","data":{"pumpId":"3727aebf-3c77-4180-a818-4254cbeeae72","stationName":"Kachi","fuelType":"PETROL","pricePerUnit":1490,"updatedAt":"2026-09-15T09:44:39.187Z"}}
