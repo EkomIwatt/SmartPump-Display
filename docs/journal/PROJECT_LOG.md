@@ -13,8 +13,10 @@ not by omission:** push has no server side (no device-token endpoint exists) and
 Firebase in the project), and OQ #8 already rules push a freshness optimisation with the poll
 carrying the correctness guarantee.
 
-**10a is done** (`70ad358`). JVM **297 tests / 34 classes** green; `compileDebugRealHwKotlin` and
-`lintDebug` clean.
+**10a and 10b are done** (`70ad358`, `4a87877`). JVM **306 tests / 35 classes** green;
+`compileDebugRealHwKotlin` and `lintDebug` clean. 10b turned up a product decision 10c has to make:
+pre-pay's tendered amount and the exact product the server checks against **disagree** whenever the
+price does not divide the amount evenly — pinned in a test rather than left to be rediscovered.
 
 ---
 
@@ -1542,6 +1544,69 @@ work.
 **Next:**
 Reconnect the tablet, install, and run the read-only probes — they need no reply from anyone. The
 authorise steps wait on the Paystack question in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
+
+---
+
+### Phase 10b — money stops being an integer, and the wire form is the captured bytes
+**Date:** 2026-09-17
+**Status:** done
+**Commit(s):** `4a87877` on `feature/phase-10-payments`
+
+**Summary (plain language):**
+The app could only tell the server whole naira. Almost no real sale is a whole number of naira — at
+₦1,490 a litre, 2.35 litres is ₦3,501.50 — and the server does not accept "close enough": it checks
+that the money matches the fuel exactly, so a rounded figure is refused outright rather than accepted
+fifty kobo out. Every fill-up would have hit this, because a customer stops when the tank is full,
+not on a tidy number.
+
+So money now goes out as a proper decimal. The awkward part was making sure it goes out looking
+*exactly* like the figure the server already accepted from us, because the app signs the message it
+sends and any difference in how the number is written is a different message.
+
+One thing this turned up that is not a technical problem but a business one, and it needs a decision.
+When a customer pre-pays ₦5,000, the pump rounds *down* the litres it will give them — 3.35 litres,
+which at that price is ₦4,991.50 of fuel. Those two figures are not the same, and the server will
+refuse the sale if we quote it the ₦5,000 the customer actually handed over. Either the customer is
+charged for the fuel they get, or the pump gives them the extra hundredth of a litre. It is written
+down as a test so it cannot be forgotten, and the next piece has to answer it.
+
+**Technical notes:**
+- **`BigDecimal`, not `Double`** — confirmed by the user. The server's check is an **equality**,
+  which is the exact circumstance under which binary floating point rots: 1490 × 2.3 is
+  3426.9999999999995 in a `Double`, a value that fails the check while reading as correct in every
+  log and on every screen. There is a test asserting that drift, for contrast.
+- **`NairaAmountSerializer` emits a bare JSON number, in plain notation, with trailing zeros
+  stripped.** All three properties are load-bearing, and each has a test:
+  - *bare* — the signature is computed over these exact bytes, so `"3501.5"` is a different request
+    from `3501.5`, not a cosmetic variation;
+  - *plain notation* — `stripTrailingZeros()` alone renders 3500.00 as `3.5E+3`, which is valid JSON
+    and absurd in a payment;
+  - *stripped* — so a whole amount goes out as `2980`, matching every integer amount in the
+    Reference and in the gate captures, rather than `2980.00`.
+- **`nairaFromKobo(kobo)`** sets the scale rather than dividing, so no rounding mode is involved and
+  none is needed. **`nairaForSale(litres, koboPerLitre)`** computes the server's own check the way
+  the server computes it, and is what an `/authorise` body should be built from.
+- **Fixtures are the captured bytes**, not invented ones: `docs/api-probes/2026-09-16-prod-gate/`.
+- **A now-false refusal removed from the probe.** Its happy path used to *refuse to send* a
+  fractional amount, which is how #18c was first answered — correct then, wrong now. `AmountPlan`
+  survives as a **label** telling the operator which case a litre figure lands on, which is still
+  worth seeing, but it no longer gates what can be sent. `authoriseRaw` is kept with its comment
+  corrected: it exists to ask what the **server** does with a body we would never build, so routing
+  it through the DTO would only re-test our own serializer.
+- **The finding, and why it is 10c's:** pre-pay quotes litres floored to 2dp
+  (`DeviceConfig.litresCutoff`), so at ₦1490/L a ₦5,000 pre-pay is 3.35 L — `nairaForSale` = ₦4,991.50
+  against `nairaFromKobo` = ₦5,000.00. The exact check refuses that sale. **This bites at a
+  whole-naira price**, which makes it a different and more common problem than the sub-naira
+  precision question #44 originally anticipated. Test:
+  `pre-pay amount and the exact product disagree when the price does not divide evenly`.
+- Verified: JVM **306 tests / 35 classes** green (was 297 / 34), 9 new; `compileDebugRealHwKotlin`
+  and `lintDebug` clean. No bench gate — nothing device-specific.
+
+**Next:**
+**10c** — `/config` → `/authorise` → a QR that can actually be paid, carrying **#43** (read
+`expiresAt`, do not assume 5 minutes) and **#46** (one response type behind the three names). It must
+also answer the pre-pay amount question above, and the `success.amountKobo` question 10a left at its
+call site.
 
 ---
 
