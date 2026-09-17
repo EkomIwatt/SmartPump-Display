@@ -1,6 +1,24 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-15, later (OQ #22 built; signing cutover decided)
+## Current status — 2026-09-17 (the gate's docs debt paid; Phase 10 planned and started)
+
+**`main` is pushed** — `origin/main` = `84d6f49`, carrying the whole gate. The docs the gate made
+stale are corrected: `V1_BLOCKERS.md` §4 no longer claims the API line is blocked on the backend,
+and TODO #8 no longer claims to be blocked by #3/#4/#6. All three were stale — #3 and #4 shipped in
+July, and the gate answered #6's blocking items by observation rather than by reply.
+
+**Phase 10 (payment feature flows, #8) is planned and underway** on `feature/phase-10-payments`.
+Seven sub-deliverables, 10a–10g, ending in a tablet gate against production. **Poll-only by design,
+not by omission:** push has no server side (no device-token endpoint exists) and no client side (no
+Firebase in the project), and OQ #8 already rules push a freshness optimisation with the poll
+carrying the correctness guarantee.
+
+**10a is done** (`70ad358`). JVM **297 tests / 34 classes** green; `compileDebugRealHwKotlin` and
+`lintDebug` clean.
+
+---
+
+## Previous status — 2026-09-15, later (OQ #22 built; signing cutover decided)
 
 **The last open decision holding up written code is settled and built.** OQ #22 went with Option 1:
 an attendant "End sale early" button that ends a fixed sale which will not reach its target. Checking
@@ -1524,6 +1542,59 @@ work.
 **Next:**
 Reconnect the tablet, install, and run the read-only probes — they need no reply from anyone. The
 authorise steps wait on the Paystack question in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
+
+---
+
+### Phase 10a — the payment seam grows the fields the real backend needs
+**Date:** 2026-09-17
+**Status:** done
+**Commit(s):** `70ad358` on `feature/phase-10-payments`
+
+**Summary (plain language):**
+Groundwork, and deliberately nothing more. The part of the app that starts a payment could only be
+told two things — how the customer is paying and how much — and the real Balanceeè system needs to be
+told a third: how much fuel that money buys. It also hands back three things the app had nowhere to
+put, the most important being the web address the customer's QR code has to point at.
+
+So this widens the connection between the two halves without plugging the real one in yet. Everything
+still runs on the pretend payment system, every existing test passes untouched, and the app behaves
+exactly as it did this morning. The point of doing it separately is that the next piece — the real
+thing — is easier to check when its changes are not tangled up with this renaming.
+
+One detail worth recording because it is a money question rather than a plumbing one: the amount of
+fuel the app promises the server is now guaranteed to be the same figure the pump actually stops at.
+The server checks that the money and the litres match **exactly**, so if those two numbers were
+worked out separately they would eventually disagree, and a customer standing at the pump would have
+their sale refused for no reason they could see.
+
+**Technical notes:**
+- **`PaymentRequest(method, amountKobo, expectedLitres)`** replaces the two positional arguments.
+  **`pumpId` and `fuelType` are deliberately absent** — they are properties of the *device*, not of
+  the sale (credentials and `DeviceConfig` respectively), so 10c's processor sources them itself
+  rather than four screens each remembering facts about the pump they run on.
+- **`PaymentResult.Pending` gains `checkoutUrl`, `expiresAt`, `paymentReference`**; `Success` gains
+  `paymentReference`, without which 10f's upload cannot quote one. All nullable: USSD has no
+  checkout URL, and a mock has no real ones.
+- **`litresFor(amountKobo)` extracted in `CustomerViewModel`.** Two consumers that must not
+  disagree: the cutoff the pump enforces, and the `expectedLitres` quoted to `/authorise`. Tested
+  directly — `prepay expectedLitres equals the cutoff the pump will enforce` asserts the quoted
+  figure against `FixedDispensing.litresAuthorised` rather than against a literal.
+- **The fill-up case is the one that is not derived from the amount.** The tank is already full, so
+  `expectedLitres` is the metered figure; deriving it back out of the money would reintroduce exactly
+  the rounding the exact check refuses.
+- **The mock now carries production's measured 20-minute expiry** (**#43**), not the 5 minutes the
+  app assumed in three places, and its checkout URL is on a `.invalid` host — a mock QR scanned by
+  accident on a forecourt must fail rather than open a real checkout page.
+- **Left open on purpose, with a comment at the site:** `onPaymentSuccess` derives litres from
+  `success.amountKobo` while its fallback uses the requested `amountKobo`. Identical under the mock;
+  with a real backend one of them has been round-tripped. **10c/10d decides which is authoritative**
+  — folding them together now would have buried the question inside a refactor.
+- Verified: JVM **297 tests / 34 classes** green (was 287 / 32), 10 new across two new classes;
+  `compileDebugRealHwKotlin` and `lintDebug` clean. No bench gate — nothing here is device-specific.
+
+**Next:**
+**10b** — `AuthoriseRequest.amount` stops being a `Long`. `BigDecimal` confirmed by the user
+2026-09-17; fixtures are the gate's captured bytes (3501.5 for 2.35 L at ₦1490).
 
 ---
 
