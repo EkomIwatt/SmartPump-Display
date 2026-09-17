@@ -795,6 +795,26 @@ captures are the test fixtures.
     the ₦5,000 the customer actually handed over is a **refused sale**, not a 50-kobo discrepancy.
     Charge for the litres, or quote unfloored litres: a product decision, and **10c must make it**.
     Test: `pre-pay amount and the exact product disagree when the price does not divide evenly`.
+  - **→ The decision is made, and the remaining half is being MEASURED rather than guessed
+    (2026-09-17).** Discussed with the user, who pushed back on tuning anything to ₦1,490 — rightly.
+    - **Quoting the tendered amount cannot be built.** ₦5,000 ÷ ₦1,490 = 3.35570469798657718…, a
+      non-terminating decimal. There is no unfloored litre figure to send, and no truncation of it
+      multiplies back to exactly ₦5,000.
+    - **It is also the option that is *fragile* to price changes, which inverts the argument for
+      it.** Whether the quotient terminates depends on the price's prime factors: at ₦1,250 a
+      ₦5,000 pre-pay is exactly 4 L and everything works; at ₦1,490 it never terminates and the sale
+      is refused. Same code, different month's price, different outcome. **Deriving the amount from
+      the litres satisfies the exact check at every price, forever** — it computes the server's own
+      equation instead of hoping it comes out even. **DECIDED: never send the tendered amount.**
+    - **What is left is one measurement:** how many decimal places of litres the server accepts. At
+      2dp the customer's shortfall is up to `0.01 × price` (≈₦14.90 today, ~0.3% of a ₦5,000 sale);
+      at 4dp it is under a kobo. We have only ever *observed* one decimal place accepted (`3501.5`).
+      **Built: the `Precision` probe** (`AuthoriseVariant.Precision`) sends a 4dp litre figure and
+      its exact 4dp product, models a realistic pre-pay, and reports the shortfall at both scales.
+      A refusal is reported as a **caution, not a pass** — it is half the answer, not a failed test.
+    - Unaffected either way: what the pump physically stops at (a pulse boundary, and the real
+      K-factor will not be round) — **#47** confirmed the upload accepts whatever actually flowed.
+      The authorise is a quote; the upload reports reality.
   - Verified: JVM **306 tests / 35 classes** green (was 297 / 34); `compileDebugRealHwKotlin` and
     `lintDebug` clean.
 - [ ] **10c — `BalanceePaymentProcessor`: `/config` → `/authorise` → a QR that can actually be paid.**

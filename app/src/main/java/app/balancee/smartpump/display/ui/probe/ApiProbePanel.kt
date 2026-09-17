@@ -230,6 +230,15 @@ internal fun ApiProbePanelContent(
                     modifier = Modifier.weight(1f),
                 )
             }
+            Spacer(Modifier.height(8.dp))
+            BalanceeButton(
+                label = "…4dp litres (pre-pay precision)",
+                onClick = { actions.onProbeAuthorise(AuthoriseVariant.Precision) },
+                variant = BalanceeButtonVariant.Secondary,
+                enabled = state.canWrite,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            PrecisionLine(state = state)
 
             Spacer(Modifier.height(8.dp))
             BalanceeButton(
@@ -361,6 +370,26 @@ private fun WritesGate(state: ApiProbeUiState, onAcknowledge: (Boolean) -> Unit)
  * itself. The server checks `amount == litres × price` exactly, so a fractional product is not a
  * rounding inconvenience, it is a sale that cannot be authorised.
  */
+@Composable
+private fun PrecisionLine(state: ApiProbeUiState) {
+    val config = state.config ?: return
+    val litres = state.litresValue ?: return
+    val koboPerLitre = config.pricePerUnit * 100
+    val tendered = tenderedFor(litres, koboPerLitre)
+    val coarse = precisionQuote(tendered, koboPerLitre, scale = 2)
+    val fine = precisionQuote(tendered, koboPerLitre, scale = 4)
+
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = "Models a pre-pay of ₦$tendered. At 2dp: ${coarse.litres} L for ₦${coarse.amount} " +
+            "— customer loses ₦${coarse.shortfall}. At 4dp: ${fine.litres} L for ₦${fine.amount} " +
+            "— loses ₦${fine.shortfall}. The button sends the 4dp pair; the question is whether " +
+            "the server takes it.",
+        style = MaterialTheme.typography.bodySmall,
+        color = TextTertiary,
+    )
+}
+
 @Composable
 private fun AmountLine(state: ApiProbeUiState) {
     when (val plan = state.amountPlan) {
