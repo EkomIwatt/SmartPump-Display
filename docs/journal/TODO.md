@@ -392,7 +392,9 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     factory installs an `UncaughtExceptionHandler`. The call still fails, the coroutine still gets
     its `IOException`, but the process survives. Small, and testable by throwing from a stub
     interceptor.
-- [ ] **43. The QR expiry is 20 minutes, not 5 — three places in the app say otherwise.**
+- [x] **43. The QR expiry is 20 minutes, not 5 — FIXED 2026-09-18 in phase 10c.** The countdown
+  reads the server's `expiresAt`; the two remaining “five minutes” are the signing freshness window,
+  which is a different thing and is disambiguated in place. _(original entry)_
   Measured four times on 2026-09-16, always 20 min 1 s between the authorise and its `expiresAt`
   (`docs/api-probes/2026-09-16-prod-gate/`).
   - `TransactionState.kt:50` — *"5-min expiry, then auto-cancel back to Idle"*. **This is the one that
@@ -448,7 +450,8 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - **Unrelated but adjacent:** this endpoint cannot be the home for **cash** sales either — it demands
     a `paymentReference` only `/authorise` issues. `V1_BLOCKERS.md` already says a cash sale has
     nothing to upload; this is the server agreeing.
-- [ ] **46. Three DTOs are three partial views of one resource.** Observed 2026-09-16 (§9 of
+- [x] **46. Three DTOs are three partial views of one resource — FIXED 2026-09-18 in phase 10c.**
+  One `PumpTransactionResponse`, three typealiases. _(original entry)_ Observed 2026-09-16 (§9 of
   `docs/api-probes/2026-09-16-prod-gate/`): `/authorise`, `/transactions/{id}` and
   `/transactions/upload` all return the **same object** — `{status, transactionId, paymentReference,
   authorizationUrl, expiresAt}` — differing only in `status` and the envelope's `message`.
@@ -833,7 +836,31 @@ captures are the test fixtures.
     - No further sitting needed: 3dp is strictly coarser than the 4dp just accepted.
   - Verified: JVM **306 tests / 35 classes** green (was 297 / 34); `compileDebugRealHwKotlin` and
     `lintDebug` clean.
-- [ ] **10c — `BalanceePaymentProcessor`: `/config` → `/authorise` → a QR that can actually be paid.**
+- [x] **10c — `/config` → `/authorise` → a QR that can actually be paid. DONE 2026-09-17/18**
+  (`96b5241`, `ef17770`).
+  - **#46 done:** one `PumpTransactionResponse` behind three typealiases, verified byte-for-byte
+    against the gate captures. `authorizationUrl` and `expiresAt` had been parsing away silently on
+    every poll and upload. Making the payment fields nullable immediately caught a real call site.
+  - **`SaleQuote` done:** the litre step is derived from the price
+    (`10_000 / gcd(price, 10_000)`) — 0.001 L at ₦1,490, 0.01 L at ₦1,491, 0.02 L at ₦870.50. **A
+    first version using a plain decimal scale was wrong** and would have produced uncollectable
+    amounts at a sub-naira price; invariants are now checked across five prices and six tenders.
+  - **The QR is real.** It encoded `balancee://pay?txn=…`, a scheme no scanner resolves and no bank
+    honours. Now the Paystack checkout URL, with the reference shown instead when there is none.
+  - **#43 done:** the countdown runs on the server's `expiresAt`; a restored sale resumes the
+    persisted deadline; a past deadline ends the sale. `PumpRequestSigner`'s five minutes is
+    disambiguated, not changed — different window, still unmeasured.
+  - **`PaymentRequest` gains `SaleBasis`** so a re-pricing processor knows which end is fixed.
+  - **NOT bound in DI** — 10d flips it once the poll exists.
+  - Verified: JVM **341 tests / 39 classes** green; `compileDebugRealHwKotlin` + `lintDebug` clean.
+  - **⚠ New, for the board:** for a `Dispensed` basis the fuel is already in the tank, so a price
+    change between the nozzle clicking off and the QR appearing changes what is owed — and the
+    customer watched the old figure climb on the display. Unavoidable from the processor (the server
+    checks against its own price), so it needs a **policy**: refuse, warn the attendant, or honour
+    the struck price via a backend change. Rare; not a blocker; must not be discovered in the field.
+
+  _(original entry)_
+- [x] **10c — `BalanceePaymentProcessor`: `/config` → `/authorise` → a QR that can actually be paid.**
   Fetch-before-authorise is the correctness guarantee (OQ #8), then authorise, then emit `Pending`
   carrying the real checkout URL and the server's `expiresAt`.
   - **The QR today renders a fabricated payload** — `balancee://pay?txn=…`,

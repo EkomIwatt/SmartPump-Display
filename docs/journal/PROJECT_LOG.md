@@ -13,10 +13,14 @@ not by omission:** push has no server side (no device-token endpoint exists) and
 Firebase in the project), and OQ #8 already rules push a freshness optimisation with the poll
 carrying the correctness guarantee.
 
-**10a and 10b are done** (`70ad358`, `4a87877`). JVM **306 tests / 35 classes** green;
-`compileDebugRealHwKotlin` and `lintDebug` clean. 10b turned up a product decision 10c has to make:
-pre-pay's tendered amount and the exact product the server checks against **disagree** whenever the
-price does not divide the amount evenly — pinned in a test rather than left to be rediscovered.
+**10a, 10b and 10c are done** (`70ad358`, `4a87877`, `ea6037b`, `96b5241`, `ef17770`). JVM **341
+tests / 39 classes** green; `compileDebugRealHwKotlin` and `lintDebug` clean.
+
+**The QR can be paid now.** It encoded a payload this app invented, so the artefact looked right and
+could not take money. That, **#43** (the expiry is the server's, 20 minutes, not a 5-minute constant)
+and **#46** (three DTOs were three partial views of one object) are all closed.
+
+**The processor is built but NOT bound in DI** — the terminal result needs the poll, which is 10d.
 
 ---
 
@@ -1544,6 +1548,73 @@ work.
 **Next:**
 Reconnect the tablet, install, and run the read-only probes — they need no reply from anyone. The
 authorise steps wait on the Paystack question in `BOSS_CONFIRMATIONS_DRAFT.md` item 4.
+
+---
+
+### Phase 10c — the QR stops being decorative
+**Date:** 2026-09-17 / 18
+**Status:** done
+**Commit(s):** `96b5241`, `ef17770` on `feature/phase-10-payments`
+
+**Summary (plain language):**
+Until today the payment screen drew a QR code containing something this app made up. It looked
+entirely correct — right size, right position, scannable — and no phone could have paid it. It now
+contains the Paystack page the server actually issues, and when there is no page to show it says so
+rather than drawing a barcode that leads nowhere. A customer standing in front of a QR that cannot
+work is worse off than one told plainly that something is wrong.
+
+The clock was wrong too, in the expensive direction. The screen gave a customer five minutes to pay
+and then cancelled the sale; the server honours it for twenty. So the pump was abandoning sales that
+were still perfectly good, fifteen minutes early, with the customer standing there. It now uses the
+deadline the server sends, and a sale interrupted by a restart picks up the same deadline rather than
+being handed a fresh one.
+
+Underneath, the thing that decides how much to charge was rebuilt so it cannot produce an amount the
+payment system is unable to collect. **The first version of that was wrong and was caught before it
+ran**: it worked at today's price and would have failed at a price ending in 50 kobo, producing
+amounts with a fraction of a kobo in them.
+
+**Technical notes:**
+- **#46 closed.** One `PumpTransactionResponse` behind three typealiases, verified byte-for-byte
+  across the gate captures rather than on the TODO's say-so. `authorizationUrl` and `expiresAt` had
+  been discarded silently by `ignoreUnknownKeys` on every poll and every upload. Making the payment
+  fields nullable immediately found a real call site — the probe's upload was passing a
+  `paymentReference` that is provably optional, where an empty string would have bought an opaque
+  server refusal in place of a clear "nothing was sent".
+- **`SaleQuote`, and the bug in its first draft.** Three constraints meet: the server's check is an
+  equality, Paystack collects whole kobo, and litres always floor. Quoting litres as `n/10_000`, the
+  kobo amount is integral exactly when `10_000 / gcd(price, 10_000)` divides `n` — so the litre step
+  is **derived from the price**: 0.001 L at ₦1,490, 0.01 L at ₦1,491, 0.02 L at ₦870.50, 0.0002 L at
+  ₦1,250. The draft used a plain decimal scale and fell back to 2dp when none divided, which at
+  ₦870.50 gives 3.35 L × 87,050 = **291,617.5 kobo**. Invariants are now asserted across five prices
+  and six tenders, because a rule that holds at today's price can fail one naira away.
+- **#43 closed.** `TransactionState.PrepayAwaitingPayment` carries `expiresAtEpochMs`, boot resume
+  restores it, and a deadline already past ends the sale instead of counting backwards.
+  `PumpRequestSigner`'s five minutes is **disambiguated rather than changed**: it is the signing
+  freshness window, a different five minutes, and still unmeasured — #15's probe proves only that
+  ten is too old.
+- **`SaleBasis`** was added to `PaymentRequest`. A processor that re-prices against `/config` has to
+  know which end of the sale is nailed down. There is no option to price against the device's own
+  figure: the server checks against **its** price, so a stale one is refused every time.
+- **Not bound in DI, deliberately.** `awaitCancellation()` after the Pending rather than completing
+  the flow — a flow that ended there would look to a collector like a payment that had resolved.
+- **Tested through a real `PumpApiClient`** over a hand-written fake `PumpApiService`, so the
+  envelope unwrapping and error mapping are exercised rather than stubbed past.
+- Verified: JVM **341 tests / 39 classes** green (was 324 / 37); `compileDebugRealHwKotlin` and
+  `lintDebug` clean.
+
+**A consequence named rather than hidden — needs a policy before the field.**
+For a `Dispensed` sale the fuel is already in the tank, so a price change between the nozzle clicking
+off and the QR appearing changes what is owed — and the customer watched the old figure climb on the
+display. The processor cannot avoid it (the server checks against its own price; anything else is a
+refused sale). Options are refuse, warn the attendant, or have the backend honour the struck price.
+Rare, not a blocker, and not something to discover on a forecourt.
+
+**Next:**
+**10d** — PAID by poll, and the boot-resume trap: `CustomerViewModel` currently restarts a
+`process()` call after a restart, which against a real server would **authorise a second sale for a
+customer who has already paid**. The id is ours, so the fix is to resume the poll; it needs tests
+written at it first. 10d also flips the DI binding.
 
 ---
 
