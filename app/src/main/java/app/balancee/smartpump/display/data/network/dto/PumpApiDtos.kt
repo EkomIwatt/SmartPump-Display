@@ -69,28 +69,59 @@ data class AuthoriseRequest(
     @SerialName("fuelType") val fuelType: FuelType,
 )
 
+/**
+ * **One transaction, one shape.** `/authorise`, `GET /transactions/{id}` and
+ * `/transactions/upload` all return the **same object** — verified byte-for-byte across the #32
+ * gate captures, where they differ only in `status` and the envelope's `message`:
+ *
+ * ```
+ * authorise → {"status":"PENDING_PAYMENT","transactionId":…,"paymentReference":"BPM-…",
+ *              "authorizationUrl":"https://checkout.paystack.com/…","expiresAt":…}
+ * poll      → {"status":"PAID",           … same five fields, same values …}
+ * upload    → {"status":"DISPENSED",      … same five fields, same values …}
+ * ```
+ *
+ * TODO **#46**. Three separate types had been modelled, two of them carrying only three fields — so
+ * `authorizationUrl` and `expiresAt` **parsed away silently** under `ignoreUnknownKeys` on every
+ * poll and every upload. The one that mattered is `expiresAt` on a poll: **#43** requires the expiry
+ * countdown to read the server's value rather than a constant, and the poll is exactly where a
+ * running screen would refresh it.
+ *
+ * Kept as one class with three aliases rather than three classes: an alias cannot drift, and a
+ * fourth endpoint returning this shape needs no fourth type.
+ *
+ * **Why these are nullable when all five were observed on all three responses.** Only `status` and
+ * `transactionId` identify the transaction; the rest describe a payment that a future endpoint (a
+ * cash sale, a refund) may legitimately not have. Failing a poll to deserialize would strand a
+ * customer who has already paid, which is a worse outcome than a null the caller must handle — the
+ * opposite trade from `PumpConfigResponse`, where a silent default became a wrong price on every
+ * litre. The two consumers that must not accept null (`authorizationUrl` on an authorise, and
+ * `paymentReference` before an upload) check for it where it matters.
+ */
 @Serializable
-data class AuthoriseResponse(
-    // Expected "PENDING_PAYMENT" on success. Kept as String until the full status set is confirmed.
+data class PumpTransactionResponse(
+    /** Observed set: `PENDING_PAYMENT` → `PAID` → `DISPENSED` (**#18d**, closed at the gate). */
     @SerialName("status") val status: String,
+    /** The id **we** generated and sent, echoed back unchanged. */
     @SerialName("transactionId") val transactionId: String,
-    @SerialName("paymentReference") val paymentReference: String,
-    // Paystack checkout URL — rendered as the on-screen QR.
-    @SerialName("authorizationUrl") val authorizationUrl: String,
-    // ISO-8601; drives the 5-min QR-expiry / poll window.
-    @SerialName("expiresAt") val expiresAt: String,
+    /** The server's own reference (`BPM-…`). `/transactions/upload` requires it. */
+    @SerialName("paymentReference") val paymentReference: String? = null,
+    /** Paystack checkout URL — rendered as the on-screen QR, and the only thing a customer can pay. */
+    @SerialName("authorizationUrl") val authorizationUrl: String? = null,
+    /**
+     * ISO-8601. **Twenty minutes** from the authorise, measured six times across two sittings
+     * (**#43**) — against three places in the app that said five. Read it; never assume it.
+     */
+    @SerialName("expiresAt") val expiresAt: String? = null,
 )
+
+/** The three names the endpoints are described by. All one shape — see [PumpTransactionResponse]. */
+typealias AuthoriseResponse = PumpTransactionResponse
 
 // ---- Payment status: GET /api/pump/transactions/{id} (signed) -------------------------------
 
-/** Polled every ~10s during the PENDING_PAYMENT window as the fallback to the PAID push. */
-@Serializable
-data class TransactionStatusResponse(
-    // e.g. "PENDING_PAYMENT" → "PAID"/"DISPENSED". String until the set is confirmed.
-    @SerialName("status") val status: String,
-    @SerialName("transactionId") val transactionId: String,
-    @SerialName("paymentReference") val paymentReference: String? = null,
-)
+/** Polled during the PENDING_PAYMENT window. The correctness guarantee; push is freshness only. */
+typealias TransactionStatusResponse = PumpTransactionResponse
 
 // ---- Config: GET /api/pump/config (signed) --------------------------------------------------
 
@@ -146,10 +177,9 @@ data class UploadTransactionRequest(
     @SerialName("completedAt") val completedAt: String, // ISO-8601
 )
 
-@Serializable
-data class UploadTransactionResponse(
-    // Expected "DISPENSED".
-    @SerialName("status") val status: String,
-    @SerialName("transactionId") val transactionId: String,
-    @SerialName("paymentReference") val paymentReference: String,
-)
+/**
+ * A `200` here means **accepted**, not **stored** — **#48**. A second upload carrying corrected
+ * litres returns `200 Transaction recorded` and changes nothing; first write wins. Nothing in this
+ * response echoes `actualLitresDispensed`, so the app cannot read its own record back at all.
+ */
+typealias UploadTransactionResponse = PumpTransactionResponse

@@ -338,13 +338,18 @@ class ApiProbeViewModel @Inject constructor(
         val state = _ui.value
         val authorised = state.lastAuthorise ?: return@probe notReadySummary("an /authorise")
         val litres = state.litresValue ?: return@probe notReadySummary("a litres figure")
+        // #46 made this nullable and the compiler found this call site, which is the point: the
+        // endpoint demands a paymentReference and only /authorise issues one. Sending an empty
+        // string would trade a clear "nothing was sent" for an opaque server refusal.
+        val reference = authorised.paymentReference
+            ?: return@probe notReadySummary("an /authorise that returned a paymentReference")
         val now = clock.instant()
 
         client.uploadTransaction(
             UploadTransactionRequest(
                 pumpId = state.config?.pumpId ?: state.pumpId.orEmpty(),
                 transactionId = authorised.transactionId,
-                paymentReference = authorised.paymentReference,
+                paymentReference = reference,
                 actualLitresDispensed = litres,
                 startedAt = ISO.format(now.minusSeconds(UPLOAD_WINDOW_SECONDS)),
                 completedAt = ISO.format(now),
