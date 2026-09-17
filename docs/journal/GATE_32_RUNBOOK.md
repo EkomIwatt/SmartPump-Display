@@ -6,8 +6,13 @@ How to run the gate on a tablet, and what to do with what comes back. Written 20
 **Read first:** TODO **#31** (settled — why production is the right target here), **#32** (the steps,
 and why they must go through `PumpApiClient`).
 
-**Status:** steps 1 and 2 **passed** on 2026-09-16 and their findings are logged. Steps 3–7 are built
-(stage 9d-2) and unrun.
+**Status:** **all seven steps passed** on 2026-09-16/17, ending in a real paid ₦149 transaction.
+The gate is closed; this file is kept as the way back in.
+
+**One probe is built and UNRUN — the pre-pay precision probe** (added 2026-09-17 with phase 10b).
+It is the only thing in here still owed an answer, and phase **10c** is waiting on it. Skip to
+[Step 8](#step-8--pre-pay-precision--the-one-still-unrun) if that is why you are here; you still need
+the install, activation and a `GET /config` first.
 
 ---
 
@@ -18,7 +23,7 @@ and why they must go through `PumpApiClient`).
 | `GET /config` | no | activation |
 | `GET /transactions/{id}` | no | activation |
 | `GET /config` signed 10 min ago | no | activation |
-| `POST /authorise` (+ amount+1, + decimal) | **yes — real Paystack initialisation** | the acknowledgement switch |
+| `POST /authorise` (+ amount+1, + decimal, + 4dp litres) | **yes — real Paystack initialisation** | the acknowledgement switch |
 | `POST /transactions/upload` | **yes** | the switch, and a prior authorise |
 
 The switch resets every time the panel is rebuilt. That is deliberate: a panel reopened next week
@@ -91,11 +96,10 @@ Paystack? Do not scan any QR the URLs lead to.
 
 Turn the switch on, set litres, and watch the amount line — it does the arithmetic **before** sending:
 
-- **A whole-naira amount** (e.g. 2.0 L × 1490 = 2980) → press **POST /authorise**.
-- **A fractional amount** (e.g. 2.35 L × 1490 = 3501.5) → the panel refuses to send and says so. This
-  is #18c answered by arithmetic rather than by asking: `amount` is a `Long`, the server checks
-  `amount == litres × price` **exactly**, so a rounded figure is refused rather than accepted a few
-  kobo out. Every metered fill-up lands here.
+- **Both whole and fractional amounts send now.** Until phase 10b the panel *refused* on a fractional
+  amount, because `amount` was a `Long` and the sale genuinely could not be expressed — that refusal
+  is how #18c was first answered, and it is history rather than behaviour. `amount` is a `BigDecimal`
+  as of 2026-09-17 and the amount line is now a label telling you which case you are on.
 
 Then:
 
@@ -114,6 +118,36 @@ Needs the ids only a real authorise issues, so it lights up after step 3.
 
 - [ ] A success is what the upload job (7e) has been waiting to be told — it means the ingest
       endpoint exists and works.
+
+## Step 8 — pre-pay precision · **the one still unrun**
+
+**Why it exists.** A pre-pay customer hands over a round sum. Litres quoted at 2dp cannot spend all
+of it: ₦5,000 at ₦1,490/L buys 3.35 L, worth ₦4,991.50, and the server's check is **exact**, so
+quoting the ₦5,000 actually tendered is a refused sale rather than a ₦8.50 discrepancy. Quoting finer
+litres shrinks the customer's shortfall from up to `0.01 × price` (≈₦14.90 today) to **under a
+kobo** — *if* the server accepts more than the one decimal place we have ever observed it take.
+
+Phase **10c** cannot quote pre-pay litres until this is answered, and guessing wrong means either
+giving fuel away or refusing sales.
+
+**Prerequisites:** activated, a `GET /config` in hand, switch on, a litres figure entered.
+
+Press **…4dp litres (pre-pay precision)**. The line under the button shows both scales before you
+send — the tendered sum it is modelling, and the shortfall at 2dp and at 4dp.
+
+- [ ] **Accepted** → the summary reads *ACCEPTED 4dp litres*. Record it, and **10c quotes pre-pay
+      litres at 4dp.** The shortfall effectively disappears.
+- [ ] **Refused** → the summary reads *REFUSED 4dp litres* as a **caution, not a failure**. That is
+      half the answer, not a failed test: 10c quotes at 2dp and the customer's shortfall stands.
+      Before settling, **re-run at 3dp** — change `scale = 4` in `AuthoriseVariant.Precision` and
+      reinstall — because the boundary matters and two decimal places is the expensive answer.
+      Copy the `message` and `code` verbatim; a refusal here is worth raising with the backend, since
+      this is the difference between spending a customer's money and keeping some of it.
+- [ ] Either way, record it against **#44** in `TODO.md` and under **10b** in the Phase 10 section.
+
+**This creates a real Paystack initialisation, like every other write probe. Do not scan the QR.**
+
+---
 
 ## Optional, and worth it while the pump is throwaway — revoke and re-activate
 
