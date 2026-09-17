@@ -83,6 +83,7 @@ fun CustomerStateHost(
             txnId = state.txnId,
             priceKoboPerLitre = state.priceKoboPerLitre,
             expiresInSeconds = uiState.prepayExpiresInSeconds,
+            checkoutUrl = state.checkoutUrl,
             onCancel = onCancel,
             modifier = modifier,
         )

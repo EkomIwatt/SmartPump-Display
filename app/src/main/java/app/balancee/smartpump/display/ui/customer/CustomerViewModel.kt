@@ -52,6 +52,7 @@ import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PostFillIntent
 import app.balancee.smartpump.display.domain.model.PulseMessage
+import app.balancee.smartpump.display.domain.model.SaleBasis
 import app.balancee.smartpump.display.domain.model.Transaction
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionMode
@@ -76,9 +77,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Duration
+import java.time.Instant
 import java.util.Locale
 import javax.inject.Inject
 
+/**
+ * Fallback only, since 10c. The real window is the `expiresAt` the server issues with each
+ * authorise — **20 minutes** on production, measured six times (TODO #43). This applies when a
+ * response carried no expiry at all, which no observed response has.
+ */
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
 private const val FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60
 private const val USSD_SMS_TIMEOUT_SECONDS = 5 * 60
@@ -227,7 +235,10 @@ class CustomerViewModel @Inject constructor(
 
             is TransactionState.PrepayAwaitingPayment -> {
                 setState(restored)
-                startExpiryCountdown()
+                // The server's window keeps running through a restart, so resume against the
+                // persisted deadline rather than granting a fresh one. Starting the clock again
+                // here would keep a QR on screen after the server had stopped honouring it.
+                startExpiryCountdown(restored.expiresAtEpochMs?.let(Instant::ofEpochMilli))
                 resumePrepayPaymentListener(restored)
             }
 
@@ -771,6 +782,7 @@ class CustomerViewModel @Inject constructor(
                 amountKobo = amountKobo,
                 // The tank is already full: this is the metered figure, not one derived from price.
                 expectedLitres = source.verifiedLitres,
+                basis = SaleBasis.Dispensed,
             )
             paymentProcessor.process(request).collect { result ->
                 when (result) {
@@ -1013,6 +1025,7 @@ class CustomerViewModel @Inject constructor(
                 method = PaymentMethod.USSD,
                 amountKobo = amountKobo,
                 expectedLitres = litresFor(amountKobo),
+                basis = SaleBasis.Tender,
             )
             paymentProcessor.process(request).collect { result ->
                 when (result) {
@@ -1086,6 +1099,7 @@ class CustomerViewModel @Inject constructor(
                 method = method,
                 amountKobo = amountKobo,
                 expectedLitres = litresFor(amountKobo),
+                basis = SaleBasis.Tender,
             )
             paymentProcessor.process(request).collect { result ->
                 when (result) {
@@ -1112,6 +1126,7 @@ class CustomerViewModel @Inject constructor(
                 method = restored.method,
                 amountKobo = amountKobo,
                 expectedLitres = litresFor(amountKobo),
+                basis = SaleBasis.Tender,
             )
             paymentProcessor.process(request).collect { result ->
                 when (result) {
@@ -1135,9 +1150,11 @@ class CustomerViewModel @Inject constructor(
                 method = method,
                 txnId = pending.transactionRef,
                 priceKoboPerLitre = priceKoboPerLitre,
+                checkoutUrl = pending.checkoutUrl,
+                expiresAtEpochMs = pending.expiresAt?.toEpochMilli(),
             )
         )
-        startExpiryCountdown()
+        startExpiryCountdown(pending.expiresAt)
     }
 
     private suspend fun onPaymentSuccess(
@@ -1180,10 +1197,23 @@ class CustomerViewModel @Inject constructor(
         )
     }
 
-    private fun startExpiryCountdown() {
+    /**
+     * TODO **#43**. [serverExpiry] is the `expiresAt` the server issued with the authorise, and it is
+     * what the countdown runs on whenever there is one — measured at **twenty minutes** on
+     * production against the five this app assumed. The constant is the fallback for a response that
+     * carried no expiry, not the default.
+     *
+     * Clamped to at least one second: a server expiry already in the past (a long restart, a clock
+     * well behind) would otherwise run the countdown negative rather than ending the sale.
+     */
+    private fun startExpiryCountdown(serverExpiry: Instant? = null) {
         expiryJob?.cancel()
+        val window = serverExpiry
+            ?.let { Duration.between(Instant.now(), it).seconds.toInt() }
+            ?.coerceAtLeast(1)
+            ?: PREPAY_EXPIRY_SECONDS
         expiryJob = viewModelScope.launch {
-            var remaining = PREPAY_EXPIRY_SECONDS
+            var remaining = window
             _ui.update { it.copy(prepayExpiresInSeconds = remaining) }
             while (remaining > 0 && currentState() is TransactionState.PrepayAwaitingPayment) {
                 delay(1_000L)

@@ -9,6 +9,7 @@ package app.balancee.smartpump.display.data.payment
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
+import app.balancee.smartpump.display.domain.model.SaleBasis
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -32,6 +33,7 @@ class MockPaymentProcessorTest {
         method = PaymentMethod.BALANCEE_APP,
         amountKobo = 500_000,
         expectedLitres = 5.0,
+        basis = SaleBasis.Tender,
     )
 
     @Test

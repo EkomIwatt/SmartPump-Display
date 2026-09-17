@@ -47,7 +47,22 @@ sealed class TransactionState {
 
     // ---- PRE-PAY (Flow 1, Flow 5 entry) ----
 
-    /** QR / NFC / digital wait. 5-min expiry, then auto-cancel back to Idle. */
+    /**
+     * QR / digital wait, then auto-cancel back to Idle.
+     *
+     * **The window is the server's, not ours (TODO #43).** It was documented here as five minutes
+     * for a year; production gives **twenty**, measured six times across two sittings. A screen that
+     * gave up at five abandoned a sale the server would still have honoured for another fifteen,
+     * with the customer standing at the pump. [expiresAtEpochMs] carries the server's own figure and
+     * the countdown reads it; the five-minute constant survives only as the fallback for a response
+     * that omitted it.
+     *
+     * @param checkoutUrl the Paystack page the QR encodes — **the only thing a customer can pay**.
+     *   Null on a state persisted before 10c, and on the mock's fabricated sales; the screen falls
+     *   back to showing the reference rather than a QR that goes nowhere.
+     * @param expiresAtEpochMs server expiry. Epoch millis rather than an Instant because this class
+     *   is persisted through kotlinx and a Long needs no serializer.
+     */
     @Serializable @SerialName("prepay_awaiting_payment")
     data class PrepayAwaitingPayment(
         val flow: TransactionFlow,           // FIXED_PREPAY_DIGITAL or USSD_OFFLINE
@@ -55,6 +70,8 @@ sealed class TransactionState {
         val method: PaymentMethod,
         val txnId: String,
         val priceKoboPerLitre: Long,
+        val checkoutUrl: String? = null,
+        val expiresAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /** USSD-specific: SMS expected on the pump SIM. */
@@ -106,7 +123,13 @@ sealed class TransactionState {
         val txnId: String,
         val verifiedLitres: Double,
         val amountDueKobo: Long,
-        val qrContent: String,               // NIP transfer payload
+        /**
+         * What the QR encodes. Was a fabricated NIP transfer payload built from the operator's
+         * virtual account; from 10c it is the Paystack checkout URL the server returned, which is
+         * the only form of it a customer can actually pay.
+         */
+        val qrContent: String,
+        val expiresAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /** Customer chose cash. Attendant has not yet tapped CASH RECEIVED. */

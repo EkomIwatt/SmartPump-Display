@@ -69,6 +69,13 @@ fun PrepayAwaitingPaymentScreen(
     txnId: String,
     priceKoboPerLitre: Long,
     expiresInSeconds: Int,
+    /**
+     * The Paystack checkout URL from `/authorise` — what the QR encodes, and the only thing a
+     * customer can actually pay. Null before 10c wired it, and on a sale restored from a blob
+     * written then; the artefact falls back to the reference rather than drawing a QR that leads
+     * nowhere.
+     */
+    checkoutUrl: String? = null,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     pumpLabel: String = "Pump 1",
@@ -124,8 +131,8 @@ fun PrepayAwaitingPaymentScreen(
                     ) {
                         ArtifactPane(
                             method = method,
-                            amountKobo = amountKobo,
                             txnId = txnId,
+                            checkoutUrl = checkoutUrl,
                             accent = accent,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -150,8 +157,8 @@ fun PrepayAwaitingPaymentScreen(
                     ) {
                         ArtifactPane(
                             method = method,
-                            amountKobo = amountKobo,
                             txnId = txnId,
+                            checkoutUrl = checkoutUrl,
                             accent = accent,
                             modifier = Modifier
                                 .weight(1f)
@@ -191,8 +198,8 @@ fun PrepayAwaitingPaymentScreen(
 @Composable
 private fun ArtifactPane(
     method: PaymentMethod,
-    amountKobo: Long,
     txnId: String,
+    checkoutUrl: String?,
     accent: Color,
     modifier: Modifier = Modifier,
 ) {
@@ -204,8 +211,8 @@ private fun ArtifactPane(
         LabelText(text = artifactLabel(method), color = TextSecondary)
         PaymentArtifact(
             method = method,
-            amountKobo = amountKobo,
             txnId = txnId,
+            checkoutUrl = checkoutUrl,
             accent = accent,
         )
         Text(
@@ -253,17 +260,19 @@ private fun LedgerPane(
 }
 
 /**
- * The "thing the customer interacts with" in the centre of the card. For BANK_QR_TRANSFER
- * and BALANCEE_APP this is a real QR. For NFC_CARD it's a tap-target prompt — no QR, since
- * NFC doesn't need a scanned artefact. USSD and CASH don't reach this screen (they're
- * routed to their own states by the VM) so they're not branched here; we fall through
- * to a QR with their payload as a safety net.
+ * The "thing the customer interacts with" in the centre of the card.
+ *
+ * **10c replaced what this encodes.** It used to draw a QR of a payload this app invented —
+ * `balancee://pay?txn=…`, a scheme no scanner resolves and no bank honours — so the artefact looked
+ * right and could not take a payment. It now encodes the Paystack checkout URL the server issued,
+ * and when there is no URL it says so instead of drawing a QR that leads nowhere. A QR-shaped hole
+ * a customer stands in front of is worse than a visible failure.
  */
 @Composable
 private fun PaymentArtifact(
     method: PaymentMethod,
-    amountKobo: Long,
     txnId: String,
+    checkoutUrl: String?,
     accent: Color,
 ) {
     Box(
@@ -279,16 +288,36 @@ private fun PaymentArtifact(
             .padding(vertical = 20.dp, horizontal = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (method == PaymentMethod.NFC_CARD) {
-            NfcTapPrompt(accent = accent)
-        } else {
-            Box(modifier = Modifier.width(180.dp)) {
-                QrCodeView(
-                    content = qrPayload(method, amountKobo, txnId),
-                    sizeDp = 180.dp,
-                )
+        when {
+            method == PaymentMethod.NFC_CARD -> NfcTapPrompt(accent = accent)
+            checkoutUrl.isNullOrBlank() -> UnavailableQrPrompt(txnId = txnId)
+            else -> Box(modifier = Modifier.width(180.dp)) {
+                QrCodeView(content = checkoutUrl, sizeDp = 180.dp)
             }
         }
+    }
+}
+
+/** No checkout URL: show the reference an attendant can quote, never an unpayable QR. */
+@Composable
+private fun UnavailableQrPrompt(txnId: String) {
+    Column(
+        modifier = Modifier.padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Payment code unavailable",
+            style = MaterialTheme.typography.bodyLarge,
+            color = TextSecondary,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = "Ask the attendant, quoting ${'$'}txnId",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -343,22 +372,6 @@ private fun accentFor(method: PaymentMethod): Color = when (method) {
     else -> PrimaryGold
 }
 
-private fun qrPayload(method: PaymentMethod, amountKobo: Long, txnId: String): String {
-    // Pre-pay amounts are whole naira; payloads carry the naira value.
-    val naira = amountKobo / 100
-    return when (method) {
-        PaymentMethod.BANK_QR_TRANSFER ->
-            "nip://balancee/$txnId?amount=$naira"
-        PaymentMethod.BALANCEE_APP ->
-            "balancee://pay?txn=$txnId&amount=$naira"
-        PaymentMethod.USSD ->
-            "ussd://*737*$naira*${txnId.takeLast(3)}#"
-        PaymentMethod.NFC_CARD ->
-            "nfc://tap/$txnId/$naira"
-        PaymentMethod.CASH_SEE_ATTENDANT ->
-            "cash://$txnId/$naira"
-    }
-}
 
 private fun methodCaption(method: PaymentMethod): String = when (method) {
     PaymentMethod.BALANCEE_APP -> "or open Balanceè app"

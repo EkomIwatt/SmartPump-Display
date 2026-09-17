@@ -17,14 +17,42 @@ import androidx.compose.runtime.Immutable
  * @param method        How the customer is paying. Cash never reaches a processor.
  * @param amountKobo    What to charge, in kobo. The app carries money as kobo everywhere; the
  *                      repository mapper owns the conversion to the wire's decimal naira.
- * @param expectedLitres How much fuel that amount buys, floored to 2dp by
- *                      [DeviceConfig.litresCutoff] — never more than was paid for. For a fill-up
- *                      the tank is already full, so this is the measured figure rather than a
- *                      derived one.
+ * @param expectedLitres How much fuel that amount buys, floored by [DeviceConfig.litresCutoff] —
+ *                      never more than was paid for. For a fill-up the tank is already full, so
+ *                      this is the measured figure rather than a derived one.
+ * @param basis         **Which of the two numbers above is fixed.** Added in 10c, because a real
+ *                      processor re-prices against the server's `/config` and has to know which
+ *                      figure to hold still while the other moves. Both are always populated; this
+ *                      says which one is the truth and which is a consequence of it.
  */
 @Immutable
 data class PaymentRequest(
     val method: PaymentMethod,
     val amountKobo: Long,
     val expectedLitres: Double,
+    val basis: SaleBasis,
 )
+
+/**
+ * Which end of a sale is nailed down.
+ *
+ * It matters only once a price can change underneath a sale — which it can, because the server's
+ * price is authoritative and is fetched immediately before every authorise (OQ #8). Re-pricing has
+ * to move the *other* number, and moving the wrong one either charges for fuel that was not
+ * dispensed or dispenses fuel that was not charged for.
+ */
+enum class SaleBasis {
+    /**
+     * The customer chose a sum and has not received anything yet. Hold the money; litres follow.
+     * A pre-pay customer who tendered ₦5,000 gets fewer litres if the price went up, which is
+     * correct — they are buying ₦5,000 of fuel, not a fixed volume.
+     */
+    Tender,
+
+    /**
+     * The fuel is already in the tank and the volume cannot be argued with. Hold the litres; the
+     * amount follows. A price change between the nozzle clicking off and the QR appearing therefore
+     * changes what is owed — see the note in `BalanceePaymentProcessor`, which cannot avoid it.
+     */
+    Dispensed,
+}
