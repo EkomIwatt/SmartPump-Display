@@ -7,7 +7,7 @@
 // Generates monotonically-increasing transaction refs in the BLC-NNNNN format used in the spec.
 package app.balancee.smartpump.display.data.payment
 
-import app.balancee.smartpump.display.domain.model.PaymentMethod
+import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import kotlinx.coroutines.channels.Channel
@@ -17,12 +17,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Clock
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class MockPaymentProcessor @Inject constructor() : PaymentProcessor {
+class MockPaymentProcessor @Inject constructor(
+    // Only used to date the fabricated expiry. Injected rather than read off the wall clock so a
+    // test can assert the 20 minutes without waiting for them.
+    private val clock: Clock,
+) : PaymentProcessor {
 
     private val _autoApprove = MutableStateFlow(true)
     val autoApprove: StateFlow<Boolean> = _autoApprove.asStateFlow()
@@ -53,10 +59,23 @@ class MockPaymentProcessor @Inject constructor() : PaymentProcessor {
      */
     fun triggerInstantResolve() { instantResolve.trySend(Unit) }
 
-    override fun process(method: PaymentMethod, amountKobo: Long): Flow<PaymentResult> = flow {
+    override fun process(request: PaymentRequest): Flow<PaymentResult> = flow {
         instantResolve.tryReceive() // drain any stale signal from a previous transaction
         val ref = nextRef()
-        emit(PaymentResult.Pending(transactionRef = ref, method = method))
+        val method = request.method
+        val amountKobo = request.amountKobo
+        emit(
+            PaymentResult.Pending(
+                transactionRef = ref,
+                method = method,
+                // Shaped like the real thing so the screens that consume it in 10c are exercised
+                // by the debug path too — but pointed at a host that cannot take a payment, so a
+                // mock QR scanned by accident fails instead of charging someone.
+                checkoutUrl = "https://checkout.invalid/mock/$ref",
+                expiresAt = clock.instant().plus(MOCK_EXPIRY),
+                paymentReference = "BPM-MOCK-$ref",
+            )
+        )
 
         val delayMs = _pendingDelayMs.value
         if (delayMs > 0) {
@@ -65,7 +84,14 @@ class MockPaymentProcessor @Inject constructor() : PaymentProcessor {
         }
 
         if (_autoApprove.value) {
-            emit(PaymentResult.Success(transactionRef = ref, amountKobo = amountKobo, method = method))
+            emit(
+                PaymentResult.Success(
+                    transactionRef = ref,
+                    amountKobo = amountKobo,
+                    method = method,
+                    paymentReference = "BPM-MOCK-$ref",
+                )
+            )
         } else {
             emit(PaymentResult.Failed(reason = _failureReason.value, transactionRef = ref))
         }
@@ -79,5 +105,8 @@ class MockPaymentProcessor @Inject constructor() : PaymentProcessor {
         const val DEFAULT_PENDING_DELAY_MS = 5_000L
         const val DEFAULT_FAILURE_REASON = "Mock: payment declined"
         const val START_REF_NUMBER = 0
+
+        /** Matches the 20 minutes measured on production (TODO #43), not the 5 the app used to assume. */
+        val MOCK_EXPIRY: Duration = Duration.ofMinutes(20)
     }
 }

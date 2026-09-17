@@ -17,6 +17,7 @@ import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.OperationalEvent
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
+import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PulseMessage
 import app.balancee.smartpump.display.domain.model.Transaction
@@ -37,6 +38,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import java.time.Instant
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -115,13 +117,31 @@ class FakePaymentProcessor : PaymentProcessor {
     var pendingRef = "BLC-PAY01"
     var lastMethod: PaymentMethod? = null
     var lastAmountKobo: Long = 0L
+    /** What the caller said the amount buys. Phase 10c sends this to /authorise verbatim. */
+    var lastExpectedLitres: Double? = null; private set
+    var lastRequest: PaymentRequest? = null; private set
     var processCount = 0; private set
 
-    override fun process(method: PaymentMethod, amountKobo: Long): Flow<PaymentResult> = flow {
+    /** Optional Pending extras, so a test can drive the 10c/10d screens without a real backend. */
+    var pendingCheckoutUrl: String? = null
+    var pendingExpiresAt: Instant? = null
+    var pendingPaymentReference: String? = null
+
+    override fun process(request: PaymentRequest): Flow<PaymentResult> = flow {
         processCount++
-        lastMethod = method
-        lastAmountKobo = amountKobo
-        emit(PaymentResult.Pending(pendingRef, method))
+        lastRequest = request
+        lastMethod = request.method
+        lastAmountKobo = request.amountKobo
+        lastExpectedLitres = request.expectedLitres
+        emit(
+            PaymentResult.Pending(
+                transactionRef = pendingRef,
+                method = request.method,
+                checkoutUrl = pendingCheckoutUrl,
+                expiresAt = pendingExpiresAt,
+                paymentReference = pendingPaymentReference,
+            )
+        )
         emitAll(terminals)
     }
 

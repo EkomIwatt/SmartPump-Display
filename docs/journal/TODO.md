@@ -741,13 +741,30 @@ captures are the test fixtures.
 
 ### Sub-deliverables
 
-- [ ] **10a — Widen the payment seam.** The blocker in front of everything else.
+- [x] **10a — Widen the payment seam. DONE 2026-09-17.** The blocker in front of everything else.
   `PaymentProcessor.process(method, amountKobo)` cannot express what `/authorise` requires
   (`expectedLitres`, `fuelType`, `pumpId`), and `PaymentResult.Pending(transactionRef, method)`
   cannot carry what the screen needs (`authorizationUrl`, `expiresAt`, the server-side ids).
   Widen both. `MockPaymentProcessor` keeps working — it fabricates a URL and a 20-minute expiry —
   so the debug path and all existing tests stay green. **No behaviour change**; committed alone so
   the real processor's diff is readable against it.
+  - **Built:** `PaymentRequest(method, amountKobo, expectedLitres)`; `PaymentResult.Pending` gains
+    `checkoutUrl` / `expiresAt` / `paymentReference`, `Success` gains `paymentReference`. `pumpId`
+    and `fuelType` deliberately stay **off** the request — they are properties of the device, not of
+    the sale, so 10c's processor sources them from credentials and `DeviceConfig` rather than making
+    four screens remember facts about the pump they run on.
+  - **`litresFor(amountKobo)` extracted in the VM**, because the figure now has two consumers that
+    must not disagree: the cutoff the pump enforces and the `expectedLitres` quoted to `/authorise`.
+    The server's check is exact, so a separately-derived quote is a refused sale, not a rounding
+    error. Tested directly (`prepay expectedLitres equals the cutoff the pump will enforce`).
+  - **The mock now carries the measured 20-minute expiry** (#43) rather than the old 5, and its
+    checkout URL points at a `.invalid` host — a mock QR must not be payable.
+  - **Question surfaced, deliberately not answered here:** `onPaymentSuccess` derives litres from
+    `success.amountKobo` while its fallback uses the requested `amountKobo`. Identical under the
+    mock; with a real backend one of them has been round-tripped. **10c/10d must decide which is
+    authoritative** — left as a comment at the site rather than silently unified.
+  - Verified: JVM **297 tests / 34 classes** green (was 287 / 32); `compileDebugRealHwKotlin` and
+    `lintDebug` clean.
 - [ ] **10b — Money representation (#44).** `AuthoriseRequest.amount` stops being a `Long`.
   Fixtures from the gate: `3501.5` for 2.35 L at ₦1490, request and response both captured.
   **Decision to confirm at go:** `BigDecimal` + serializer (recommended — the wire value is decimal

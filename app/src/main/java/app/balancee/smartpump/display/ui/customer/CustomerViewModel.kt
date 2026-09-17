@@ -48,6 +48,7 @@ import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
+import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PostFillIntent
 import app.balancee.smartpump.display.domain.model.PulseMessage
@@ -765,7 +766,13 @@ class CustomerViewModel @Inject constructor(
         paymentJob?.cancel()
         val amountKobo = source.amountDueKobo
         paymentJob = viewModelScope.launch {
-            paymentProcessor.process(PaymentMethod.BANK_QR_TRANSFER, amountKobo).collect { result ->
+            val request = PaymentRequest(
+                method = PaymentMethod.BANK_QR_TRANSFER,
+                amountKobo = amountKobo,
+                // The tank is already full: this is the metered figure, not one derived from price.
+                expectedLitres = source.verifiedLitres,
+            )
+            paymentProcessor.process(request).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> Unit
                     is PaymentResult.Success -> onFillupDigitalSuccess(source)
@@ -1002,7 +1009,12 @@ class CustomerViewModel @Inject constructor(
     private fun startUssdSmsListener(amountKobo: Long, txnId: String) {
         paymentJob?.cancel()
         paymentJob = viewModelScope.launch {
-            paymentProcessor.process(PaymentMethod.USSD, amountKobo).collect { result ->
+            val request = PaymentRequest(
+                method = PaymentMethod.USSD,
+                amountKobo = amountKobo,
+                expectedLitres = litresFor(amountKobo),
+            )
+            paymentProcessor.process(request).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> Unit
                     is PaymentResult.Success -> onUssdSmsConfirmed(amountKobo, txnId)
@@ -1015,8 +1027,7 @@ class CustomerViewModel @Inject constructor(
     private suspend fun onUssdSmsConfirmed(amountKobo: Long, txnId: String) {
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
-        val litresAuthorised = deviceConfig()?.litresCutoff(amountKobo)
-            ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
+        val litresAuthorised = litresFor(amountKobo)
         pulseBaseline = 0
         recoveredLitres = 0.0
         setState(
@@ -1071,7 +1082,12 @@ class CustomerViewModel @Inject constructor(
     private fun startPrepayPayment(amountKobo: Long, method: PaymentMethod) {
         cancelInFlightJobs()
         paymentJob = viewModelScope.launch {
-            paymentProcessor.process(method, amountKobo).collect { result ->
+            val request = PaymentRequest(
+                method = method,
+                amountKobo = amountKobo,
+                expectedLitres = litresFor(amountKobo),
+            )
+            paymentProcessor.process(request).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> onPaymentPending(amountKobo, method, result)
                     is PaymentResult.Success -> onPaymentSuccess(amountKobo, method, result)
@@ -1092,7 +1108,12 @@ class CustomerViewModel @Inject constructor(
         paymentJob?.cancel()
         val amountKobo = restored.amountKobo
         paymentJob = viewModelScope.launch {
-            paymentProcessor.process(restored.method, amountKobo).collect { result ->
+            val request = PaymentRequest(
+                method = restored.method,
+                amountKobo = amountKobo,
+                expectedLitres = litresFor(amountKobo),
+            )
+            paymentProcessor.process(request).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> Unit
                     is PaymentResult.Success -> onPaymentSuccess(amountKobo, restored.method, result)
@@ -1125,6 +1146,10 @@ class CustomerViewModel @Inject constructor(
         success: PaymentResult.Success,
     ) {
         expiryJob?.cancel()
+        // NOT litresFor(amountKobo): this path deliberately measures against the amount the
+        // processor confirmed, not the one we asked for. Harmless with the mock, where they are the
+        // same value — but with a real backend Success.amountKobo has been round-tripped, and 10c/10d
+        // should decide which of the two is authoritative rather than inherit the question silently.
         val litresAuthorised = deviceConfig()?.litresCutoff(success.amountKobo)
             ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
 
@@ -1354,6 +1379,21 @@ class CustomerViewModel @Inject constructor(
     }
 
     private suspend fun deviceConfig(): DeviceConfig? = deviceConfigRepository.getConfig()
+
+    /**
+     * Litres a fixed amount buys. Extracted in Phase 10a because this number now has two consumers
+     * that must not disagree: the cutoff the pump enforces, and the `expectedLitres` sent to
+     * `/authorise`. The server checks `amount == expectedLitres x pricePerUnit` **exactly**, so if
+     * the figure we quote it were derived any differently from the figure we stop at, the sale would
+     * either be refused outright or authorise a different quantity from the one dispensed.
+     *
+     * The expression is unchanged from the two places it was duplicated in: floored to 2dp by
+     * [DeviceConfig.litresCutoff] so the pump never gives away more than was paid for, with a
+     * price-only fallback for the (guard-blocked) case of no config at all.
+     */
+    private suspend fun litresFor(amountKobo: Long): Double =
+        deviceConfig()?.litresCutoff(amountKobo)
+            ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
 
     private companion object {
         const val DEFAULT_KOBO_PER_LITRE = 87_000L
