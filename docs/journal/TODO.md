@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-17 (the gate (#32) closed on a real paid transaction; #8 is unblocked and is now the top of the board — see the new Phase 10 section)_
+_Last updated: 2026-09-18 (Phase 10a–10c built on `feature/phase-10-payments`; **next session starts with the decision under 10c-bis**)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -874,6 +874,33 @@ captures are the test fixtures.
     (the signing freshness window) and is still unmeasured; #15's probe only proves ten is too old.
   - Carries **#46**: one `PumpTransactionResponse` behind the three names, built from the captured
     bytes, so the poll stops silently discarding the `expiresAt` that #43 needs.
+- [ ] **10c-bis — sync the price from `/config`. DECISION PENDING — START HERE.**
+  _Raised 2026-09-18 while answering “what do we do if the price changes mid-fill-up”. The question
+  turned out to rest on a false premise, and the real finding is bigger than the policy._
+  - **Nothing ever writes the server's price into `DeviceConfig`.** `PumpConfigResponse` has exactly
+    three consumers — `PumpApiClient`, `PumpApiService` and `BalanceePaymentProcessor`. The only
+    writers of `DeviceConfig` are the debug screen, the operator settings screen and the VM's own
+    seeded default.
+  - **So the displayed price and the authorised price are unrelated numbers**, and nothing
+    reconciles them. This is not a rare race: it is a **permanent divergence**, zero today only
+    because someone typed 1490 to match what the server happens to hold.
+  - This is **#18(a) / 7b's second half**, marked BLOCKED since 2026-09-03 *because the payload shape
+    was unknown*. It has been known since 2026-09-16 and 10c already parses it. **The block is
+    stale.**
+  - It also retires `BOSS_CONFIRMATIONS_DRAFT.md` **item 1** — the ask marked *highest*, about every
+    price change becoming a physical visit to every pump. The endpoint that kills it has been live
+    since 2026-09-16 and the app has not consumed it.
+  - **Proposed:** fetch on boot, and cache what the processor already fetches before every authorise,
+    so display and authorise agree by construction. Small; the parsing exists.
+  - **Then the residual price-change race is genuinely seconds wide.** Recommended policy: proceed at
+    the server's price and write an operational event to 7h's fuel log. *Not* refusing — refusal
+    degrades to the existing cash path (`FillupAwaitingCashConfirm`, which never touches the API) at
+    the struck price, which is defensible but forces cash on someone who chose digital.
+  - **Honouring the struck price is NOT available to us:** the server's check is an equality against
+    its own price, so any other amount is a refused sale. That needs a backend change — **add to the
+    #18 asks**, do not wait on it.
+  - **Open:** do this as 10c-bis before 10d (recommended), or fold it into 10e. Not "later".
+
 - [ ] **10d — PAID detection by poll.** ~10 s poll over `GET /transactions/{id}` across the
   `PENDING_PAYMENT` window, terminating on `PAID`, on `expiresAt`, or on cancel.
   - **The boot-resume trap, and the reason this is its own deliverable.**

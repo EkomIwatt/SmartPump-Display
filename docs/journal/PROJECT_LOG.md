@@ -22,6 +22,16 @@ and **#46** (three DTOs were three partial views of one object) are all closed.
 
 **The processor is built but NOT bound in DI** — the terminal result needs the poll, which is 10d.
 
+**Next session starts with a decision, not with code (10c-bis).** Answering "what happens if the price
+changes mid-fill-up" found the question rested on a false premise: **nothing ever writes the server's
+price into `DeviceConfig`**, so the displayed price and the authorised price are unrelated numbers
+and always have been. That is #18(a) / 7b's second half, marked BLOCKED since 2026-09-03 because the
+`/config` shape was unknown — it has been known since 2026-09-16 and 10c already parses it, so the
+block is stale. Proposed as 10c-bis before 10d; detail on the board.
+
+**Branch state at close:** `feature/phase-10-payments`, **10 commits, local only, working tree clean**,
+JVM 341 tests / 39 classes green, `compileDebugRealHwKotlin` + `lintDebug` clean. Not pushed.
+
 ---
 
 ## Previous status — 2026-09-15, later (OQ #22 built; signing cutover decided)
