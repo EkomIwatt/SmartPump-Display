@@ -269,7 +269,7 @@ private fun FuelLogSection(entries: List<OperationalEvent>) {
         Spacer(Modifier.height(4.dp))
         Text(
             text = "Fuel measured while this screen was off or restarting, and price changes " +
-                "received from the operator.",
+                "received from the backend.",
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary,
         )
@@ -308,6 +308,10 @@ private fun headlineFor(entry: OperationalEvent): Pair<String, androidx.compose.
             (entry.litres?.let { "%.2f L".format(it) } ?: "Amount unknown") to TextPrimary
 
         EventType.PRICE_SYNCED -> "Price updated" to TextPrimary
+
+        // Not red: most abandoned payments are someone changing their mind. It is here so that a
+        // customer who says they paid and got nothing can be looked up rather than disbelieved.
+        EventType.PAYMENT_ABANDONED -> "Payment not completed" to TextSecondary
 
         // Gold: money, and a figure a customer may come back and ask about.
         EventType.PRICE_CHANGED_MID_SALE -> "Price changed mid-sale" to PrimaryGold

@@ -50,4 +50,23 @@ enum class EventType {
      * asks again, and an event per attempt would bury the ones that matter.
      */
     DISPENSE_UPLOAD_FAILED,
+
+    /**
+     * A digital payment window closed with the payment unconfirmed, and the app stopped watching
+     * (Phase 10g).
+     *
+     * **The customer may still pay after this.** Observed on production 2026-09-19: three minutes
+     * past a transaction's own `expiresAt`, `GET /transactions/{id}` still answered 200 with
+     * `PENDING_PAYMENT` and the same live Paystack checkout URL. `expiresAt` is a figure the
+     * backend reports, not a deadline it enforces — so the window is ours, not theirs, and money
+     * can land in it after the tablet has moved on.
+     *
+     * Written so that money is not the only record such a sale ever had. Until this existed, an
+     * abandoned pre-pay left **no trace at all**: a customer returning to say they had paid and
+     * got no fuel could not be answered, because nothing on the pump knew the transaction had
+     * existed. The detail carries the transaction id, which is what support needs to look it up.
+     *
+     * Not an error, and common — most are simply someone changing their mind at the screen.
+     */
+    PAYMENT_ABANDONED,
 }

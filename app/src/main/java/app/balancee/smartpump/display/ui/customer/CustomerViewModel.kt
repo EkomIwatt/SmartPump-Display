@@ -228,17 +228,43 @@ class CustomerViewModel @Inject constructor(
      * this adds is the **idle screen**, which would otherwise keep showing the boot-time figure
      * until someone bought fuel.
      *
-     * Applied to the display only when the pump is idle. A resumed dispense has already struck its
-     * price and its litre target; moving the figure under a customer mid-sale would make the screen
-     * disagree with the sale they are watching, which is worse than a stale idle price.
+     * Applied to the display only when **no price has been struck yet**. A resumed dispense, or a
+     * sale already quoted, has its price and its litre target fixed; moving the figure under a
+     * customer mid-sale would make the screen disagree with the sale they are watching, which is
+     * worse than a stale idle price.
+     *
+     * **It is not enough to check for [TransactionState.Idle], which is what this did until the
+     * 10g gate (2026-09-19).** A tablet that restores to [TransactionState.ModeSelect] — a
+     * customer standing at the screen who has chosen nothing yet — returned early here, so the
+     * refreshed price reached the *database* and never reached *memory*. Everything downstream
+     * then quoted from a stale field: the amount screen's litre previews, and
+     * `PrepayAwaitingPayment.priceKoboPerLitre`, which is what the receipt and the completion
+     * screen read. Observed on production with the seed ₦870 on screen and ₦1,490 on the wire.
+     *
+     * The states listed here are the ones where nothing has been struck. Anything else keeps what
+     * it has, which is the original guard's intent stated precisely rather than by proxy.
      */
     private suspend fun syncPriceOnBoot() {
         deviceConfigSync.refresh()
-        if (_ui.value.state !is TransactionState.Idle) return
+        if (!priceMayMoveFreely(_ui.value.state)) return
         deviceConfigRepository.getConfig()?.let { config ->
             priceKoboPerLitre = config.koboPerLitre
             _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
         }
+    }
+
+    /**
+     * Whether the displayed price may still change without contradicting something a customer is
+     * looking at. True before a sale has been quoted, false from the moment one has.
+     *
+     * Kept as a named predicate rather than an inline `is` check because the cost of getting the
+     * list wrong is a customer charged at a price the screen never showed.
+     */
+    private fun priceMayMoveFreely(state: TransactionState): Boolean = when (state) {
+        is TransactionState.Idle,
+        is TransactionState.ModeSelect,
+        -> true
+        else -> false
     }
 
     // ---- Boot resume ---------------------------------------------------------------
@@ -944,6 +970,10 @@ class CustomerViewModel @Inject constructor(
             }
             if (remaining <= 0 && currentState() is TransactionState.FillupDigitalAwaitingPayment) {
                 paymentJob?.cancel()
+                // The fall-back to cash is visible to an attendant, unlike the pre-pay one — but
+                // the checkout page is just as live, so a customer who pays digitally a moment
+                // later can be asked for cash as well. The log is what makes that answerable.
+                recordAbandonedPayment(source.txnId, source.amountDueKobo)
                 setState(
                     TransactionState.FillupAwaitingCashConfirm(
                         txnId = source.txnId,
@@ -1278,7 +1308,12 @@ class CustomerViewModel @Inject constructor(
                 amountKobo = pending.amountKobo,
                 method = method,
                 txnId = pending.transactionRef,
-                priceKoboPerLitre = priceKoboPerLitre,
+                // Derived from the quote, not read from this class's field. The quote's amount
+                // and litres were struck together against the price the processor fetched, so
+                // their ratio *is* that price; the field is a display copy that can be stale.
+                // 10g caught it stale — ₦870 on the state, ₦1,490 on the wire — which would
+                // have put the wrong price on the receipt and the completion screen (#37).
+                priceKoboPerLitre = pending.strikePriceKoboPerLitre() ?: priceKoboPerLitre,
                 checkoutUrl = pending.checkoutUrl,
                 expiresAtEpochMs = pending.expiresAt?.toEpochMilli(),
                 litresAuthorised = pending.litres,
@@ -1346,6 +1381,32 @@ class CustomerViewModel @Inject constructor(
      * Clamped to at least one second: a server expiry already in the past (a long restart, a clock
      * well behind) would otherwise run the countdown negative rather than ending the sale.
      */
+    /**
+     * The price this quote was struck at, in kobo per litre, or null when it cannot be derived.
+     *
+     * `amountKobo` and `litres` come out of `SaleQuote` together, so their ratio is the price the
+     * server will check the sale against — which is the only price a receipt should ever show.
+     * Mirrors what [bootResume] already does for a restored fill-up.
+     */
+    private fun PaymentResult.Pending.strikePriceKoboPerLitre(): Long? =
+        if (litres > 0) Math.round(amountKobo / litres) else null
+
+    /**
+     * Note that a digital payment window closed unpaid, and that the app has stopped watching.
+     *
+     * See [EventType.PAYMENT_ABANDONED]. The backend does not move the transaction off
+     * `PENDING_PAYMENT` when its `expiresAt` passes, so this is not "the sale is over" — it is
+     * "we are no longer looking", which is a different and more useful thing to have written down.
+     */
+    private suspend fun recordAbandonedPayment(txnId: String, amountKobo: Long) {
+        events.record(
+            type = EventType.PAYMENT_ABANDONED,
+            transactionRef = txnId,
+            detail = "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
+                "The pump stopped watching; the checkout link may still be payable.",
+        )
+    }
+
     private fun startExpiryCountdown(serverExpiry: Instant? = null) {
         expiryJob?.cancel()
         val window = serverExpiry
@@ -1360,8 +1421,10 @@ class CustomerViewModel @Inject constructor(
                 remaining -= 1
                 _ui.update { it.copy(prepayExpiresInSeconds = remaining) }
             }
-            if (remaining <= 0 && currentState() is TransactionState.PrepayAwaitingPayment) {
+            val abandoned = currentState() as? TransactionState.PrepayAwaitingPayment
+            if (remaining <= 0 && abandoned != null) {
                 cancelInFlightJobs()
+                recordAbandonedPayment(abandoned.txnId, abandoned.amountKobo)
                 setState(TransactionState.Idle)
             }
         }

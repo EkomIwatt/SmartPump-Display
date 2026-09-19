@@ -104,7 +104,12 @@ class PumpConfigSync @Inject constructor(
         if (synced.priceChanged) {
             events.record(
                 type = EventType.PRICE_SYNCED,
-                detail = "Price updated from the operator: " +
+                // "from the backend", not "from the operator". This is the /config path, and
+                // the operator's own edit records no event at all — so this is the only price
+                // event there is, and until 10g (2026-09-19) it credited the one party that
+                // cannot have made the change. It exists to tell an operator the price moved
+                // with nobody at the pump.
+                detail = "Price updated from the backend: " +
                     "${formatNaira(synced.previousKoboPerLitre!!)} → ${formatNaira(synced.koboPerLitre)} per litre.",
             )
         }
