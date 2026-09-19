@@ -3,6 +3,7 @@
 // cleared), and the pre-pay expiry timeout that auto-cancels an unpaid transaction.
 package app.balancee.smartpump.display.ui.customer
 
+import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
@@ -73,5 +74,54 @@ class CustomerViewModelLifecycleTest {
             runCurrent()
 
             assertTrue(state(vm) is TransactionState.Idle)
+        }
+
+    /**
+     * Going back to Idle must leave a trace (10g).
+     *
+     * Until `PAYMENT_ABANDONED` existed, an abandoned pre-pay left **nothing at all** — and the
+     * backend does not close the transaction on its own, so the customer can still pay after this
+     * moment. A customer who returns saying they paid and got no fuel could not be answered,
+     * because nothing on the pump knew the sale had ever existed. The transaction id is the part
+     * that makes it answerable, so it is what this asserts.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `an abandoned prepay is recorded with the transaction id it abandoned`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            vm.onStartTransaction()
+            vm.onModeTileTap(TransactionMode.PRE_PAY)
+            vm.onAmountTileTap(amountNaira = 5000)
+            vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+            vm.onModeConfirm()
+            val txnId = (state(vm) as TransactionState.PrepayAwaitingPayment).txnId
+
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            val abandoned = harness.events.recorded.filter { it.type == EventType.PAYMENT_ABANDONED }
+            assertEquals("expected exactly one abandonment row", 1, abandoned.size)
+            assertEquals(txnId, abandoned.single().transactionRef)
+        }
+
+    /** A sale that completes must not also be logged as abandoned — the expiry job is cancelled. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a paid prepay is never recorded as abandoned`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            vm.onStartTransaction()
+            vm.onModeTileTap(TransactionMode.PRE_PAY)
+            vm.onAmountTileTap(amountNaira = 5000)
+            vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+            vm.onModeConfirm()
+            harness.payment.succeed()
+            runCurrent()
+
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            assertTrue(harness.events.recorded.none { it.type == EventType.PAYMENT_ABANDONED })
         }
 }

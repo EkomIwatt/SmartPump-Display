@@ -201,10 +201,24 @@ class BalanceePaymentProcessor @Inject constructor(
             if (deadline != null && !clock.instant().isBefore(deadline)) {
                 emit(
                     PaymentResult.Failed(
+                        // **Both halves of the previous wording were false**, and the 10g gate
+                        // proved it (2026-09-19): it said the *server's* window had expired and
+                        // that nothing had been charged. The server does not close these — 3m16s
+                        // past `expiresAt` it still answered 200 / PENDING_PAYMENT with a live
+                        // checkout URL — and because this pump stops polling here, whether money
+                        // arrived afterwards is precisely the thing it no longer knows.
+                        //
+                        // So neither line claims it. The window that closed is ours, and an
+                        // attendant is pointed at the transaction rather than told a customer is
+                        // mistaken. Saying "nothing was charged" is the one sentence that turns a
+                        // recoverable mix-up into a customer being sent away.
                         failure = FailureCopy(
-                            customerMessage = "The payment window closed before this was paid.",
-                            attendantDetail = "The server's payment window expired before the money " +
-                                "landed. Nothing was charged — start a new sale.",
+                            customerMessage = "This pump stopped waiting for the payment. " +
+                                "If you have already paid, please see the attendant.",
+                            attendantDetail = "The pump stopped waiting when the payment window " +
+                                "elapsed. The server does not close these on its own, so a " +
+                                "payment made after this may still have gone through — check " +
+                                "this transaction before treating it as unpaid.",
                         ),
                         transactionRef = transactionId,
                     ),

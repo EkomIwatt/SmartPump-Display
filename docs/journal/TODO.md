@@ -1143,15 +1143,20 @@ captures are the test fixtures.
     carrying `PENDING_PAYMENT`**, so there is no expiry code to un-park a Catalogue A row with.
   - **8 · instrumented** — **19/19 green on the SM-T220**, including the four 10f migration tests
     and the v2→v5 chain, none of which had run on a device before.
-  - **Still open before merge:** #3's `PAYMENT_ABANDONED` has no JVM test, and finding #5 (below)
-    is unfixed.
+  - **Both merge blockers closed 2026-09-19:** `PAYMENT_ABANDONED` now has two JVM tests (one
+    verified to fail without the fix), and finding #5's copy is corrected. **Step 6 stays the one
+    untested flow** — the tank slider bottoms out at **0.5 L**, which is **~₦745** of real money,
+    so it is a deliberate spend rather than a free check.
 
-- [ ] **NEW (10g, sitting 2) — the expiry copy tells an attendant two things that are false.**
+- [x] **NEW (10g, sitting 2) — the expiry copy told an attendant two things that are false. FIXED.**
   `BalanceePaymentProcessor.kt:205` says *"The server's payment window expired before the money
   landed. Nothing was charged — start a new sale."* The probe disproved both halves: the server
   does **not** expire the transaction, and we cannot know nothing was charged, because the app
   stopped watching. It converts an unknown into a confident denial, on the one line an attendant
-  reads when a customer says they paid. Wording only, no logic. Goes with the `expiresAt` ask. The probe panel proved the
+  reads when a customer says they paid. Wording only, no logic. Goes with the `expiresAt` ask.
+  - **Fixed 2026-09-19.** Neither line claims it now. The customer is told the pump stopped
+    waiting and to see the attendant if they have paid; the attendant is told the server does not
+    close these and to check the transaction before treating it as unpaid. The probe panel proved the
   *endpoints*; this proves the *app*. A real small sale end to end through the customer UI against
   `SN-TEST-001`, scanning the QR with a phone. Sized like the #32 sitting. Nothing merges until it
   passes.
