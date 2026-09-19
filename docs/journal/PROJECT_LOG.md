@@ -1,6 +1,30 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-19 (10c-bis: the displayed price and the charged price are finally the same number)
+## Current status — 2026-09-19, later (10d: a digital sale can now complete, and a restart cannot sell twice)
+
+**A digital sale works end to end in code for the first time.** The QR goes up, the poll watches
+`GET /transactions/{id}` on a 10 s cadence, and `PAID` starts the fuel. `BalanceePaymentProcessor`
+is **bound** — per build type, not unconditionally: `MOCK_PAYMENTS` mirrors `MOCK_HARDWARE`, so
+`debug` and `debugRealHw` keep the simulator and only `debugProd` and `release` charge real cards.
+
+**The boot-resume trap is closed on both digital flows**, not just the pre-pay one the board named.
+`resume(ref, request, deadline)` is a separate method from `process`, so the wrong call is
+impossible rather than discouraged, and the deadline is restored rather than re-granted.
+
+**Three money defects surfaced on the way and are fixed.** Flow 3's QR still could not be paid (10c
+fixed pre-pay only, and the state class had been documented as carrying a checkout URL it never
+did). The pre-pay screen printed the round tender beside a checkout page charging the quote. And
+the pump was stopping 5 ml short of what was paid for on every pre-pay sale, because the quote's
+payable litre step and `DeviceConfig.litresCutoff` disagree.
+
+**Branch state:** `feature/phase-10-payments`, **19 commits, local only, working tree clean**, JVM
+**378 tests / 41 classes** green, `compileDebugRealHwKotlin` + `lintDebug` + `assembleDebugProd`
+clean. Not pushed. **Next is 10e** — error mapping, where #45's *retry later, not now* outcome has
+to exist before 10f's upload job can be trusted not to drop a record.
+
+---
+
+## Previous status — 2026-09-19 (10c-bis: the displayed price and the charged price are finally the same number)
 
 **The divergence is closed.** Nothing in this app had ever written the server's price into
 `DeviceConfig` — `PumpConfigResponse` had three consumers and none of them stored anything, while
@@ -1903,3 +1927,91 @@ receipt is otherwise disputing a number nobody can reconstruct.
 boot-resume trap: `CustomerViewModel:1095` restarts `process()` after a restart, which against a
 real server would authorise a **second** sale for a customer who has already paid for the first.
 `BalanceePaymentProcessor` stays unbound in DI until that poll exists.
+
+---
+
+### Phase 10d — payment confirmed by polling, and a restart that stops selling twice
+**Date:** 2026-09-19
+**Status:** done
+**Commit(s):** `42064e1` (poll + resume), `b347188` (Flow 3's QR), `8aa2879` (DI per build type) —
+on branch `feature/phase-10-payments`, not yet merged or pushed
+
+**Summary (plain language):**
+Until today the app could put a payment QR on screen but had no way of learning that anyone had
+paid it. It now asks Balanceè every ten seconds, until the payment lands or the server's own
+twenty-minute window runs out, and starts the fuel the moment the answer comes back "paid". That is
+the last missing piece of a digital sale.
+
+The other half is what happens when the tablet restarts mid-payment — a power cut, a crash. The app
+used to *start the sale again*: a brand-new payment, for a customer standing at the pump who may
+already have paid for the first one. It never showed up in testing because the practice payment
+system we develop against is happy to be asked twice. Against the real one it would have charged
+somebody twice. The app now asks about the sale it already has, and cannot create a second.
+
+Three more things turned up while doing it, all of them the sort that only surface when you follow
+the money end to end. The fill-up QR still could not be paid — last month's fix covered the pre-pay
+screen and left this one showing a code no bank will open. The pre-pay screen was printing the
+customer's round ₦5,000 beside a checkout page that would actually charge ₦4,998.95. And the pump
+was about to stop five millilitres short of what each customer had paid for, on every single sale,
+because two parts of the app worked the amount out differently.
+
+Finally, the real payment system is now switched on — but only in the builds that should have it.
+The everyday development build keeps the simulator, so nobody demonstrates the app and charges a
+card by accident.
+
+**Technical notes:**
+- **The poll.** `BalanceePaymentProcessor.process` no longer ends in `awaitCancellation()`; it polls
+  `GET /transactions/{id}` on a 10 s cadence (OQ #8) until terminal or `expiresAt`.
+- **What ends the poll early is deliberately a short list** — `PAID`, `DISPENSED`,
+  `TRANSACTION_NOT_FOUND` and `NotActivated`. An unrecognised status, an `ApiError.Serialization`, a
+  500 and a dropped connection all keep polling. The asymmetry is the point: giving up on a status
+  nobody has observed refuses fuel to someone who has paid, on a guess about a word, whereas riding
+  to the deadline costs a wait the server's own window bounds — and the VM's countdown cancels the
+  flow at that same moment anyway. `DISPENSED` counts as paid: a sale that completed and uploaded
+  before a restart is a paid sale.
+- **`PaymentProcessor.resume(ref, request, deadline)` is a separate method, not a flag on
+  `process`.** Calling `process` again is precisely what a resumed sale must not do, so the seam
+  makes the wrong call impossible rather than discouraged. It skips `/config` and `/authorise`
+  entirely — re-pricing would be wrong even if it were free, because the customer may already have
+  paid the figure they were quoted.
+- **The trap was on BOTH digital flows.** The board named `resumePrepayPaymentListener`; reading the
+  code found `startFillupDigitalPayment` was called from the boot-resume branch too, where it is
+  worse — the fuel is already in the customer's tank.
+- **The deadline is restored, not re-granted.** `PrepayAwaitingPayment.expiresAtEpochMs` and
+  `FillupDigitalAwaitingPayment.expiresAtEpochMs` are handed to `resume`; the server's window kept
+  running while the app was down.
+- **`PaymentResult.Pending` gains `amountKobo` and `litres`, both required.** They are the quote's,
+  not the request's. At ₦1,490/L a ₦5,000 tender authorises ₦4,998.95 (`SaleQuote`), and the QR
+  screen was printing the ₦5,000. Required rather than defaulted because a processor that does not
+  answer this is showing someone the wrong price.
+- **`PaymentResult.Success` gains `litresAuthorised`, and it answers the question 10c left in a
+  comment.** `onPaymentSuccess` re-derived litres via `DeviceConfig.litresCutoff`, which floors to
+  2 dp, while the quote lands on a payable litre step: 3.355 authorised, 3.35 derived. The pump
+  stopped 5 ml short of what was paid for on every pre-pay sale, on the same figure 10f will
+  reconcile against the server's record. Persisted on the state so a resume keeps it.
+- **Flow 3's QR (`b347188`).** `onFillupPayDigital()` built `nip://transfer?account=…` from the
+  operator's virtual account — well-formed, resolvable by no scanner, honoured by no bank. OQ #6
+  retired the virtual account when payments moved to Paystack and this was its last caller; the
+  state class had been *documented* as carrying a checkout URL since 10c, which it never did. The
+  screen now holds on `FillupTankFull` until `Pending` arrives (mirroring Flow 1) rather than
+  transitioning into an empty QR, blank content renders the reference instead of a QR of nothing,
+  and `buildNipTransferQr` / `DEFAULT_VIRTUAL_ACCOUNT` are gone.
+- **The DI flip is per build type (`8aa2879`).** A one-line unconditional bind would have made every
+  debug build charge real cards. New `MOCK_PAYMENTS` buildConfigField mirroring `MOCK_HARDWARE`,
+  branched in `PaymentModule` with a `Provider` so the unselected implementation is never
+  constructed: mock on `debug` / `debugRealHw` (dev backend, no activated pump, and the debug
+  screen's auto-approve and force-resolve only exist on the mock), real on `debugProd` / `release`.
+  The debug screen states in red that the controls are inert when they are.
+- **Verified on the real-payments graph specifically:** `assembleDebugProd` builds, so Hilt resolves
+  `BalanceePaymentProcessor` and its injected `Clock` — `lintDebug` alone would not have caught a
+  missing binding on the path only production builds take.
+- Verified: JVM **378 tests / 41 classes** green (was 357 / 40), including 11 new poll/resume tests
+  on the processor and a new `CustomerViewModelPaymentResumeTest`; `compileDebugRealHwKotlin`,
+  `lintDebug` and `assembleDebugProd` clean.
+
+**Next:**
+**10e — error mapping** (#14's mapping half, #45). `PAYMENT_NOT_CONFIRMED` is a 409 that parses as
+`ApiError.Business`, which `ApiResult.kt:52` makes non-retryable — and an upload job treating it as
+final drops the record permanently, which is the one thing the upload job exists to prevent. The
+taxonomy needs a third outcome: *retry later, not now*, keyed on `code` and never on prose. Then
+10f (the upload job) and 10g (the tablet gate against production).

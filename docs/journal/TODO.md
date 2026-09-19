@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-19 (10c-bis decided and built; **10d — PAID detection by poll — is next**)_
+_Last updated: 2026-09-19, later (10d built and the real processor is bound; **10e — error mapping — is next**)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -944,13 +944,62 @@ captures are the test fixtures.
   the server to accept a struck price (or a struck-at timestamp) on `/authorise`. **Do not wait on
   it** — an improvement, not a gate.
 
-- [ ] **10d — PAID detection by poll.** ~10 s poll over `GET /transactions/{id}` across the
-  `PENDING_PAYMENT` window, terminating on `PAID`, on `expiresAt`, or on cancel.
-  - **The boot-resume trap, and the reason this is its own deliverable.**
-    `CustomerViewModel:1095` already restarts a `process()` call after a restart. Against a mock
-    that is free; against a real server it would **authorise a second sale** for a customer who has
-    already paid for the first. Because `transactionId` is ours, the correct behaviour is to resume
-    polling the existing id. Tests first, on that path specifically.
+- [x] **10d — PAID detection by poll. DONE 2026-09-19** (`42064e1`, `b347188`, `8aa2879`).
+  - **The poll.** `process()` no longer suspends after `Pending`; it polls
+    `GET /transactions/{id}` every 10 s until the sale resolves or the server's `expiresAt` passes.
+    **What ends it early is a short list on purpose** — `PAID`, `DISPENSED`, `TRANSACTION_NOT_FOUND`
+    and `NotActivated`. An unrecognised status, an unparseable reply, a 500 and no signal all keep
+    polling: giving up on a word nobody has observed would refuse fuel to someone who has paid,
+    while riding to the deadline costs a wait the server's own window bounds. `DISPENSED` counts as
+    paid — a sale that completed and uploaded before a restart is a paid sale.
+  - **The boot-resume trap, closed on BOTH digital flows.** The board named the pre-pay one;
+    checking found `startFillupDigitalPayment` had it too, and worse, because a fill-up's fuel is
+    already in the tank. `PaymentProcessor.resume(ref, request, deadline)` is its own method rather
+    than a flag: it polls the sale that exists and never authorises. The deadline comes off the
+    persisted state — the server's window kept running while the app was down.
+  - **Two money bugs found on the path and fixed here.**
+    - `Pending` now carries **what will actually be collected**. At ₦1,490/L a ₦5,000 pre-pay
+      authorises at ₦4,998.95, and the screen was printing ₦5,000 beside a checkout page saying
+      ₦4,998.95 — two numbers for one sale, with the customer looking at both.
+    - `Success` now carries the **authorised litres**, answering the question 10c left in a comment
+      at `onPaymentSuccess`. Re-deriving them from the amount gives 3.35 against an authorised
+      3.355, stopping the pump 5 ml short of what was paid for on the same figure 10f will
+      reconcile against the server's record. Persisted on `PrepayAwaitingPayment` so a resume keeps
+      it.
+  - **Flow 3's QR was still unpayable and is fixed here** — see the entry below; 10c fixed pre-pay
+    only.
+  - **The DI flip is per build type, not one line.** New `MOCK_PAYMENTS` buildConfigField mirroring
+    `MOCK_HARDWARE`: mock on `debug` / `debugRealHw` (dev backend, no activated pump, and the debug
+    screen's controls only exist on the mock), real on `debugProd` / `release`. The debug screen
+    says so in red when the controls are inert. Verified on the real-payments graph specifically —
+    `assembleDebugProd` builds, so Hilt resolves `BalanceePaymentProcessor` and its `Clock`.
+  - Verified: JVM **378 tests / 41 classes** green (was 357 / 40); `compileDebugRealHwKotlin`,
+    `lintDebug` and `assembleDebugProd` clean.
+
+- [x] **NEW, found and fixed inside 10d — Flow 3's QR could not be paid either.**
+  10c fixed `PrepayAwaitingPaymentScreen`'s fabricated payload and left
+  `onFillupPayDigital()` building `nip://transfer?account=…` against the operator's virtual account
+  — well-formed, resolvable by no scanner, honoured by no bank. OQ #6 had retired the virtual
+  account when payments moved to Paystack, and this was the last call site keeping it alive; the
+  state class had been *documented* as carrying a checkout URL since 10c, which it never did. The QR
+  is now the checkout URL off `Pending`, the screen holds on `FillupTankFull` until it arrives
+  (mirroring Flow 1), and blank content renders the reference instead of a QR of nothing.
+
+- [ ] **NEW — no build type is both real hardware and production.** `debugProd` takes real
+  payments on the mock pulse source; `debugRealHw` drives the Arduino against the dev backend. 10g
+  can prove the payment path on `debugProd` and 7h's bench gate covered the hardware, so this is not
+  a blocker — but the parallel run's release build will be the first time the two run together,
+  and that should be a deliberate decision rather than a discovery.
+
+  _(original entry)_
+  - [ ] **10d — PAID detection by poll.** ~10 s poll over `GET /transactions/{id}` across the
+    `PENDING_PAYMENT` window, terminating on `PAID`, on `expiresAt`, or on cancel.
+    - **The boot-resume trap, and the reason this is its own deliverable.**
+      `CustomerViewModel:1095` already restarts a `process()` call after a restart. Against a mock
+      that is free; against a real server it would **authorise a second sale** for a customer who has
+      already paid for the first. Because `transactionId` is ours, the correct behaviour is to resume
+      polling the existing id. Tests first, on that path specifically.
+
 - [ ] **10e — Error mapping (#14's mapping half, #45).**
   - **#45 — the taxonomy needs a third outcome.** `PAYMENT_NOT_CONFIRMED` is a 409 that parses as
     `ApiError.Business`, and `ApiResult.kt:52` makes every `Business` non-retryable — documented as
