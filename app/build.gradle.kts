@@ -85,6 +85,11 @@ android {
     buildTypes {
         debug {
             buildConfigField("Boolean", "MOCK_HARDWARE", "true")
+            // Payments too (Phase 10d). This build points at the DEV backend, where no pump has
+            // ever been activated, so the real processor would refuse every sale — and the debug
+            // screen's auto-approve / force-resolve controls, which the demo depends on, only
+            // exist on the mock. Mirrors MOCK_HARDWARE deliberately: same idea, same shape.
+            buildConfigField("Boolean", "MOCK_PAYMENTS", "true")
             // Hosted dev backend (per boss, 2026-07-04). debugRealHw inherits this via initWith.
             // To run against a LOCAL backend instead, point this at "http://10.0.2.2:8080/"
             // (emulator → host loopback) — the debug network-security-config already permits
@@ -117,6 +122,10 @@ android {
             initWith(getByName("debug"))
             applicationIdSuffix = ".prod"
             versionNameSuffix = "-prod"
+            // **Real payments.** This is the only debuggable build that can take one: production is
+            // where the activated pump lives. It is the build the 10g gate runs on — and it charges
+            // a real card, so keep the amounts small.
+            buildConfigField("Boolean", "MOCK_PAYMENTS", "false")
             buildConfigField("String", "PUMP_API_BASE_URL", "\"https://api.balancee.app/\"")
         }
         release {
@@ -126,6 +135,7 @@ android {
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             buildConfigField("Boolean", "MOCK_HARDWARE", "false")
+            buildConfigField("Boolean", "MOCK_PAYMENTS", "false")
             // Production backend (per boss, 2026-07-04).
             buildConfigField("String", "PUMP_API_BASE_URL", "\"https://api.balancee.app/\"")
             proguardFiles(
