@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-19, later still (10e's taxonomy half done and the branch is PUSHED; **next session opens on 10e's copy half**)_
+_Last updated: 2026-09-19, latest (**10e is DONE — both halves**; #14 and #15's mapping half close with it. **Next is 10f, the upload job.**)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -132,9 +132,11 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
     (was 5 at gate #10): the new `legacyFormatBlob_isPurged_ratherThanPartiallyRead` passes, so the
     `v: 2` purge is confirmed against real KeyStore crypto, and the original five still pass with
     `pumpId` required. _(move to PROJECT_LOG when the conformance batch is logged.)_
-- [~] **14. Error `message` discarded (MED) — PARSING HALF DONE 2026-09-12** on branch
-  `feature/api-live-probe` (`4970c4e`). `safeApiCall` reads the envelope back out of a non-2xx body
-  and returns `ApiError.Business(message, code, httpCode)`.
+- [x] **14. Error `message` discarded (MED) — DONE. Parsing 2026-09-12 (`4970c4e`), mapping
+  2026-09-19 (phase 10e).** `safeApiCall` reads the envelope back out of a non-2xx body and returns
+  `ApiError.Business(message, code, httpCode)`; `ApiError.toFailureCopy()` now turns that into the
+  customer's line and the attendant's, and `PaymentResult.Failed` carries both out to the screen.
+  _(move to PROJECT_LOG when the conformance batch is logged.)_
   - **Built on observed bytes, not inference.** The Reference states the failure envelope in §1 and
     never prints one; the dev probe captured it (`docs/api-probes/2026-09-12/`). Two things the
     captures decided that a careful reading would have got wrong: `code` is a **top-level sibling of
@@ -144,30 +146,37 @@ identity fields — `pumpId` and `deviceId` — that `/activate` settles once an
     HTML 404 (what an undeployed route actually returns), a plain-text 502 and a 4xx whose envelope
     claims success all stay `ApiError.Http` with the bytes intact — a deployment mistake must not
     read as the server declining a sale. Retryability unchanged.
-  - **The mapping half is UNBLOCKED — OQ #17 settled 2026-09-12.** The copy now exists
-    ([`ERROR_COPY_DRAFT.md`](ERROR_COPY_DRAFT.md), Catalogue A), the customer/attendant split is
-    decided and built for local errors, and the attendant surface is the swipe-up panel. What is
-    left is wiring, and it **waits on #8**: nothing receives an `ApiError` and sets
-    `TransactionState.Error` until the payment feature flows exist, so building the mapping now
-    would carry text nothing reads.
+  - ~~**The mapping half is UNBLOCKED — OQ #17 settled 2026-09-12.**~~ ✅ **WIRED 2026-09-19.**
+    Keyed on the server's `code` and on the 401, never on the Reference's prose — the one Reference
+    string comparable against the wire (`AMOUNT_MISMATCH`) had already been reworded on production,
+    so a prose table would mostly not fire and would fail silently. Three Catalogue A rows (out of
+    stock, invalid station price, fuel type not sold here) are **parked pending one observation of
+    their code**; everything unrecognised takes the catalogue's last row, which shows the attendant
+    the server's own words plus the status and the code. See `ERROR_COPY_DRAFT.md` for the three
+    decisions taken at wiring time.
   - **The Reference's full error catalogue is now extracted** (2026-09-01, same Flate/ToUnicode
     decode as #11 — the audit had only sampled it): global codes 400 / 401 / 404, eight literal 401
     auth messages, and per-endpoint tables for §4.2 and §4.3. §1 states the failure envelope
     explicitly (`status:false`, `data` absent, `message` = reason), but the doc never prints a
     literal failure *body* — so parse defensively and fall back to `ApiError.Http` when a 4xx body
     is not envelope-shaped, or a plain-text 502 from a proxy becomes `Business(null)`.
-  - **Blocked on copy, not on parsing.** Mapping messages to attendant-facing text needs copy that
-    does not exist: there is no error screen in `docs/Strict design screens/` and OQ #17 is open.
+  - ~~**Blocked on copy, not on parsing.**~~ Resolved: OQ #17 settled the copy, and the
+    design-authority flag (still no error screen in `docs/Strict design screens/`) stands at the top
+    of `ERROR_COPY_DRAFT.md` for a reviewer to overrule.
   - **New #18 ask:** the API returns human message strings only, several with interpolated values
     ("Amount mismatch for PETROL…", "Fuel type not available at station: PETROL"). Matching on
     substrings breaks silently if the backend rewords — **request stable error codes** alongside
     `message`.
-- [ ] **15. Clock skew unguarded (MED).** ±5 min or every request 401s. Enforce automatic network
-  time at install; map that 401 to distinguishable attendant copy.
-  - **Mapping half is ready and rides on #14.** Exact strings confirmed from the Reference:
-    `Request timestamp is not fresh` (clock skew > 5 min from server UTC) and `Invalid request
-    timestamp` (malformed / non-ISO-8601) — two different causes, and only the first means "fix the
-    clock", so they want distinguishable copy.
+- [~] **15. Clock skew unguarded (MED) — MAPPING HALF DONE 2026-09-19, enforcement half open.**
+  ±5 min or every request 401s.
+  - ~~**Mapping half is ready and rides on #14.**~~ ✅ **DONE (phase 10e).** A clock-skew 401 no
+    longer reads as rejected credentials: the attendant is sent to automatic date and time rather
+    than to re-activation, which is the one screen that cannot fix it. It is matched on the message
+    because the server sends **no code** on that path — the one prose match in the mapper, and it
+    earns the exception by having been observed twice on production at the #32 gate rather than
+    quoted from the PDF. A rewording degrades to the credentials line: terminal, and still pointing
+    at a person. `Invalid request timestamp` (malformed, not skewed) arrives as `INVALID_REQUEST`
+    and is already keyed on its code.
   - **Enforcement half has no home yet.** The app is not a device-owner app (kiosk lock-task still
     deferred), so it **cannot set the clock itself**; the most it can do is read
     `Settings.Global.AUTO_TIME` and warn. Whether that gate lives in the debug screen now, waits for
@@ -1014,27 +1023,31 @@ captures are the test fixtures.
       already paid for the first. Because `transactionId` is ours, the correct behaviour is to resume
       polling the existing id. Tests first, on that path specifically.
 
-- [~] **10e — Error mapping (#14's mapping half, #45). HALF DONE 2026-09-19.**
+- [x] **10e — Error mapping (#14's mapping half, #45). DONE 2026-09-19, both halves.**
   - [x] **The taxonomy half (#45)** — `6162027`. Detail under #45 below. Done first and on its own
     because it is what 10f's upload job rests on, and because 10d had just created a second,
     private answer to the same question that was going to drift.
-  - [ ] **The copy half — START HERE NEXT SESSION.** Wire `ERROR_COPY_DRAFT.md` Catalogue A (123
-    lines) into the customer's one plain line and the attendant panel's detail. Deliberately left
-    for fresh eyes: per the authority order the **strict design screens govern copy**, so this is a
-    reading-and-wording pass against `docs/Strict design screens/` and the draft, not a continuation
-    of the payment plumbing. `BalanceePaymentProcessor.describe()` is the placeholder it replaces —
-    it carries the server's own `message` through verbatim rather than paraphrasing, because a
-    paraphrase written in passing is copy nobody agreed.
-  - A `RETRY_LATER` failure should also **not read to an attendant as a failed sale**. That is the
-    one place the taxonomy half reaches into the copy half.
+  - [x] **The copy half.** `FailureCopy(customerMessage, attendantDetail, recoverable)` is the unit
+    the split travels in; `ApiError.toFailureCopy()` decides it; `PaymentResult.Failed` carries it
+    out of the data layer; `toErrorState()` renders it. `BalanceePaymentProcessor.describe()` is
+    gone — the placeholder it replaced put the server's own prose on a customer-facing display.
+    Keyed on `code` and on the 401, **never on a string nobody has seen**; three Catalogue A rows
+    parked pending an observation; the catalogue's last row catches everything else and shows the
+    attendant the server's words verbatim, with the status and the code.
+  - [x] A `RETRY_LATER` failure does **not read to an attendant as a failed sale** — the one place
+    the taxonomy half reaches into the copy half, and the reason `PAYMENT_NOT_CONFIRMED` departs
+    from the draft's `recoverable: no`. Pinned by a test that walks `PumpErrorCodes.NOT_YET`.
+  - **Found on the way, and fixed:** the clock-skew 401 shares a bucket with a rejected API key, so
+    the drafted credentials line would have sent an attendant to re-activate a pump whose clock was
+    simply wrong. See #15.
   - **#45 — the taxonomy needs a third outcome.** `PAYMENT_NOT_CONFIRMED` is a 409 that parses as
     `ApiError.Business`, and `ApiResult.kt:52` makes every `Business` non-retryable — documented as
     "a considered refusal". This one is not: it is true now and false in a minute. Add *retry later,
     not now*, keyed on `code` and never on prose. An upload job that treats it as final **drops the
     record permanently**, which is the one outcome the upload job exists to prevent.
-  - Wire `ERROR_COPY_DRAFT.md` Catalogue A into the customer's one plain line and the attendant
-    panel's detail. This is the half that was blocked on #8 — unblocked now, because something
-    finally produces an `ApiError` a customer can see.
+  - ~~Wire `ERROR_COPY_DRAFT.md` Catalogue A into the customer's one plain line and the attendant
+    panel's detail.~~ ✅ Done. It was blocked on #8 for the right reason — nothing produced an
+    `ApiError` a customer could see until 10c/10d did.
 - [ ] **10f — Upload job (7e).** Add `workmanager` (confirmed absent from
   `gradle/libs.versions.toml`), a `TransactionUploadWorker`, and the thing that finally sets
   `syncedAt`.

@@ -1,6 +1,32 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-19, later still (10e's taxonomy half; **the branch is finally pushed**)
+## Current status — 2026-09-19, latest (**10e is done**; a failure now says two different things to two different people)
+
+**Both halves of 10e have landed, and #14 and #15's mapping half close with them.** A failure no
+longer reaches the screen as one invented sentence plus the server's raw prose. `FailureCopy` carries
+the customer's plain line, the attendant's diagnostic line and the recoverable flag out of the data
+layer together, and `ApiError.toFailureCopy()` decides all three — keyed on the server's `code`, and
+on the 401 where there is none.
+
+**Never on a string nobody has seen.** The Reference quotes `"Amount mismatch for PETROL…"`;
+production returns something else entirely for that same `AMOUNT_MISMATCH`. The one Reference string
+comparable against the wire had already been reworded, so three Catalogue A rows are **parked**
+pending one observation of their code, and everything unrecognised takes the catalogue's last row —
+the server's own words, verbatim, plus the status and the code.
+
+**The one exception found on the way: the clock-skew 401.** It shares a codeless 401 with a rejected
+API key, so the drafted credentials line would have told an attendant to re-activate a pump whose
+clock was simply wrong. It is matched on its message, which was observed twice on production at the
+#32 gate — and a rewording degrades safely to the credentials line.
+
+**Branch state:** `feature/phase-10-payments`, working tree clean, JVM **409 tests / 43 classes**
+green, `compileDebugRealHwKotlin`, `lintDebug` and `assembleDebugProd` clean. (Run `lintDebug` and
+`assembleDebugProd` in **separate** invocations — together they race on generated Hilt sources and
+lint dies with an internal error that is not a code defect.) **Next is 10f, the upload job.**
+
+---
+
+## Previous status — 2026-09-19, later still (10e's taxonomy half; **the branch is finally pushed**)
 
 **`feature/phase-10-payments` is on `origin` for the first time.** It had never been pushed at all —
 no remote branch, twenty commits of 10a–10d existing only on one laptop. That was a bigger exposure
@@ -2040,3 +2066,79 @@ card by accident.
 final drops the record permanently, which is the one thing the upload job exists to prevent. The
 taxonomy needs a third outcome: *retry later, not now*, keyed on `code` and never on prose. Then
 10f (the upload job) and 10g (the tablet gate against production).
+
+---
+
+### Phase 10e — a failure finally says two different things to two different people
+**Date:** 2026-09-19
+**Status:** done (both halves)
+**Commit(s):** `6162027` (taxonomy half), `1365cb8` (copy half)
+
+**Summary (plain language):**
+Until now, every way a sale could fail told the customer the same sentence — "Payment was not
+completed." — and handed the attendant whatever raw text the server happened to send. That is wrong
+in both directions. A customer standing at the pump cannot act on "request timestamp is not fresh",
+and an attendant cannot act on a sentence that does not say what to do. Now each failure carries two
+lines: one plain one for the screen the customer is looking at, and one for the attendant behind the
+PIN that names the actual fix — open Pump settings and re-check the price, turn on automatic date
+and time, wait because the payment has not landed yet. The screen already showed retryable failures
+in gold and dead ends in red; it now has real answers to put in each.
+
+The second half, done first, was about a word: the app could previously say only *retry* or *give
+up* about a failure, and there was a third thing the server says — **not yet**. A payment the
+backend has not seen confirmed reads exactly like a refusal and is not one. Anything treating it as
+final would throw away a record of fuel that was genuinely dispensed, which is the one outcome the
+upload job coming next exists to prevent.
+
+**Technical notes:**
+- **The taxonomy half (#45, `6162027`).** `RetryPolicy` is `RETRY_NOW` / `RETRY_LATER` / `TERMINAL`,
+  keyed on the server's `code` and never on its prose. `RETRY_LATER` is deliberately **not** retried
+  in-flight — a second and a half of backoff will not outlast a payment confirming — so
+  `isRetryable` survives as `retryPolicy == RETRY_NOW` and nothing that used to back off stopped.
+  `PumpErrorCodes` collects the four codes observed at the #32 gate. It also retired the duplicate
+  `BalanceePaymentProcessor.isPollTerminal` had created an hour earlier in 10d.
+- **`FailureCopy(customerMessage, attendantDetail, recoverable)`** is the unit the split travels in.
+  `PaymentResult.Failed` carries it instead of a single `reason` string, which is what forced the
+  ViewModel to invent the customer's sentence at the call site; `toErrorState()` renders it.
+  `BalanceePaymentProcessor.describe()` — the 10d placeholder that put the server's own prose on a
+  customer-facing display — is gone.
+- **Matching is on `code`, and on the 401 where there is no code.** The Reference PDF quotes
+  `"Amount mismatch for PETROL…"`; production actually returns *"The sale amount does not match the
+  current station price for this fuel type…"* for that same `AMOUNT_MISMATCH`. The one Reference
+  string this project has been able to compare against the wire **had already been reworded**, so a
+  table keyed on the other eleven would mostly not fire and would fail silently the day it stopped.
+  Five rows are keyed; three (out of stock, invalid station price, fuel type not sold here) are
+  **parked pending one observation of their code**, the same rule `PumpErrorCodes.NOT_YET` follows.
+- **Catalogue A's last row is the one that had to exist.** Anything unrecognised shows the attendant
+  the server's own sentence verbatim, plus the HTTP status and the code, rather than being swallowed
+  into a sentence that says nothing. Terminal, because the app cannot tell a temporary refusal from
+  a permanent one without being told.
+- **Found on the way: the clock-skew 401 shares a bucket with a rejected API key.** Both are 401s
+  with **no code**, so the drafted credentials line ("it may need re-activating") would have sent an
+  attendant to the one screen that cannot fix a wrong clock. It is matched on the message — the one
+  prose match in the mapper, and it earns the exception by having been observed twice on production
+  at the #32 gate rather than quoted from the PDF. A rewording costs the match and degrades to the
+  credentials line: still terminal, still pointing at a person. **This closes #15's mapping half**;
+  the enforcement half (the app cannot set its own clock) stays open.
+- **Two departures from the approved draft, both recorded in `ERROR_COPY_DRAFT.md`.**
+  `PAYMENT_NOT_CONFIRMED` becomes `recoverable` against the table's `no` — that row predates #45,
+  and a *not yet* painted red tells an attendant a sale is dead when it is seconds from confirming.
+  And `recoverable` is authored per row rather than derived from `RetryPolicy`: the two answer
+  different questions, since an amount mismatch is terminal to a retry loop and recoverable to an
+  attendant who fixes the price.
+- **The tests pin the properties, not the prose.** Rows will be reworded; two invariants must not
+  break — no server string ever reaches the customer line, across every `ApiError` shape, and every
+  code in `PumpErrorCodes.NOT_YET` is `RETRY_LATER` *and* never shown as a dead end.
+- **Design-authority flag stands.** There is still no error screen in `docs/Strict design screens/`,
+  so every word here is invention a reviewer can overrule; the flag at the top of
+  `ERROR_COPY_DRAFT.md` now records what was wired and on what date.
+- Verified: JVM **409 tests / 43 classes** green (was 388 / 42); `compileDebugRealHwKotlin`,
+  `lintDebug` and `assembleDebugProd` clean, the last two in separate invocations.
+
+**Next:**
+**10f — the upload job.** `workmanager`, a `TransactionUploadWorker`, and the thing that finally
+sets `syncedAt`. It rests directly on this phase: `RETRY_LATER` is what stops it discarding a
+dispense the backend has not yet seen payment for. Carries **#48** (upload once, never re-send a
+superseded figure — a corrected upload returns `200 Transaction recorded` and changes nothing, so a
+wrong figure sticks while every log in the app says it went through). Then **10g**, the tablet gate
+against production.
