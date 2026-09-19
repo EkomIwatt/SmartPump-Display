@@ -1,6 +1,7 @@
 # What is still blocking V1
 
-_Compiled 2026-09-12. Refreshed 2026-09-17, after the gate (#32) closed: the app has completed a
+_Compiled 2026-09-12. Corrected 2026-09-19 — section 1's 7g firmware claim was wrong and is
+rewritten below; nothing else moved. Refreshed 2026-09-17, after the gate (#32) closed: the app has completed a
 real paid transaction against production end to end, so **section 4 is empty of anything that blocks
 V1** — nothing on the API line is waiting on the backend any more. What is left there is ours to
 build (**#8**) and the backend asks that remain are improvements, not gates._
@@ -75,9 +76,29 @@ The highest value per hour on the whole project, because none of it waits on a r
 - [x] **#37 — two receipts, two prices — FIXED 2026-09-15.** The completion screen now reads the same
   price as the saved record and the shared receipt. A price edited during an app restart is
   accepted as rare, not fixed.
-- [ ] **7g firmware gate** — worse than merely pending: `hardware/*.ino` on `main` is the **pre-7g**
-  sketch while the docs beside it describe the post-7g one, so anyone flashing from `main` gets
-  firmware predating four defect fixes. **#19** / `BRANCH_7G_SUMMARY.md`.
+- [ ] **7g firmware gate** — pending. **This entry claimed until 2026-09-19 that `main` shipped
+  broken firmware. It does not, and the correction matters because the alarm was the reason to
+  rush the merge.** `hardware/*.ino` on `main` is the **pre-7g** sketch, but that sketch is the
+  7a-hardening one — `PIN_PULSE_IN = 2` (INT0), relay on 7 — bench-verified in June and again at
+  the 7h gate. **It counts correctly.** The four defect fixes the branch carries were fixes to
+  **Olonade's EEPROM contributions, made while merging the two sketches**, not regressions in
+  ours. Flashing from `main` gets you a working adapter *without* the EEPROM totaliser.
+  - **So merging is adding an unverified totaliser to a verified sketch**, not repairing a broken
+    one — which is why the bench gate stands rather than being waived. The gate is ~5 minutes with
+    the rig: note the `BOOT` count, run one dispense, power-cycle, confirm the count comes back
+    **higher rather than zero**, then confirm the next sale still starts from **zero litres** on
+    the tablet. The second check is the one that would otherwise surface as a customer billed for
+    the pump's entire service life.
+  - **The real trap is smaller and is documentation:** `hardware/README.md` on `main` is the 7a-era
+    version while the journal docs beside it describe the post-7g sketch. Read the firmware docs
+    from the branch, not from `main` — as TODO's 7g section already says.
+  - **Merging also re-pins any bench rig** wired to `main`'s README: button 3 → 4, pin 3 becomes
+    power-sense, debounce 150 ms → 250 µs.
+  - Branch is pushed (`origin/feature/phase-7g-eeprom-totaliser` = `b304a0a`), so nothing is at
+    risk while it waits. **Merge the `hardware/` files only** — the branch is ~30 commits behind
+    `main` and a whole-branch merge conflicts on `OPEN_QUESTIONS.md` and `BRANCH_7G_SUMMARY.md`
+    while silently auto-merging a 2026-09-07 `TODO.md`, which would reopen settled OQ #22 and #25.
+  **#19** / `BRANCH_7G_SUMMARY.md`.
 - [·] **Third `Missing` case — NOT movable, corrected 2026-09-12.** Listed here first as small and
   unblocked; it is neither. `PULSES_PER_LITRE` is a **compile-time constant** in
   `MeterCalibration.kt`, not a field on `DeviceConfig`, so there is no absent state for a guard to
@@ -215,8 +236,9 @@ waiting any more, which promotes **#8** from "gated/later" to the largest movabl
 2. **Chase Kelvin for the meter output type and voltage (#22)** — unchanged, and still the long pole
    in front of the K-factor → parallel run → live money. It runs in parallel with #8 because it
    costs a message, not a day.
-3. **The 7g bench gate (#19).** Needs only the rig, and removes a live trap on `main` — `hardware/*.ino`
-   there is the pre-7g sketch. ~~#27~~ passed 2026-09-13.
+3. **The 7g bench gate (#19).** Needs only the rig. **Not a live trap** — corrected 2026-09-19:
+   `main`'s sketch counts correctly (see section 1). The gate buys the EEPROM totaliser; it does
+   not repair anything. ~~#27~~ passed 2026-09-13.
 4. **Send Olonade the three protocol questions** (OQ #23 / #24 / #26) as one message.
 5. **Release signing, last (#34).** The build side is done and the dummy run key waits on nobody.
    Still last because the run waits on the K-factor. **#40** (getting records off a release build)
