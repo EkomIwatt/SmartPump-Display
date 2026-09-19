@@ -319,9 +319,28 @@ class FakeTransactionRepository : TransactionRepository {
     override suspend fun saveTransaction(transaction: Transaction) { saved += transaction }
     override suspend fun getTransaction(id: String): Transaction? = saved.lastOrNull { it.id == id }
     override fun getRecentTransactions(limit: Int): Flow<List<Transaction>> = MutableStateFlow(saved.toList())
-    override suspend fun getPendingSync(): List<Transaction> = saved.toList()
+
+    /**
+     * Mirrors the DAO's filter rather than returning everything (10f). A fake that hands back rows
+     * the real query excludes would let the upload job pass its tests while looping forever in the
+     * field on cash sales it can never send.
+     */
+    override suspend fun getPendingSync(): List<Transaction> =
+        saved.filter { it.syncedAt == null && it.isUploadable && it.uploadError == null }
+            .sortedBy { it.createdAt }
+
+    override suspend fun markSynced(id: String, syncedAt: Long) = replace(id) { it.copy(syncedAt = syncedAt) }
+
+    override suspend fun markUploadFailed(id: String, reason: String) =
+        replace(id) { it.copy(uploadError = reason) }
+
+    private fun replace(id: String, edit: (Transaction) -> Transaction) {
+        val index = saved.indexOfLast { it.id == id }
+        if (index >= 0) saved[index] = edit(saved[index])
+    }
 
     val last: Transaction? get() = saved.lastOrNull()
+    fun byId(id: String): Transaction? = saved.lastOrNull { it.id == id }
 }
 
 /**

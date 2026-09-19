@@ -311,6 +311,12 @@ private fun headlineFor(entry: OperationalEvent): Pair<String, androidx.compose.
 
         // Gold: money, and a figure a customer may come back and ask about.
         EventType.PRICE_CHANGED_MID_SALE -> "Price changed mid-sale" to PrimaryGold
+
+        // Red, and the litres are the headline: the station has sold fuel that the backend's
+        // ledger does not know about, which is the same class of finding as fuel that went
+        // unaccounted for at the pump (10f).
+        EventType.DISPENSE_UPLOAD_FAILED ->
+            (entry.litres?.let { "%.2f L not recorded".format(it) } ?: "Sale not recorded") to WarningRed
     }
 
 @Composable

@@ -39,4 +39,15 @@ enum class EventType {
      * nobody can reconstruct. Seconds-wide and rare; not an error.
      */
     PRICE_CHANGED_MID_SALE,
+
+    /**
+     * Fuel was dispensed and the backend refused to record it, for a reason that will not change
+     * (Phase 10f).
+     *
+     * The station has sold fuel the backend's ledger does not know about, and no amount of waiting
+     * fixes it — so it needs a person, which is what this log is for. A refusal that *may* pass
+     * (no signal, a 500, a payment not yet confirmed) is not written here: the upload job simply
+     * asks again, and an event per attempt would bury the ones that matter.
+     */
+    DISPENSE_UPLOAD_FAILED,
 }

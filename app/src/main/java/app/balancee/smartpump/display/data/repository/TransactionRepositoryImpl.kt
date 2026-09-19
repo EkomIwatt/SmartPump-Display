@@ -30,6 +30,11 @@ class TransactionRepositoryImpl @Inject constructor(
     override suspend fun getPendingSync(): List<Transaction> =
         dao.getPendingSync().map { it.toDomain() }
 
+    override suspend fun markSynced(id: String, syncedAt: Long) = dao.markSynced(id, syncedAt)
+
+    override suspend fun markUploadFailed(id: String, reason: String) =
+        dao.markUploadFailed(id, reason)
+
     private fun Transaction.toEntity() = TransactionEntity(
         id = id,
         flow = flow.name,
