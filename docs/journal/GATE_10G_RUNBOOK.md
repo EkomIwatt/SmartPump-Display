@@ -14,18 +14,43 @@ Nothing on `feature/phase-10-payments` merges until this passes.
 
 ## ⚠️ Read this before you plug anything in
 
-**Do not uninstall the `.prod` app.** The tablet is carrying the **schema v4** database that the
-#32 gate wrote, including the real ₦149 transaction. Installing this build over it runs
-`MIGRATION_4_5` **on real production data** — three `ALTER TABLE`s against a row written by an
-older build. That is the only chance this project will ever get to test that migration on data it
-did not create itself, and `adb uninstall` throws it away in one command.
+**Do not uninstall the `.prod` app — it would destroy the activation identity.** The credentials
+#32 minted live in the Android KeyStore, not in the database, and the activation code that minted
+them is **spent**. `adb uninstall` wipes the KeyStore entry and the deviceId, and the pump would
+need a fresh code that may not exist. Install **over** the existing app.
 
-It also sets up the best available test of 10f's queue filter. That ₦149 row is **pre-10f**: it
-has `syncedAt` null but `paymentReference` null too, because the field did not exist when it was
-written. `getPendingSync` filters on `paymentReference IS NOT NULL`, so the row must be **ignored
-by the upload job forever**. If the pump log shows it being uploaded — or refused — the filter is
-wrong in a way no JVM test would have caught, because every fixture in the suite was written by
-code that knew about the column.
+### What is actually on the tablet — checked 2026-09-19, before the sitting
+
+An earlier draft of this runbook said the tablet carried the #32 gate's ₦149 transaction, and
+built two checks on top of that. **It does not.** The database was pulled and recovered from its
+WAL before installing, and reads:
+
+| Table | Rows |
+|---|---|
+| `transactions` | **0** |
+| `events` | **0** |
+| `device_config` | 1 — ₦870/L, "Total Lekki Ph2", `PUMP 1`, virtual account `0123456789` |
+| `station_identity` | 1 — `DEMO-001` / "Demo Station" |
+| `pulse_state` | 1 — idle (`mode_select`), nothing mid-transaction |
+
+Schema is **v4**, as expected. The reason there is no transaction row is that **#32 ran through
+the API probe panel**, which makes raw HTTP calls and never touches the app's data layer. The
+₦149 sale is real, and it is on the *server*; it was never a local record.
+
+**Two consequences, both of which shrink what this gate can claim:**
+
+- **There is no pre-10f row to test `getPendingSync` against.** The `paymentReference IS NOT NULL`
+  filter cannot be exercised on real legacy data here, because no legacy data exists. It stays
+  covered by JVM fixtures only. Do not claim otherwise in the log.
+- **`MIGRATION_4_5` will run against an empty `transactions` table.** It proves the three
+  `ALTER TABLE`s apply to a real on-device v4 schema — worth having, and still the first time the
+  migration has run outside a test harness — but it proves **nothing about preserving rows**,
+  because there are none to preserve.
+
+`device_config` is the debug seed (₦870/L is `seedDefaultConfigIfMissing`'s placeholder), which is
+correct for an install dating from 2026-09-17: it predates 10c-bis entirely. That makes **step 1 a
+genuine before/after** rather than a formality — the price on this device has never once come from
+the server.
 
 ---
 
@@ -61,10 +86,12 @@ adb logcat -b crash -d | head -40      # empty is the pass
 ```
 
 - [ ] App opens to the idle screen rather than crashing.
-- [ ] The pump log still shows the **#32 history** — a migration that silently dropped the table
-      would give you a clean, plausible, empty log, which is the failure that looks like success.
+- [ ] The pump log is **empty** — which is correct here, and is why it proves nothing on its own.
+      The pre-install check above is what establishes the table was empty *before* the migration,
+      so an empty log afterwards cannot be mistaken for a migration that silently dropped it.
 
-**Pass:** app runs, old rows still there.
+**Pass:** app runs, `device_config` / `station_identity` / `pulse_state` still hold their one
+row each (those *are* real pre-existing rows, and the migration must not disturb them).
 
 **Fail and stop:** a `SQLiteException` in the crash buffer. Do not reinstall to "fix" it — capture
 the database first, because it is the evidence:
@@ -124,7 +151,8 @@ report.
 
 - [ ] Shortly after the sale, the record uploads. `syncedAt` is set.
 - [ ] **No red `DISPENSE_UPLOAD_FAILED`** in the pump log.
-- [ ] **The #32 ₦149 row was never offered** — see the warning at the top.
+- [ ] ~~The #32 ₦149 row was never offered~~ — **struck 2026-09-19: no such local row exists.**
+      See the warning at the top. Today's sale is the only row the queue will ever see.
 
 ```bash
 adb shell dumpsys jobscheduler | grep -A 5 -i smartpump   # the worker's real scheduling, unrun until now
@@ -138,8 +166,7 @@ MSYS_NO_PATHCONV=1 adb exec-out run-as app.balancee.smartpump.display.prod \
   "SELECT id, amount, paymentReference, syncedAt, uploadError FROM transactions ORDER BY createdAt DESC LIMIT 5;"
 ```
 
-**Pass:** today's row has a `syncedAt` and a `paymentReference`, no `uploadError`; the ₦149 row is
-untouched, `syncedAt` still null, and nothing ever tried.
+**Pass:** today's row has a `syncedAt` and a `paymentReference`, and no `uploadError`.
 
 ---
 
