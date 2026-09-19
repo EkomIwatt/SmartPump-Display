@@ -53,12 +53,26 @@ class ApiErrorCopyTest {
         assertTrue(copy.attendantDetail!!.contains("DO NOT DISPENSE"))
     }
 
+    /**
+     * **This test used to assert the opposite**, and the 10g gate showed why that was unsafe
+     * (2026-09-19). The copy told an attendant "nothing was charged for it" — and the code came
+     * back on a fill-up the customer had just paid ₦149 for, because the upload quoted an id the
+     * server had never issued. The money was real; only our reference was wrong.
+     *
+     * A server that does not recognise a reference has said nothing at all about whether a payment
+     * happened. The attendant is the one person who can still check, so the line must send them to
+     * look rather than close the question.
+     */
     @Test
-    fun `an unknown transaction says nothing was charged`() {
+    fun `an unknown transaction never claims the customer was not charged`() {
         val copy = business("No transaction was found for this id.", PumpErrorCodes.TRANSACTION_NOT_FOUND)
 
         assertEquals(FailureCopy.SEE_ATTENDANT, copy.customerMessage)
-        assertTrue(copy.attendantDetail!!.contains("nothing was charged"))
+        assertFalse(
+            "a reference the server does not know says nothing about whether money moved",
+            copy.attendantDetail!!.contains("nothing was charged"),
+        )
+        assertTrue(copy.attendantDetail!!.contains("check the payment"))
         assertTrue(copy.recoverable)
     }
 

@@ -1135,7 +1135,32 @@ captures are the test fixtures.
   - **5 · boot-resume trap** — force-stop on a **live** deadline: same `transactionId`, **same
     `expiresAtEpochMs`** (restored, not re-granted), and `POST /authorise` still at 2. Also passed
     accidentally across a full reinstall earlier.
-  - **6 · Flow 3 fill-up — SKIPPED.** The mock tank is **60 L**, which at ₦1,490/L is a **₦89,400**
+  - **6 · Flow 3 fill-up — RUN 2026-09-19 (third sitting), and it FAILED, which is why it mattered.**
+    The debug tank floor was lowered to 0.1 L (~₦149) first — the slider *and*
+    `MockPulseSource`'s own `coerceIn`, which clamped independently and made moving the slider
+    alone look like it worked. **Two defects, both fixed, both now tested:**
+    - **The upload quoted an id no `/authorise` ever issued.** `onFillupDigitalSuccess` recorded
+      `source.txnId` — the local `BLC-…` reference minted at attendant-authorise, before any
+      server transaction existed — instead of `success.transactionRef`. The ₦149 was taken, 0.1 L
+      flowed, and `/transactions/upload` was refused as **terminal**: `uploadError` set,
+      `syncedAt` null, excluded from `getPendingSync` forever. **A paid transaction with no
+      dispense against it — the one outcome 10f exists to prevent**, on the first fill-up ever
+      run against production. Flow 1 never had it; it has always taken the id from the payment
+      result.
+    - **`TRANSACTION_NOT_FOUND` told the attendant "nothing was charged for it".** It fired on a
+      sale the customer had *just paid*. A reference the server does not recognise says nothing
+      about whether money moved, and that line closes the question at the one moment someone
+      could still check. Second instance of the same false-reassurance pattern as finding #5.
+    - **What passed:** `quoteForDispensed` sent `amount: 149, expectedLitres: 0.1` — a clean
+      payable step, nothing floored away — and the QR was a **real Paystack checkout URL**, which
+      confirms 10d's fix to the path that used to build a `nip://transfer` payload no bank
+      honours. The screen held on tank-full until the URL arrived.
+    - **Reconciliation owed:** production still holds transaction
+      `740e2af7-3573-45b1-a92b-813f2730ac93` as PAID with no dispense recorded, and the local row
+      `BLC-77819` is condemned. ₦149, ours, on a throwaway pump — but it should be mentioned to
+      Balancee rather than left as a silent discrepancy.
+
+  - _(superseded)_ **6 · Flow 3 — was skipped earlier in the sitting.** The mock tank is **60 L**, which at ₦1,490/L is a **₦89,400**
     real charge, and a fill-up fixes its amount before the QR appears. Needs the debug screen's
     tank set to ~0.15 L first. `quoteForDispensed` and the fill-up QR path stay unproven against
     production.

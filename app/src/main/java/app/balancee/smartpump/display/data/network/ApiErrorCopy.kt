@@ -102,10 +102,16 @@ private fun ApiError.Business.businessCopy(context: String): FailureCopy = when 
         recoverable = true,
     )
 
+    // **Do not tell an attendant nothing was charged.** The draft did, and the 10g gate showed
+    // why that is unsafe (2026-09-19): this code came back on a fill-up the customer had *just
+    // paid* ₦149 for, because the upload quoted an id the server had never issued. The money was
+    // real; only our reference was wrong. A refusal to recognise a reference says nothing
+    // whatsoever about whether a payment happened, and the attendant is the one person who can
+    // still check before the customer leaves.
     PumpErrorCodes.TRANSACTION_NOT_FOUND -> FailureCopy(
         customerMessage = SEE_ATTENDANT,
-        attendantDetail = "Balanceè has no record of this sale, so nothing was charged for it. " +
-            "Start a new sale.",
+        attendantDetail = "Balanceè does not recognise this sale's reference. That does not mean " +
+            "the customer was not charged — check the payment before starting a new sale.",
         recoverable = true,
     )
 

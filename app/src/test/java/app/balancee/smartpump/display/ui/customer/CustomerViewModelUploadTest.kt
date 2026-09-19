@@ -11,6 +11,7 @@ import app.balancee.smartpump.display.domain.model.TransactionState
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -22,6 +23,10 @@ class CustomerViewModelUploadTest {
     @get:Rule val mainRule = MainDispatcherRule()
 
     private val harness = VmHarness()
+    private fun state(vm: CustomerViewModel) = vm.ui.value.state
+
+    /** Deliberately unlike the `BLC-…` shape this pump mints for itself. */
+    private val SERVER_TXN_ID = "740e2af7-3573-45b1-a92b-813f2730ac93"
 
     private fun prepayThrough(litresPulses: Int = 500): CustomerViewModel {
         val vm = harness.build()
@@ -49,6 +54,50 @@ class CustomerViewModelUploadTest {
         val record = harness.transactions.last!!
         assertEquals("BPM-TEST-0001", record.paymentReference)
         assertTrue(record.isUploadable)
+    }
+
+    /**
+     * **The id on the record must be one the server issued** — the upload quotes it verbatim
+     * (`TransactionUploader` sends `record.id`), so an id this pump invented describes a sale the
+     * backend has never heard of.
+     *
+     * Found by the 10g gate on a real ₦149 fill-up (2026-09-19). Fill-up mints a local `BLC-…`
+     * reference at attendant-authorise, before any server transaction exists, and
+     * `onFillupDigitalSuccess` was recording *that* rather than the one `/authorise` returned. The
+     * fuel flowed, the money was taken, and the upload was refused as terminal — leaving a paid
+     * transaction with no dispense against it, which is the single outcome 10f exists to prevent.
+     *
+     * Flow 1 never had the bug, so it is asserted here too: the guarantee is "digital sales record
+     * the server's id", not "fill-up was patched once".
+     */
+    @Test
+    fun `a fill-up digital sale records the server's id, not the one this pump minted`() = runTest {
+        val vm = harness.build()
+        vm.onAttendantFillUpAuthorise()
+        harness.pulseSource.emitPulse(count = 10) // 0.10 L, as the gate ran it
+        vm.onSimulateNozzleShutoff()
+        val localRef = (state(vm) as TransactionState.FillupTankFull).txnId
+        vm.onFillupPayDigital()
+        harness.payment.succeed(ref = SERVER_TXN_ID)
+
+        val record = harness.transactions.last!!
+        assertEquals("the upload would quote an id no authorise ever issued", SERVER_TXN_ID, record.id)
+        assertNotEquals("the pump's own reference reached the record", localRef, record.id)
+        assertTrue(record.isUploadable)
+    }
+
+    @Test
+    fun `a pre-pay digital sale records the server's id too`() = runTest {
+        val vm = harness.build()
+        vm.onStartTransaction()
+        vm.onModeTileTap(TransactionMode.PRE_PAY)
+        vm.onAmountTileTap(amountNaira = 5000)
+        vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+        vm.onModeConfirm()
+        harness.payment.succeed(ref = SERVER_TXN_ID, litresAuthorised = 5.0)
+        harness.pulseSource.emitPulse(count = 500)
+
+        assertEquals(SERVER_TXN_ID, harness.transactions.last!!.id)
     }
 
     /** `createdAt` is when the sale finished. The upload needs the other end of the window too. */

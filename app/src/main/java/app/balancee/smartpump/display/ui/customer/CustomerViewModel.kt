@@ -926,7 +926,16 @@ class CustomerViewModel @Inject constructor(
         completeAndRecord(
             TransactionState.Complete(
                 flow = TransactionFlow.FILLUP_DIGITAL,
-                txnId = source.txnId,
+                // **The server's id, not the one this pump made up.** `source.txnId` is the
+                // `BLC-…` reference `generateCashTxnId()` minted at attendant-authorise, before
+                // any server transaction existed — and the upload quotes the record's id, so a
+                // fill-up recorded under it describes a sale the backend has never heard of.
+                //
+                // The 10g gate proved it on a real ₦149 sale (2026-09-19): the fuel flowed, the
+                // money was taken, and `/transactions/upload` was refused as terminal, leaving a
+                // paid transaction with no dispense against it. Flow 1 never had this because it
+                // has always taken the id from the payment result; this path had its own.
+                txnId = success.transactionRef,
                 litres = source.verifiedLitres,
                 amountKobo = source.amountDueKobo,
                 method = PaymentMethod.BANK_QR_TRANSFER,
