@@ -1,6 +1,34 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-19, latest (**10e is done**; a failure now says two different things to two different people)
+## Current status — 2026-09-19, latest (**10f is done** — a dispense finally reaches the backend, and the record survives a power cut)
+
+**The upload job exists, and the record it uploads exists for the first time.** 10f opened by
+finding that `PaymentResult.Success` has carried the server's `paymentReference` since 10a and
+**every call site dropped it** — `/transactions/upload` requires one and only `/authorise` issues
+one, so every digital dispense this app had ever completed was unreportable and nothing said so.
+Schema v5 keeps it, along with when fuel started flowing and why a record was refused.
+
+**`TransactionUploader` holds every decision and has no Android in it**; the worker answers
+WorkManager's one question and has no `Result.failure()` branch, because the only thing allowed to
+abandon a dispense is the uploader — by marking the row, with a reason, in the log a person reads.
+
+**`RETRY_LATER` is doing the job 10e built it for.** `PAYMENT_NOT_CONFIRMED` waits instead of
+discarding the record of fuel a customer has already taken. `NotActivated` departs from the shared
+taxonomy on purpose: credentials are a device state, not a verdict on a sale.
+
+**#48 is closed on our side** — `syncedAt` is written only on a 200 and nothing re-sends after it.
+The backend half of it stays open with #18.
+
+**Branch state:** `feature/phase-10-payments`, working tree clean, JVM **432 tests / 45 classes**
+green, `compileDebugRealHwKotlin`, `lintDebug` and `assembleDebugProd` clean. (Run `lintDebug` and
+`assembleDebugProd` in **separate** invocations — together they race on generated Hilt sources and
+lint dies with an internal error that is not a code defect.) **Next is 10g, the tablet gate against
+production** — now the only thing between phase 10 and a merge. Four new migration tests and the
+worker's real scheduling have not run on a device yet and go with it.
+
+---
+
+## Previous status — 2026-09-19, later (**10e is done**; a failure now says two different things to two different people)
 
 **Both halves of 10e have landed, and #14 and #15's mapping half close with them.** A failure no
 longer reaches the screen as one invented sentence plus the server's raw prose. `FailureCopy` carries
@@ -2142,3 +2170,89 @@ dispense the backend has not yet seen payment for. Carries **#48** (upload once,
 superseded figure — a corrected upload returns `200 Transaction recorded` and changes nothing, so a
 wrong figure sticks while every log in the app says it went through). Then **10g**, the tablet gate
 against production.
+
+---
+
+### Phase 10f — the dispense finally reaches the backend
+**Date:** 2026-09-19
+**Status:** done (JVM-verified; the instrumented half rides with 10g)
+**Commit(s):** `ed88f17` (the record), `84b20a1` (the uploader), `75f7de1` (WorkManager + the wiring)
+
+**Summary (plain language):**
+Until now the app counted the fuel, took the money, and kept the result to itself. Balanceè's own
+records had no idea a sale had happened unless someone was watching the payment page. This phase
+adds the job that reports each dispense to the backend — and, crucially, one that keeps trying. A
+forecourt with no internet is normal, not an error, so the record sits safely on the tablet and goes
+out when the link comes back, including after a power cut, without anyone reopening the app.
+
+The first thing the work turned up was that the app could not have reported a sale even if it had
+tried. The backend requires a payment reference with every dispense, it is issued once when the sale
+is authorised, and the app had been throwing it away at every point it arrived — for months. So the
+phase started by fixing the record, and only then built the thing that sends it.
+
+The second thing worth saying in plain language: this job will never quietly decide a sale did not
+happen. If Balanceè refuses a record for a reason that will not change, the sale stays in the pump's
+log marked as *not recorded*, in red, with the litres and the reason — because at that point the
+station has sold fuel that the backend's books do not know about, and that needs a person.
+
+**Technical notes:**
+- **The defect that reframed the phase (`ed88f17`).** `PaymentResult.Success.paymentReference` has
+  existed since 10a; `onPaymentSuccess`, `onFillupDigitalSuccess` and `onUssdSmsConfirmed` all
+  discarded it, the last two by rebuilding `Complete` from the source state and ignoring the result
+  entirely. Both now take the `PaymentResult` whole.
+- **Schema v5** adds `transactions.paymentReference`, `.startedAt` and `.uploadError`. All three
+  nullable with no default, because a pre-10f sale has none of them and a default would invent
+  history. `getPendingSync` filters on all three, and each condition excludes something different
+  that would otherwise sit in the queue forever: already sent (**#48**), a cash sale with no
+  reference to quote, and one the server has refused for good.
+- **The two fields are carried on the states, not in the ViewModel.** A power cut mid-dispense is
+  the one moment the upload most needs them. `FixedDispensing` and `Complete` carry both;
+  `FillupDispensing` → `FillupTankFull` → `FillupDigitalAwaitingPayment` carry the start time along
+  the fill-up chain. `CashFixedDispensing` gets neither — cash has nothing to upload.
+- **`TransactionUploader` (`84b20a1`) is a plain class.** WorkManager decides *when*; everything
+  that can be wrong lives where a JVM test can put it through a server that says no six different
+  ways. 16 tests, refusal fixtures taken from the #32 gate captures.
+- **`RETRY_LATER` is what this phase rests on.** `PAYMENT_NOT_CONFIRMED` is a 409 that parses as a
+  considered refusal and is not one; read as final it discards the record of fuel a customer has
+  already taken. A test drives it through refusing twice and then confirming.
+- **`NotActivated` deliberately departs from the shared taxonomy.** Terminal for a customer at a
+  screen, wrong here — credentials are a property of the device, and condemning the queue over one
+  would throw away a day of real dispenses that a re-activation fixes.
+- **A terminal refusal closes a record but never silently**: the row keeps its place, stops being
+  offered, carries the attendant-facing sentence 10e already wrote for that failure, and writes a
+  red `DISPENSE_UPLOAD_FAILED` entry to the pump log with the litres as the headline. Transient
+  failures write no event — one per attempt would bury the ones that matter.
+- **The run continues past a failure.** One record the server refuses must not hold the rest of the
+  day behind it, and the run is only `RETRY` if something transient happened.
+- **`TransactionUploadWorker` (`75f7de1`) has no `Result.failure()` branch.** `failure()` means give
+  up for good, and the only thing allowed to abandon a dispense is the uploader. An unexpected throw
+  takes the same answer: come back, conclude nothing.
+- **Enqueued under one name with `KEEP`, not `REPLACE`.** A busy pump enqueues a request per sale;
+  `REPLACE` would cancel the run in flight and reset its backoff every time, so a forecourt on a bad
+  link would restart the queue forever and never finish reporting anything. Constrained on
+  `CONNECTED`, backed off 30 s doubling.
+- **Hilt owns WorkManager's configuration**, because the worker needs the repository, the API client
+  and the credential store. The manifest removes WorkManager's default initializer to match —
+  leaving both is how an app works in debug and cannot instantiate its worker in the field.
+  `assembleDebugProd` is what proves the graph resolves on the build that charges real cards.
+- **Two test-fake defects fixed, both of the kind that let a real defect through.**
+  `FakeTransactionRepository.getPendingSync` returned everything and mirrored none of the DAO's
+  filter; `FakePaymentProcessor.succeed` defaulted the payment reference to null, so tests passed
+  against records the upload could never use.
+- **Incidental finding:** `PumpApiClient.uploadTransaction` already wraps the call in
+  `retryingApiCall`, so a single blip is absorbed three attempts deep and never reaches the job.
+  A fake that failed only the first call was testing nothing; failures are now keyed by transaction
+  id, and the absorption has its own test.
+- Verified: JVM **432 tests / 45 classes** green (was 388 / 42 at the start of the day);
+  `compileDebugRealHwKotlin`, `lintDebug` and `assembleDebugProd` clean.
+
+**Not yet proven on a device:**
+The four new v4→v5 migration tests and the worker's real scheduling (constraint, backoff, survival
+across a reboot) both need the tablet. They ride with 10g rather than being claimed here.
+
+**Next:**
+**10g — the gate.** A real small sale end to end through the customer UI on the tablet against
+production and `SN-TEST-001`, QR scanned with a phone, sized like the #32 sitting. It now also has
+to show the dispense arriving in the dashboard's Transactions view (**#49**), which is the only way
+the figure can be read back at all — the API cannot return it (**#46**). Nothing merges until it
+passes.

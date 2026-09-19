@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-19, latest (**10e is DONE — both halves**; #14 and #15's mapping half close with it. **Next is 10f, the upload job.**)_
+_Last updated: 2026-09-19, latest (**10f is DONE** — the upload job, and #48's half of it. **Next is 10g, the tablet gate against production**, which is now the last thing between phase 10 and a merge.)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -508,9 +508,11 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - **Why it was invisible:** the reply does not echo `actualLitresDispensed` (#46), so a 200 is the
     only signal the app gets, and it means "accepted", not "stored". Nothing in the API can read the
     figure back; only the dashboard shows it.
-  - **Ours (7e):** upload once per transaction and never re-send a superseded figure, because the
-    first send is the only one that counts. **Theirs — a fifth item for #18:** either accept a
-    correction, or refuse the repeat with a code instead of a 200 that reads as success.
+  - ~~**Ours (7e):** upload once per transaction and never re-send a superseded figure~~ ✅ **DONE
+    2026-09-19 (10f).** `syncedAt` is written only on a 200, `getPendingSync` excludes anything
+    carrying it, and nothing in the app re-sends. **Theirs — a fifth item for #18, still open:**
+    either accept a correction, or refuse the repeat with a code instead of a 200 that reads as
+    success.
 - [x] **49. Uploaded dispenses ARE visible to an operator — confirmed 2026-09-17.** The dashboard's
   per-pump Transactions view lists each transaction with its state and, for a dispensed one, the
   litres recorded. That is the counterpart the **14-day parallel run** needs: something to reconcile
@@ -1048,14 +1050,38 @@ captures are the test fixtures.
   - ~~Wire `ERROR_COPY_DRAFT.md` Catalogue A into the customer's one plain line and the attendant
     panel's detail.~~ ✅ Done. It was blocked on #8 for the right reason — nothing produced an
     `ApiError` a customer could see until 10c/10d did.
-- [ ] **10f — Upload job (7e).** Add `workmanager` (confirmed absent from
-  `gradle/libs.versions.toml`), a `TransactionUploadWorker`, and the thing that finally sets
-  `syncedAt`.
-  - Carries **#48**: upload **once** per transaction, and never re-send a superseded figure. An
-    identical retry is proven harmless; a *corrected* one returns `200 Transaction recorded` and
-    changes nothing, so a wrong figure sticks while every log in the app says it went through.
-  - **#47** confirmed the endpoint accepts any litres figure, so partial dispenses, OQ #22 early
-    ends and 7h's recovered pulses can all be reported honestly.
+- [x] **10f — Upload job (7e). DONE 2026-09-19** — `ed88f17` / `84b20a1` / `75f7de1`.
+  - **The defect it found first, and the reason it is four commits rather than one:**
+    `PaymentResult.Success` has carried the server's `paymentReference` since 10a and **every call
+    site dropped it**. `/transactions/upload` requires it and only `/authorise` issues one, so
+    every digital dispense this app had ever completed was unreportable, and nothing said so. The
+    upload job would have been built on a record that could not be uploaded.
+  - **Schema v5**: `transactions.paymentReference`, `.startedAt`, `.uploadError` — all nullable,
+    no defaults, because a pre-10f sale genuinely has none of the three. `getPendingSync` filters
+    on all three, and each condition excludes something different that would otherwise sit in the
+    queue forever (already sent; a cash sale with no reference; one the server refused for good).
+  - **`TransactionUploader` holds every decision and has no Android in it**;
+    `TransactionUploadWorker` answers WorkManager's one question and nothing else. The worker has
+    **no `Result.failure()` branch** on purpose: the only thing allowed to abandon a dispense is
+    the uploader, by marking the row with a reason a person reads.
+  - ✅ **#48 is satisfied on our side.** `syncedAt` is written only on a 200 and nothing re-sends
+    after it. _(The backend half of #48 — accept a correction, or refuse the repeat with a code
+    instead of a 200 that reads as success — stays open with #18.)_
+  - ✅ **#47** is used: `actualLitresDispensed` is what flowed, so partial dispenses, OQ #22 early
+    ends and 7h's recovered pulses are all reported honestly.
+  - **`RETRY_LATER` earns its keep here**, which is what 10e built it for: `PAYMENT_NOT_CONFIRMED`
+    waits instead of discarding the record of fuel a customer has already taken. `NotActivated`
+    departs from the shared taxonomy deliberately — credentials are a device state, not a verdict
+    on a sale, so the queue waits rather than condemning a day of real dispenses.
+  - **A terminal refusal is never silent**: the row keeps its place, stops being offered, carries
+    10e's attendant-facing sentence, and writes a red `DISPENSE_UPLOAD_FAILED` entry to the pump
+    log with the litres as the headline. Transient failures write nothing — one event per attempt
+    would bury the ones that matter.
+  - **Found while writing the fake:** `PumpApiClient.uploadTransaction` already wraps the call in
+    `retryingApiCall`, so a single blip is absorbed three attempts deep and never reaches the job.
+    Pinned by its own test.
+  - **Not yet proven on a device.** The four new migration tests and the worker's real scheduling
+    both need the tablet; they go with **10g**.
 - [ ] **10g — Gate: run it on the tablet against production.** The probe panel proved the
   *endpoints*; this proves the *app*. A real small sale end to end through the customer UI against
   `SN-TEST-001`, scanning the QR with a phone. Sized like the #32 sitting. Nothing merges until it
