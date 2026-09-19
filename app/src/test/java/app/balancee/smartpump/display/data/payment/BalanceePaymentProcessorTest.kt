@@ -19,6 +19,7 @@ import app.balancee.smartpump.display.data.network.dto.UploadTransactionRequest
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.FuelType
+import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
@@ -198,7 +199,9 @@ class BalanceePaymentProcessorTest {
         val result = processor.process(tender(500_000)).first()
 
         assertTrue(result is PaymentResult.Failed)
-        assertTrue((result as PaymentResult.Failed).reason.contains("payment page"))
+        val failure = (result as PaymentResult.Failed).failure
+        assertEquals(FailureCopy.SEE_ATTENDANT, failure.customerMessage)
+        assertTrue(failure.attendantDetail!!.contains("no payment page"))
     }
 
     /** Fetch-before-authorise is the correctness guarantee, so a price we cannot read stops the sale. */
@@ -212,9 +215,13 @@ class BalanceePaymentProcessorTest {
         assertNull("nothing should have been authorised", service.lastAuthorise)
     }
 
-    /** The server's own words, carried through rather than paraphrased into copy nobody agreed. */
+    /**
+     * The split (10e): the customer gets one plain line and the attendant gets the sentence that
+     * says what to do about it. Before this the server's own prose went on the customer-facing
+     * display, which is the defect ERROR_COPY_DRAFT.md exists to fix.
+     */
     @Test
-    fun `a refusal reports the server's message`() = runTest {
+    fun `a refusal splits into a customer line and an attendant line`() = runTest {
         service.authoriseEnvelope = ApiEnvelope(
             status = false,
             message = "Amount mismatch for PETROL",
@@ -223,7 +230,11 @@ class BalanceePaymentProcessorTest {
 
         val result = processor.process(tender(500_000)).first()
 
-        assertEquals("Amount mismatch for PETROL", (result as PaymentResult.Failed).reason)
+        val failure = (result as PaymentResult.Failed).failure
+        assertEquals(FailureCopy.SEE_ATTENDANT, failure.customerMessage)
+        assertTrue(failure.attendantDetail!!.contains("does not match the station's"))
+        // Recoverable: an attendant who corrects the price can sell.
+        assertTrue(failure.recoverable)
     }
 
     // ---- the price the customer sees (10c-bis) ------------------------------------

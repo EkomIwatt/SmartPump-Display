@@ -40,9 +40,18 @@ sealed class PaymentResult {
         val litresAuthorised: Double? = null,
     ) : PaymentResult()
 
-    /** Payment definitively failed. [transactionRef] is null if we never received a ref. */
+    /**
+     * Payment definitively failed. [transactionRef] is null if we never received a ref.
+     *
+     * @param failure both halves of what to say about it — the customer's one plain line and the
+     *   attendant's diagnostic detail. It was a single `reason` string until 10e, which meant the
+     *   ViewModel had to invent the customer's sentence at the call site: every server failure read
+     *   "Payment was not completed." no matter what the server had actually refused, and a
+     *   *not yet* was indistinguishable from a *no*. Deciding the words is the processor's job,
+     *   because only it knows which failure this is.
+     */
     data class Failed(
-        val reason: String,
+        val failure: FailureCopy,
         val transactionRef: String? = null,
     ) : PaymentResult()
 

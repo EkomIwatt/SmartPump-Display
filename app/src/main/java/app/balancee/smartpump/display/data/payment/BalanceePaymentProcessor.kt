@@ -13,8 +13,10 @@ import app.balancee.smartpump.display.data.network.ApiResult
 import app.balancee.smartpump.display.data.network.PumpApiClient
 import app.balancee.smartpump.display.data.network.RetryPolicy
 import app.balancee.smartpump.display.data.network.retryPolicy
+import app.balancee.smartpump.display.data.network.toFailureCopy
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
 import app.balancee.smartpump.display.domain.model.EventType
+import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
@@ -55,7 +57,7 @@ class BalanceePaymentProcessor @Inject constructor(
         val synced = when (val result = configSync.fetch()) {
             is ApiResult.Success -> result.data
             is ApiResult.Failure -> {
-                emit(PaymentResult.Failed(reason = result.error.describe("could not read the price")))
+                emit(PaymentResult.Failed(failure = result.error.toFailureCopy("could not read the price")))
                 return@flow
             }
         }
@@ -63,7 +65,14 @@ class BalanceePaymentProcessor @Inject constructor(
 
         val quote = quoteFor(request, synced.koboPerLitre)
         if (quote.amountKobo <= 0) {
-            emit(PaymentResult.Failed(reason = "That amount does not buy any fuel at the current price."))
+            emit(
+                PaymentResult.Failed(
+                    failure = FailureCopy(
+                        customerMessage = FailureCopy.AMOUNT_TOO_SMALL,
+                        attendantDetail = "That amount does not buy any fuel at the current price.",
+                    ),
+                ),
+            )
             return@flow
         }
 
@@ -88,7 +97,7 @@ class BalanceePaymentProcessor @Inject constructor(
         ) {
             is ApiResult.Success -> result.data
             is ApiResult.Failure -> {
-                emit(PaymentResult.Failed(reason = result.error.describe("could not start the sale")))
+                emit(PaymentResult.Failed(failure = result.error.toFailureCopy("could not start the sale")))
                 return@flow
             }
         }
@@ -98,7 +107,17 @@ class BalanceePaymentProcessor @Inject constructor(
             // A 200 with nothing to scan is worse than a refusal: the screen would show a QR-shaped
             // hole and the customer would wait at it. #46 made this field nullable; this is the
             // caller that has to care.
-            emit(PaymentResult.Failed(reason = "The sale started but no payment page was returned."))
+            emit(
+                PaymentResult.Failed(
+                    failure = FailureCopy(
+                        customerMessage = FailureCopy.SEE_ATTENDANT,
+                        attendantDetail = "The sale started but the server returned no payment page, " +
+                            "so there was nothing to scan. Nothing was charged — start a new sale, " +
+                            "and report it if it repeats.",
+                    ),
+                    transactionRef = authorised.transactionId,
+                ),
+            )
             return@flow
         }
 
@@ -182,7 +201,11 @@ class BalanceePaymentProcessor @Inject constructor(
             if (deadline != null && !clock.instant().isBefore(deadline)) {
                 emit(
                     PaymentResult.Failed(
-                        reason = "The payment window closed before this was paid.",
+                        failure = FailureCopy(
+                            customerMessage = "The payment window closed before this was paid.",
+                            attendantDetail = "The server's payment window expired before the money " +
+                                "landed. Nothing was charged — start a new sale.",
+                        ),
                         transactionRef = transactionId,
                     ),
                 )
@@ -215,7 +238,7 @@ class BalanceePaymentProcessor @Inject constructor(
                 is ApiResult.Failure -> if (result.error.isPollTerminal) {
                     emit(
                         PaymentResult.Failed(
-                            reason = result.error.describe("could not confirm the payment"),
+                            failure = result.error.toFailureCopy("could not confirm the payment"),
                             transactionRef = transactionId,
                         ),
                     )
@@ -282,24 +305,6 @@ fun interface TransactionIdFactory {
 @Singleton
 class UuidTransactionIdFactory @Inject constructor() : TransactionIdFactory {
     override fun next(): String = UUID.randomUUID().toString()
-}
-
-/**
- * A placeholder for the attendant-facing reason string, and **deliberately thin**.
- *
- * Phase 10e wires `ERROR_COPY_DRAFT.md` Catalogue A in properly: one plain line for the customer,
- * the diagnostic detail behind the swipe-up panel, and a retryable failure looking different from a
- * terminal one. That work was blocked on #8 because nothing produced an `ApiError` a customer could
- * see — this class is the first thing that does. Until then the server's own `message` is carried
- * through verbatim rather than paraphrased, because a paraphrase written now is copy nobody agreed.
- */
-private fun ApiError.describe(context: String): String = when (this) {
-    is ApiError.Business -> message ?: "$context — the server declined it."
-    is ApiError.Network -> "$context — no connection to Balanceè."
-    is ApiError.NotActivated -> "This pump is not activated yet."
-    is ApiError.Http -> "$context — the server returned $code."
-    is ApiError.Serialization -> "$context — the server's reply was not understood."
-    is ApiError.Unknown -> context
 }
 
 /**

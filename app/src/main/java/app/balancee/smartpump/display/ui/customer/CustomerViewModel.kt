@@ -47,6 +47,7 @@ import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.EventType
+import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentRequest
@@ -58,6 +59,7 @@ import app.balancee.smartpump.display.domain.model.Transaction
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
+import app.balancee.smartpump.display.domain.model.toErrorState
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.EventRepository
@@ -804,7 +806,7 @@ class CustomerViewModel @Inject constructor(
                 when (result) {
                     is PaymentResult.Pending -> onFillupDigitalPending(source, result)
                     is PaymentResult.Success -> onFillupDigitalSuccess(source)
-                    is PaymentResult.Failed -> onFillupDigitalFailed(source, result.reason)
+                    is PaymentResult.Failed -> onFillupDigitalFailed(source, result.failure)
                 }
             }
         }
@@ -831,7 +833,7 @@ class CustomerViewModel @Inject constructor(
                     when (result) {
                         is PaymentResult.Pending -> Unit
                         is PaymentResult.Success -> onFillupDigitalSuccess(source)
-                        is PaymentResult.Failed -> onFillupDigitalFailed(source, result.reason)
+                        is PaymentResult.Failed -> onFillupDigitalFailed(source, result.failure)
                     }
                 }
         }
@@ -878,10 +880,19 @@ class CustomerViewModel @Inject constructor(
         )
     }
 
-    private fun onFillupDigitalFailed(source: TransactionState.FillupTankFull, reason: String) {
+    private fun onFillupDigitalFailed(
+        source: TransactionState.FillupTankFull,
+        failure: FailureCopy,
+    ) {
         if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
         expiryJob?.cancel()
-        android.util.Log.w("CustomerVM", "Fill-up digital payment failed: $reason")
+        // No Error state here: the fuel is already in the tank, so the flow falls back to cash
+        // rather than to a card the customer can only dismiss. The diagnostic half still has to go
+        // somewhere, and this is the one failure path with no attendant banner to put it on.
+        android.util.Log.w(
+            "CustomerVM",
+            "Fill-up digital payment failed: " + (failure.attendantDetail ?: failure.customerMessage),
+        )
         setState(
             TransactionState.FillupAwaitingCashConfirm(
                 txnId = source.txnId,
@@ -979,7 +990,9 @@ class CustomerViewModel @Inject constructor(
                     // The attendant typed this amount, so the actionable number is theirs: it goes
                     // to the panel, not onto the customer card (OQ #17).
                     TransactionState.Error(
-                        message = "Amount is too small — please see attendant.",
+                        // Shared with the processor's own below-minimum refusal: one condition,
+                        // one sentence, which is the defect OQ #17 started from.
+                        message = FailureCopy.AMOUNT_TOO_SMALL,
                         recoverable = true,
                         attendantDetail = "Below the smallest dispensable step — the minimum at " +
                             "this price is ${formatNaira(priceKoboPerLitre / 100)} for 0.01 L.",
@@ -1097,7 +1110,7 @@ class CustomerViewModel @Inject constructor(
                 when (result) {
                     is PaymentResult.Pending -> Unit
                     is PaymentResult.Success -> onUssdSmsConfirmed(amountKobo, txnId)
-                    is PaymentResult.Failed -> onUssdFailed(result.reason)
+                    is PaymentResult.Failed -> onUssdFailed(result.failure)
                 }
             }
         }
@@ -1123,17 +1136,16 @@ class CustomerViewModel @Inject constructor(
         startDispensing(litresAuthorised, PaymentMethod.USSD)
     }
 
-    private fun onUssdFailed(reason: String) {
+    private fun onUssdFailed(failure: FailureCopy) {
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
         setState(
-            // The reason comes from the bank SMS parser and means nothing to a customer standing
-            // at the pump; it is exactly what an attendant needs. Split per OQ #17.
-            TransactionState.Error(
-                message = "Payment was not completed.",
-                recoverable = true,
-                attendantDetail = "USSD payment failed — $reason.",
-            )
+            // The split arrives already decided (10e). All this path adds is which payment method
+            // it was, because the attendant's next move differs: a USSD failure is a bank's SMS
+            // that did not arrive, not a QR nobody scanned.
+            failure.toErrorState().let {
+                it.copy(attendantDetail = it.attendantDetail?.let { d -> "USSD — $d" })
+            }
         )
     }
 
@@ -1274,15 +1286,15 @@ class CustomerViewModel @Inject constructor(
         startDispensing(litresAuthorised, method)
     }
 
+    /**
+     * The customer-facing half of 10e. Both lines and the recoverable flag are the processor's —
+     * it is the only thing that knows whether the server refused the sale, declined the card, or
+     * simply has not seen the money land yet, and until 10e all three read "Payment was not
+     * completed." to the customer and "Payment failed — …" to the attendant.
+     */
     private fun onPaymentFailed(failed: PaymentResult.Failed) {
         cancelInFlightJobs()
-        setState(
-            TransactionState.Error(
-                message = "Payment was not completed.",
-                recoverable = true,
-                attendantDetail = "Payment failed — ${failed.reason}.",
-            )
-        )
+        setState(failed.failure.toErrorState())
     }
 
     /**

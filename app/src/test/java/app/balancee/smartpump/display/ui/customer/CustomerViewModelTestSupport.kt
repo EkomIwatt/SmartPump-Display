@@ -13,6 +13,7 @@ package app.balancee.smartpump.display.ui.customer
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.OperationalEvent
 import app.balancee.smartpump.display.domain.model.FuelType
@@ -193,8 +194,26 @@ class FakePaymentProcessor : PaymentProcessor {
         )
     }
 
-    fun fail(reason: String, ref: String? = pendingRef) {
-        terminals.tryEmit(PaymentResult.Failed(reason, ref))
+    /**
+     * [reason] is the attendant's half. The customer's line defaults to the one a real declined
+     * payment carries, so a test that only cares that a payment failed still exercises the split.
+     */
+    fun fail(
+        reason: String,
+        ref: String? = pendingRef,
+        customerMessage: String = FailureCopy.PAYMENT_NOT_COMPLETED,
+        recoverable: Boolean = true,
+    ) {
+        terminals.tryEmit(
+            PaymentResult.Failed(
+                FailureCopy(
+                    customerMessage = customerMessage,
+                    attendantDetail = reason,
+                    recoverable = recoverable,
+                ),
+                ref,
+            ),
+        )
     }
 }
 

@@ -7,6 +7,7 @@
 // Generates monotonically-increasing transaction refs in the BLC-NNNNN format used in the spec.
 package app.balancee.smartpump.display.data.payment
 
+import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
@@ -120,7 +121,17 @@ class MockPaymentProcessor @Inject constructor(
                 )
             )
         } else {
-            emit(PaymentResult.Failed(reason = _failureReason.value, transactionRef = ref))
+            emit(
+                PaymentResult.Failed(
+                    // The customer's line is the same one a real declined payment gets; the mock's
+                    // reason is a diagnostic and belongs behind the PIN with the rest of them.
+                    failure = FailureCopy(
+                        customerMessage = FailureCopy.PAYMENT_NOT_COMPLETED,
+                        attendantDetail = _failureReason.value,
+                    ),
+                    transactionRef = ref,
+                ),
+            )
         }
     }
 
