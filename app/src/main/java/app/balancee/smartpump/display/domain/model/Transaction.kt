@@ -17,6 +17,16 @@ import androidx.compose.runtime.Immutable
  * @param syncedAt           Epoch millis when synced to backend; null if pending sync.
  * @param recoveredLitres    Litres of [litresDispensed] added by Phase 7h pulse-gap recovery
  *                           rather than observed pulse-by-pulse. Normally 0.0.
+ * @param paymentReference   The server's own reference (`BPM-…`) from `/authorise`. **The upload
+ *                           cannot go out without it** and only `/authorise` issues one, so null
+ *                           means this sale is not uploadable — which is exactly right for a cash
+ *                           sale and a defect for any other (10f).
+ * @param startedAt          Epoch millis when fuel began to flow. Null for rows written before
+ *                           10f; the uploader falls back to [createdAt] and records that it did.
+ * @param uploadError        Why this record will never be uploaded, set only for a failure the
+ *                           taxonomy calls TERMINAL. The row stays visible and unsynced rather
+ *                           than being retried forever or quietly dropped — #45's stance, applied
+ *                           to the queue it was written for. Null on every healthy record.
  */
 @Immutable
 data class Transaction(
@@ -32,4 +42,17 @@ data class Transaction(
     val createdAt: Long = System.currentTimeMillis(),
     val syncedAt: Long? = null,
     val recoveredLitres: Double = 0.0,
-)
+    val paymentReference: String? = null,
+    val startedAt: Long? = null,
+    val uploadError: String? = null,
+) {
+    /**
+     * Whether this sale is one the backend expects to hear about at all.
+     *
+     * A cash sale has no `paymentReference` because nothing authorised it, and
+     * `POST /transactions/upload` requires one — so it is not *pending* upload, it is *outside* the
+     * upload path. Conflating the two would leave every cash sale sitting in the queue forever,
+     * failing on a field it can never have.
+     */
+    val isUploadable: Boolean get() = !paymentReference.isNullOrBlank()
+}

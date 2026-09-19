@@ -119,6 +119,15 @@ sealed class TransactionState {
         val txnId: String,
         val priceKoboPerLitre: Long,
         val litresSoFar: Double,
+        /**
+         * When fuel actually began to flow, for `POST /transactions/upload`'s `startedAt` (10f).
+         *
+         * Carried on the state rather than held in the ViewModel because the upload is what the
+         * 14-day parallel run reconciles the station's records against, and a power cut mid-dispense
+         * is precisely when the app most needs to still know when the sale began. Null on states
+         * persisted before 10f; the uploader falls back to the completion time and says so.
+         */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /** Nozzle shutoff detected. Verified count locked. Customer chooses cash or QR. */
@@ -128,6 +137,8 @@ sealed class TransactionState {
         val priceKoboPerLitre: Long,
         val verifiedLitres: Double,
         val amountDueKobo: Long,
+        /** Carried through from [FillupDispensing] — the fuel flowed before the payment. */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /** Customer chose digital after fill-up. Dynamic NIP QR shown. */
@@ -143,6 +154,8 @@ sealed class TransactionState {
          */
         val qrContent: String,
         val expiresAtEpochMs: Long? = null,
+        /** Carried through from [FillupTankFull]. See [FixedDispensing.startedAtEpochMs]. */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /** Customer chose cash. Attendant has not yet tapped CASH RECEIVED. */
@@ -191,6 +204,26 @@ sealed class TransactionState {
         val litresAuthorised: Double,
         val litresSoFar: Double,
         val method: PaymentMethod? = null,
+        /**
+         * The server's own reference for this sale (`BPM-…`), from the authorise (10f).
+         *
+         * `POST /transactions/upload` **requires** it, and only `/authorise` issues one — so a
+         * dispense whose reference was not kept can never be reported, no matter how faithfully its
+         * litres were counted. It arrived on `PaymentResult.Success` from 10a onward and was
+         * dropped on the floor at every call site until 10f went looking for it.
+         *
+         * Null for cash flows, which have nothing to upload, and for the mock.
+         */
+        val paymentReference: String? = null,
+        /**
+         * When fuel actually began to flow, for `POST /transactions/upload`'s `startedAt` (10f).
+         *
+         * Carried on the state rather than held in the ViewModel because the upload is what the
+         * 14-day parallel run reconciles the station's records against, and a power cut mid-dispense
+         * is precisely when the app most needs to still know when the sale began. Null on states
+         * persisted before 10f; the uploader falls back to the completion time and says so.
+         */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     // ---- TERMINAL ----
@@ -209,6 +242,10 @@ sealed class TransactionState {
          * sale that finished normally. Defaulted, so rows persisted before it existed still decode.
          */
         val litresTarget: Double? = null,
+        /** See [FixedDispensing.paymentReference]. Null for a cash sale: nothing to upload. */
+        val paymentReference: String? = null,
+        /** See [FixedDispensing.startedAtEpochMs]. */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /**

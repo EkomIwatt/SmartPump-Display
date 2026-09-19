@@ -294,6 +294,7 @@ class CustomerViewModel @Inject constructor(
                     priceKoboPerLitre = derivedPriceKobo,
                     verifiedLitres = restored.verifiedLitres,
                     amountDueKobo = restored.amountDueKobo,
+                    startedAtEpochMs = restored.startedAtEpochMs,
                 )
                 startFillupDigitalExpiry(source)
                 resumeFillupDigitalPayment(source, restored)
@@ -310,6 +311,11 @@ class CustomerViewModel @Inject constructor(
                             litres = litresFromBaseline(),
                             amountKobo = restored.amountKobo,
                             method = method,
+                            // A sale that finished across a restart is exactly the one the upload
+                            // must not lose, so the reference and the start time come off the
+                            // restored state rather than being re-derived (10f).
+                            paymentReference = restored.paymentReference,
+                            startedAtEpochMs = restored.startedAtEpochMs,
                         )
                     )
                 } else {
@@ -617,6 +623,7 @@ class CustomerViewModel @Inject constructor(
                             txnId = txnId,
                             priceKoboPerLitre = priceKoboPerLitre,
                             litresSoFar = 0.0,
+                            startedAtEpochMs = System.currentTimeMillis(),
                         )
                     )
                     startFillupDispensing(txnId)
@@ -698,6 +705,7 @@ class CustomerViewModel @Inject constructor(
                 priceKoboPerLitre = current.priceKoboPerLitre,
                 verifiedLitres = verifiedLitres,
                 amountDueKobo = amountDueKobo,
+                startedAtEpochMs = current.startedAtEpochMs,
             )
         )
         dispenseJob?.cancel()
@@ -752,6 +760,10 @@ class CustomerViewModel @Inject constructor(
                     amountKobo = current.amountKobo,
                     method = current.method ?: deriveMethodForFlow(current.flow),
                     litresTarget = current.litresAuthorised,
+                    // #47 confirmed the backend accepts a litres figure other than the authorised
+                    // one, so an OQ #22 early end is reported honestly rather than not at all.
+                    paymentReference = current.paymentReference,
+                    startedAtEpochMs = current.startedAtEpochMs,
                 )
                 is TransactionState.CashFixedDispensing -> TransactionState.Complete(
                     flow = TransactionFlow.CASH_FIXED,
@@ -805,7 +817,7 @@ class CustomerViewModel @Inject constructor(
             paymentProcessor.process(fillupDigitalRequest(source)).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> onFillupDigitalPending(source, result)
-                    is PaymentResult.Success -> onFillupDigitalSuccess(source)
+                    is PaymentResult.Success -> onFillupDigitalSuccess(source, result)
                     is PaymentResult.Failed -> onFillupDigitalFailed(source, result.failure)
                 }
             }
@@ -832,7 +844,7 @@ class CustomerViewModel @Inject constructor(
                 .collect { result ->
                     when (result) {
                         is PaymentResult.Pending -> Unit
-                        is PaymentResult.Success -> onFillupDigitalSuccess(source)
+                        is PaymentResult.Success -> onFillupDigitalSuccess(source, result)
                         is PaymentResult.Failed -> onFillupDigitalFailed(source, result.failure)
                     }
                 }
@@ -861,12 +873,21 @@ class CustomerViewModel @Inject constructor(
                 amountDueKobo = pending.amountKobo,
                 qrContent = pending.checkoutUrl.orEmpty(),
                 expiresAtEpochMs = pending.expiresAt?.toEpochMilli(),
+                startedAtEpochMs = source.startedAtEpochMs,
             )
         )
         startFillupDigitalExpiry(source)
     }
 
-    private suspend fun onFillupDigitalSuccess(source: TransactionState.FillupTankFull) {
+    /**
+     * [success] is taken whole because of one field: `paymentReference`. It has arrived here since
+     * 10a and was discarded, and `POST /transactions/upload` cannot go out without it — so this
+     * flow's dispenses were unreportable and nothing said so (10f).
+     */
+    private suspend fun onFillupDigitalSuccess(
+        source: TransactionState.FillupTankFull,
+        success: PaymentResult.Success,
+    ) {
         if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
         expiryJob?.cancel()
         completeAndRecord(
@@ -876,6 +897,8 @@ class CustomerViewModel @Inject constructor(
                 litres = source.verifiedLitres,
                 amountKobo = source.amountDueKobo,
                 method = PaymentMethod.BANK_QR_TRANSFER,
+                paymentReference = success.paymentReference,
+                startedAtEpochMs = source.startedAtEpochMs,
             )
         )
     }
@@ -1109,14 +1132,19 @@ class CustomerViewModel @Inject constructor(
             paymentProcessor.process(request).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> Unit
-                    is PaymentResult.Success -> onUssdSmsConfirmed(amountKobo, txnId)
+                    is PaymentResult.Success -> onUssdSmsConfirmed(amountKobo, txnId, result)
                     is PaymentResult.Failed -> onUssdFailed(result.failure)
                 }
             }
         }
     }
 
-    private suspend fun onUssdSmsConfirmed(amountKobo: Long, txnId: String) {
+    /** [success] is taken for its `paymentReference` — see [onFillupDigitalSuccess]. */
+    private suspend fun onUssdSmsConfirmed(
+        amountKobo: Long,
+        txnId: String,
+        success: PaymentResult.Success,
+    ) {
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
         val litresAuthorised = litresFor(amountKobo)
@@ -1131,6 +1159,8 @@ class CustomerViewModel @Inject constructor(
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
                 method = PaymentMethod.USSD,
+                paymentReference = success.paymentReference,
+                startedAtEpochMs = System.currentTimeMillis(),
             )
         )
         startDispensing(litresAuthorised, PaymentMethod.USSD)
@@ -1281,6 +1311,9 @@ class CustomerViewModel @Inject constructor(
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
                 method = method,
+                // The reference the upload quotes. Received since 10a, kept since 10f.
+                paymentReference = success.paymentReference,
+                startedAtEpochMs = System.currentTimeMillis(),
             )
         )
         startDispensing(litresAuthorised, method)
@@ -1349,6 +1382,8 @@ class CustomerViewModel @Inject constructor(
                                         litres = litresAuthorised,
                                         amountKobo = current.amountKobo,
                                         method = method,
+                                        paymentReference = current.paymentReference,
+                                        startedAtEpochMs = current.startedAtEpochMs,
                                     )
                                 )
                                 return@collect
@@ -1468,6 +1503,10 @@ class CustomerViewModel @Inject constructor(
                 String.format(Locale.UK, "Ended by attendant at %.2f of %.2f L", litres, target)
             },
             recoveredLitres = recoveredLitres,
+            // 10f. Null on a cash sale, which nothing authorised and which therefore has nothing
+            // to upload — `Transaction.isUploadable` is the one place that reads it that way.
+            paymentReference = paymentReference,
+            startedAt = startedAtEpochMs,
         )
 
     private fun cancelInFlightJobs() {

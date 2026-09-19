@@ -270,4 +270,130 @@ class SmartPumpMigrationTest {
             assertEquals(0, c.getInt(0))
         }
     }
+
+    // ---- v4 -> v5 (Phase 10f: the columns a dispense upload needs) --------------------------
+
+    /**
+     * The headline case: a sale that completed before 10f keeps every figure it recorded, and
+     * arrives with all three new columns NULL.
+     *
+     * NULL is the point on each of them. A pre-10f sale has no `BPM-…` reference on file — so
+     * `getPendingSync` will never offer it to the upload job, which is correct: the app cannot
+     * report a dispense whose reference it never kept, and pretending otherwise would send the
+     * backend a row it must refuse. It did not record when fuel started flowing. And it has not
+     * failed to upload; it was never offered. A default on any of the three would invent history.
+     */
+    @Test
+    fun migrate4To5_addsTheUploadColumnsAsNull_andKeepsTheSale() {
+        helper.createDatabase(TEST_DB, 4).use { db ->
+            db.execSQL(
+                """
+                INSERT INTO transactions (id, flow, paymentMethod, litresDispensed, amountKobo, priceKoboPerLitre, transactionRef, attendantId, attendantNote, createdAt, syncedAt, recoveredLitres)
+                VALUES ('txn-1', 'FIXED_PREPAY_DIGITAL', 'BANK_QR_TRANSFER', 3.355, 499895, 149000, 'BLC-847', NULL, NULL, 1717171717000, NULL, 0.0)
+                """.trimIndent(),
+            )
+        }
+
+        val db = helper.runMigrationsAndValidate(TEST_DB, 5, true, *SmartPumpMigrations.ALL)
+
+        db.query(
+            "SELECT litresDispensed, amountKobo, priceKoboPerLitre, paymentReference, startedAt, uploadError " +
+                "FROM transactions WHERE id = 'txn-1'",
+        ).use { c ->
+            assertTrue("audit row survived", c.moveToFirst())
+            assertEquals(3.355, c.getDouble(0), 0.0001)
+            assertEquals(499_895L, c.getLong(1))
+            assertEquals(149_000L, c.getLong(2))
+            assertTrue("no reference was ever kept for a pre-10f sale", c.isNull(3))
+            assertTrue("no dispense start time was recorded", c.isNull(4))
+            assertTrue("it did not fail to upload; it was never offered", c.isNull(5))
+        }
+    }
+
+    /**
+     * The query the upload job actually runs, exercised against the migrated schema.
+     *
+     * Each excluded row is excluded for a different reason, and getting any of them wrong puts a
+     * record in a queue it can never leave: an already-synced sale (**#48** — the first write is
+     * the only one that counts), a cash sale that has no reference to quote, and one the server
+     * refused for good. Only the healthy pending row comes back.
+     */
+    @Test
+    fun migratedSchema_pendingUploadQueryPicksOnlyWhatCanStillBeSent() {
+        helper.createDatabase(TEST_DB, 4).close()
+        val db = helper.runMigrationsAndValidate(TEST_DB, 5, true, *SmartPumpMigrations.ALL)
+
+        fun insert(id: String, reference: String?, syncedAt: Long?, uploadError: String?) {
+            db.execSQL(
+                "INSERT INTO transactions (id, flow, paymentMethod, litresDispensed, amountKobo, " +
+                    "priceKoboPerLitre, transactionRef, attendantId, attendantNote, createdAt, " +
+                    "syncedAt, recoveredLitres, paymentReference, startedAt, uploadError) " +
+                    "VALUES (?, 'FIXED_PREPAY_DIGITAL', 'BANK_QR_TRANSFER', 1.0, 149000, 149000, " +
+                    "?, NULL, NULL, 1, ?, 0.0, ?, 1, ?)",
+                arrayOf(id, id, syncedAt, reference, uploadError),
+            )
+        }
+        insert("pending", "BPM-1", null, null)
+        insert("already-synced", "BPM-2", 1_717_171_717_000L, null)
+        insert("cash", null, null, null)
+        insert("refused", "BPM-3", null, "The server has no record of this sale.")
+
+        db.query(
+            "SELECT id FROM transactions " +
+                "WHERE syncedAt IS NULL AND paymentReference IS NOT NULL AND uploadError IS NULL " +
+                "ORDER BY createdAt ASC",
+        ).use { c ->
+            assertEquals("exactly one row is still uploadable", 1, c.count)
+            assertTrue(c.moveToFirst())
+            assertEquals("pending", c.getString(0))
+        }
+    }
+
+    /**
+     * A pump that skipped every release in between. The chain is what actually runs in the field
+     * on a tablet that sat in a box, and it is where a broken link destroys a station's records
+     * silently.
+     */
+    @Test
+    fun migrate2To5_chainsEveryMigration_preservingEverything() {
+        helper.createDatabase(TEST_DB, 2).use { db ->
+            db.execSQL(
+                """
+                INSERT INTO device_config (id, pumpId, stationName, koboPerLitre, virtualAccountNumber, updatedAt)
+                VALUES (1, 'PUMP 3', 'Total Lekki Ph2', 87050, '0123456789', 1717171717000)
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                INSERT INTO station_identity (id, stationId, displayName, pinHash, pinSalt, setupAtMs)
+                VALUES (1, 'STN-001', 'Total Lekki Ph2', 'hash-abc', 'salt-xyz', 1717171717000)
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                INSERT INTO transactions (id, flow, paymentMethod, litresDispensed, amountKobo, priceKoboPerLitre, transactionRef, attendantId, attendantNote, createdAt, syncedAt)
+                VALUES ('txn-old', 'FILLUP_CASH', NULL, 42.5, 3699625, 87050, 'BLC-001', NULL, NULL, 1717171717000, NULL)
+                """.trimIndent(),
+            )
+        }
+
+        val db = helper.runMigrationsAndValidate(TEST_DB, 5, true, *SmartPumpMigrations.ALL)
+
+        db.query("SELECT koboPerLitre, fuelType FROM device_config WHERE id = 1").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(87_050L, c.getLong(0))
+            assertTrue("v3's nullable fuelType still reads NULL at v5", c.isNull(1))
+        }
+        db.query("SELECT pinHash FROM station_identity WHERE id = 1").use { c ->
+            assertTrue("PIN survived three migrations", c.moveToFirst())
+            assertEquals("hash-abc", c.getString(0))
+        }
+        db.query("SELECT amountKobo, recoveredLitres, paymentReference FROM transactions WHERE id = 'txn-old'")
+            .use { c ->
+                assertTrue("the oldest sale survived three migrations", c.moveToFirst())
+                assertEquals(3_699_625L, c.getLong(0))
+                assertEquals(0.0, c.getDouble(1), 0.0001)
+                assertTrue("a cash sale has no reference, at any version", c.isNull(2))
+            }
+    }
 }

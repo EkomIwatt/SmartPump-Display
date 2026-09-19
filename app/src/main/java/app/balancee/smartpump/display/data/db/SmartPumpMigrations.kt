@@ -85,9 +85,42 @@ object SmartPumpMigrations {
         }
     }
 
+    /**
+     * v4 -> v5 (Phase 10f): the three columns a dispense upload needs, and the one that records
+     * why it never happened.
+     *
+     * All three NULLABLE with no default, and for the same reason each time: there is no honest
+     * value to back-fill. A sale that completed before this existed has no `BPM-…` reference on
+     * file, did not record when fuel started flowing, and has not failed to upload — it was never
+     * offered to the upload job at all. NULL says that; a default would invent history.
+     *
+     * 1. `transactions.paymentReference` — the server's own reference, from `/authorise`.
+     *    `POST /transactions/upload` **requires** it and only `/authorise` issues one, so a row
+     *    without it can never be uploaded. That is correct for a cash sale, which nothing
+     *    authorised, and it is what `getPendingSync` filters on so cash never enters the queue.
+     *
+     * 2. `transactions.startedAt` — epoch millis when fuel began to flow, for the upload's
+     *    `startedAt`. Distinct from `createdAt`, which is when the sale *completed*.
+     *
+     * 3. `transactions.uploadError` — why this row will never be uploaded, set only for a failure
+     *    the #45 taxonomy calls TERMINAL. The row stays in the log, unsynced and carrying its
+     *    reason, rather than being retried forever or quietly marked done.
+     *
+     * Three ADDed columns, so no table rebuild: every existing audit row survives untouched, which
+     * is the whole point of migrating rather than falling back destructively.
+     */
+    private val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE transactions ADD COLUMN paymentReference TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE transactions ADD COLUMN startedAt INTEGER DEFAULT NULL")
+            db.execSQL("ALTER TABLE transactions ADD COLUMN uploadError TEXT DEFAULT NULL")
+        }
+    }
+
     /** All migrations, in order. */
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_2_3,
         MIGRATION_3_4,
+        MIGRATION_4_5,
     )
 }

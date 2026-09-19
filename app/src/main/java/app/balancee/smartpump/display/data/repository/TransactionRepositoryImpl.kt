@@ -43,6 +43,9 @@ class TransactionRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         syncedAt = syncedAt,
         recoveredLitres = recoveredLitres,
+        paymentReference = paymentReference,
+        startedAt = startedAt,
+        uploadError = uploadError,
     )
 
     private fun TransactionEntity.toDomain() = Transaction(
@@ -58,5 +61,8 @@ class TransactionRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         syncedAt = syncedAt,
         recoveredLitres = recoveredLitres,
+        paymentReference = paymentReference,
+        startedAt = startedAt,
+        uploadError = uploadError,
     )
 }
