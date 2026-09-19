@@ -1792,3 +1792,84 @@ in our logs says it went through. Two short questions have gone to the backend a
 **Next:**
 Everything left on the API line is ours: **#43–#48**, all of which belong with the payment flows
 (**#8**). The branch is thirteen commits, green, and unmerged.
+
+---
+
+### Phase 10c-bis — the price on the screen is the price the sale is charged at
+**Date:** 2026-09-19
+**Status:** done
+**Commit(s):** `f739b02` — on branch `feature/phase-10-payments`, not yet merged or pushed
+
+**Summary (plain language):**
+The pump was showing one price and charging another, and nothing in the app connected the two. The
+figure the customer read off the screen was whatever an attendant last typed into the settings
+screen; the figure the sale was actually charged at came from Balanceè's own records, fetched fresh
+every time. They matched today only because somebody had typed 1490 to match what the office
+happened to be holding — the day the office changed its price, the screen would have carried on
+saying the old one, indefinitely, with nobody at the pump any the wiser.
+
+The pump now fetches the price from Balanceè when it starts up and again before every payment, and
+keeps what it fetches. That means a price change is made once in the office and every pump picks it
+up on its own — which is exactly the thing the boss had been told would need someone driving to each
+pump to retype it. The attendant's price field stays, because a pump that has not been activated yet,
+or one that cannot reach the internet, still has to be able to sell; it is now labelled as the
+fallback it is, and the settings screen shows when the price last changed.
+
+Two things now get written into the pump's log. When Balanceè's price replaces the one on the
+device, the log says so, with both figures — otherwise the price on the screen changes and nobody
+can explain why. And in the one case the fix cannot cover — a fill-up that ends in the same few
+seconds a price change lands, where the fuel is already in the customer's tank — the sale goes
+through at Balanceè's price, because that is the only amount Balanceè will accept, and the log
+records what the customer watched alongside what they were charged. A customer querying their
+receipt is otherwise disputing a number nobody can reconstruct.
+
+**Technical notes:**
+- **The finding, restated precisely.** `PumpConfigResponse` had exactly three consumers
+  (`PumpApiClient`, `PumpApiService`, `BalanceePaymentProcessor`) and none stored anything; the only
+  writers of `DeviceConfig` were `OperatorConfigViewModel`, `DebugViewModel` and the VM's
+  debug-build seed. Not a race — a permanent divergence. It is **#18(a) / 7b's second half**, marked
+  BLOCKED since 2026-09-03 because the `/config` shape was unknown; it has been known since
+  2026-09-16 and 10c already parsed it, so the block was stale.
+- **`data/config/PumpConfigSync`** wraps `client.config()` and writes through to `DeviceConfig`
+  before returning. Both callers get the sync as a side effect of what they already did: the
+  processor's fetch-before-authorise (the OQ #8 correctness guarantee) and a new boot call. It
+  returns `SyncedConfig`, which carries the **displaced** price — a caller cannot recover it
+  afterwards, and it is what makes "the price moved during this sale" answerable at all.
+- **Layering:** the boot caller only needs "refresh what you know", so it takes a narrow
+  `domain/config/DeviceConfigSync` interface (bound in `NetworkModule`), keeping `CustomerViewModel`
+  importing only `domain.*` as it does today. The processor takes the concrete class, because it
+  needs the response it just stored.
+- **Only `koboPerLitre` and `fuelType` are taken.** `pumpLabel` and `virtualAccountNumber` survive a
+  sync untouched. `stationName` is deliberately **not** taken though `/config` carries one:
+  `ReceiptText.kt:67` prints `DeviceConfig.stationName` while `CustomerStateHost.kt:108,126,143`
+  shows `StationIdentity.displayName`. That duplication predates this work and is now on the board;
+  resolving it by way of a price sync would have silently changed what receipts say.
+- **No write when nothing moved**, so `updatedAt` keeps meaning *when the price changed* rather than
+  *when we last had signal* — the operator screen renders it.
+- **`EventType.PRICE_SYNCED`** on an actual change only. A first sync is not a change: logging one
+  would put a "price changed" row in every pump's log the day it is activated, which teaches an
+  operator to ignore the row.
+- **`EventType.PRICE_CHANGED_MID_SALE`** for `SaleBasis.Dispensed` only, recorded after the
+  authorise succeeds so the log never carries a discrepancy for a sale that never happened. The
+  detail carries both prices and both amounts. `SaleBasis.Tender` is excluded on purpose — a pre-pay
+  customer is buying a sum, not a volume, so a re-price simply buys them fewer litres.
+- **Honouring the struck price is not available to us**: the server's check is an equality against
+  its own `pricePerUnit`, so any other amount is a refused sale. Added to the **#18** asks; not
+  waited on.
+- **The operator's fuel-log card is now the Pump log**, one chronological list with a headline per
+  event kind. A price row rendered by the fuel wording read "Amount unknown" in `WarningRed`, which
+  means lost fuel — the opposite of what happened.
+- **Boot sync runs on its own coroutine**, not in the boot sequence that asserts the relay-open
+  invariant and resumes a live sale; nothing safety-critical waits on a server that may be
+  unreachable. The fetched price is applied to the display only when the pump is `Idle` — a resumed
+  dispense has already struck its price and its litre target.
+- Verified: JVM **357 tests / 40 classes** green (was 341 / 39), including 11 new in
+  `PumpConfigSyncTest` and 4 in `BalanceePaymentProcessorTest`; `compileDebugRealHwKotlin` and
+  `lintDebug` clean.
+
+**Next:**
+**10d — PAID detection by poll.** ~10 s poll over `GET /transactions/{id}` across the
+`PENDING_PAYMENT` window, terminating on `PAID`, on `expiresAt`, or on cancel — and with it the
+boot-resume trap: `CustomerViewModel:1095` restarts `process()` after a restart, which against a
+real server would authorise a **second** sale for a customer who has already paid for the first.
+`BalanceePaymentProcessor` stays unbound in DI until that poll exists.

@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-18 (Phase 10a–10c built on `feature/phase-10-payments`; **next session starts with the decision under 10c-bis**)_
+_Last updated: 2026-09-19 (10c-bis decided and built; **10d — PAID detection by poll — is next**)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -874,32 +874,75 @@ captures are the test fixtures.
     (the signing freshness window) and is still unmeasured; #15's probe only proves ten is too old.
   - Carries **#46**: one `PumpTransactionResponse` behind the three names, built from the captured
     bytes, so the poll stops silently discarding the `expiresAt` that #43 needs.
-- [ ] **10c-bis — sync the price from `/config`. DECISION PENDING — START HERE.**
-  _Raised 2026-09-18 while answering “what do we do if the price changes mid-fill-up”. The question
-  turned out to rest on a false premise, and the real finding is bigger than the policy._
-  - **Nothing ever writes the server's price into `DeviceConfig`.** `PumpConfigResponse` has exactly
-    three consumers — `PumpApiClient`, `PumpApiService` and `BalanceePaymentProcessor`. The only
-    writers of `DeviceConfig` are the debug screen, the operator settings screen and the VM's own
-    seeded default.
-  - **So the displayed price and the authorised price are unrelated numbers**, and nothing
-    reconciles them. This is not a rare race: it is a **permanent divergence**, zero today only
-    because someone typed 1490 to match what the server happens to hold.
-  - This is **#18(a) / 7b's second half**, marked BLOCKED since 2026-09-03 *because the payload shape
-    was unknown*. It has been known since 2026-09-16 and 10c already parses it. **The block is
-    stale.**
-  - It also retires `BOSS_CONFIRMATIONS_DRAFT.md` **item 1** — the ask marked *highest*, about every
-    price change becoming a physical visit to every pump. The endpoint that kills it has been live
-    since 2026-09-16 and the app has not consumed it.
-  - **Proposed:** fetch on boot, and cache what the processor already fetches before every authorise,
-    so display and authorise agree by construction. Small; the parsing exists.
-  - **Then the residual price-change race is genuinely seconds wide.** Recommended policy: proceed at
-    the server's price and write an operational event to 7h's fuel log. *Not* refusing — refusal
-    degrades to the existing cash path (`FillupAwaitingCashConfirm`, which never touches the API) at
-    the struck price, which is defensible but forces cash on someone who chose digital.
-  - **Honouring the struck price is NOT available to us:** the server's check is an equality against
-    its own price, so any other amount is a refused sale. That needs a backend change — **add to the
-    #18 asks**, do not wait on it.
-  - **Open:** do this as 10c-bis before 10d (recommended), or fold it into 10e. Not "later".
+- [x] **10c-bis — sync the price from `/config`. DECIDED AND DONE 2026-09-19.**
+  _All three calls went the recommended way: build it now rather than fold it into 10e; the server
+  wins and the operator's typed price becomes the pre-activation fallback; the residual race
+  proceeds at the server's price and is logged._
+  - **`PumpConfigSync` is the write-through.** `fetch()` does what `client.config()` did and then
+    stores it, so the two callers get the sync for free: the boot path (`CustomerViewModel`, its own
+    coroutine — a network call must never sit in front of the relay-open invariant or a resumed
+    sale) and every authorise (`BalanceePaymentProcessor`, which already fetched and threw away).
+  - **Only price and fuel type are taken.** `pumpLabel` and `virtualAccountNumber` are the
+    operator's. `stationName` is deliberately **not** taken though the response carries one — see
+    the new board item below.
+  - **The operator's field stays writable, and now says why it exists**: `/config` is a signed call,
+    so a pump that has not redeemed its activation code cannot reach it at all, and an unreachable
+    backend must still leave the pump selling at the last price it knew. The settings screen states
+    that Balanceè sets the price, and shows when it last changed.
+  - **An activated-but-never-configured pump is now sellable from the backend alone**, which is what
+    retires `BOSS_CONFIRMATIONS_DRAFT.md` **item 1** (the ask marked *highest*) in code rather than
+    on paper.
+  - **Two new `EventType`s**, both written only when something actually moved: `PRICE_SYNCED` (the
+    stored price was replaced — the operator's only evidence the screen changed with nobody at the
+    pump) and `PRICE_CHANGED_MID_SALE` (the `Dispensed` race). A first sync is not a change, and an
+    unchanged price writes nothing at all, so `updatedAt` keeps meaning *when the price changed*
+    rather than *when we last had signal*.
+  - The operator screen's card is now the **Pump log**, one chronological list with a headline per
+    event kind — a price row rendered by the fuel wording read "Amount unknown" in red, which is
+    lost fuel, which is not what happened.
+  - Verified: JVM **357 tests / 40 classes** green (was 341 / 39); `compileDebugRealHwKotlin` and
+    `lintDebug` clean.
+
+  _(original entry, as it stood when the decision was owed)_
+  - [ ] **10c-bis — sync the price from `/config`. DECISION PENDING — START HERE.**
+    _Raised 2026-09-18 while answering “what do we do if the price changes mid-fill-up”. The question
+    turned out to rest on a false premise, and the real finding is bigger than the policy._
+    - **Nothing ever writes the server's price into `DeviceConfig`.** `PumpConfigResponse` has exactly
+      three consumers — `PumpApiClient`, `PumpApiService` and `BalanceePaymentProcessor`. The only
+      writers of `DeviceConfig` are the debug screen, the operator settings screen and the VM's own
+      seeded default.
+    - **So the displayed price and the authorised price are unrelated numbers**, and nothing
+      reconciles them. This is not a rare race: it is a **permanent divergence**, zero today only
+      because someone typed 1490 to match what the server happens to hold.
+    - This is **#18(a) / 7b's second half**, marked BLOCKED since 2026-09-03 *because the payload shape
+      was unknown*. It has been known since 2026-09-16 and 10c already parses it. **The block is
+      stale.**
+    - It also retires `BOSS_CONFIRMATIONS_DRAFT.md` **item 1** — the ask marked *highest*, about every
+      price change becoming a physical visit to every pump. The endpoint that kills it has been live
+      since 2026-09-16 and the app has not consumed it.
+    - **Proposed:** fetch on boot, and cache what the processor already fetches before every authorise,
+      so display and authorise agree by construction. Small; the parsing exists.
+    - **Then the residual price-change race is genuinely seconds wide.** Recommended policy: proceed at
+      the server's price and write an operational event to 7h's fuel log. *Not* refusing — refusal
+      degrades to the existing cash path (`FillupAwaitingCashConfirm`, which never touches the API) at
+      the struck price, which is defensible but forces cash on someone who chose digital.
+    - **Honouring the struck price is NOT available to us:** the server's check is an equality against
+      its own price, so any other amount is a refused sale. That needs a backend change — **add to the
+      #18 asks**, do not wait on it.
+    - **Open:** do this as 10c-bis before 10d (recommended), or fold it into 10e. Not "later".
+
+- [ ] **NEW — `DeviceConfig.stationName` vs `StationIdentity.displayName`: two station names.**
+  Receipts print the first (`ReceiptText.kt:67`); every customer screen shows the second
+  (`CustomerStateHost.kt:108,126,143`). `/config` carries a third. 10c-bis declined to reconcile
+  them by side effect — a price sync silently changing what receipts say is the wrong way to
+  settle it. Small, and wants deciding before the parallel run prints receipts anyone keeps.
+
+- [ ] **NEW — backend ask (goes with #18): honour the price a fill-up was struck at.**
+  The server checks `amount == expectedLitres × pricePerUnit` against **its own** price, so a
+  fill-up that ends seconds before a price change cannot be charged at the figure the customer
+  watched climb. 10c-bis narrowed the window to seconds and logs each occurrence; closing it needs
+  the server to accept a struck price (or a struck-at timestamp) on `/authorise`. **Do not wait on
+  it** — an improvement, not a gate.
 
 - [ ] **10d — PAID detection by poll.** ~10 s poll over `GET /transactions/{id}` across the
   `PENDING_PAYMENT` window, terminating on `PAID`, on `expiresAt`, or on cancel.
