@@ -291,6 +291,21 @@ class BalanceePaymentProcessorTest {
         assertTrue(events.recorded.isEmpty())
     }
 
+    /** Refusal envelopes as the server sends them — `status:false`, a message, a stable code. */
+    private fun refusal(message: String, code: String) = ApiEnvelope<PumpTransactionResponse>(
+        status = false,
+        message = message,
+        data = null,
+        code = code,
+    )
+
+    private val notFound = refusal("Transaction not found", "TRANSACTION_NOT_FOUND")
+    private val amountMismatch = refusal("Amount mismatch for PETROL", "AMOUNT_MISMATCH")
+    private val paymentNotConfirmed = refusal(
+        "Payment has not been confirmed for this transaction.",
+        "PAYMENT_NOT_CONFIRMED",
+    )
+
     // ---- the poll (10d) -----------------------------------------------------------
 
     /** The terminal the whole phase exists for. */
@@ -368,17 +383,43 @@ class BalanceePaymentProcessorTest {
     /** A server that has never heard of this sale will not start hearing of it. */
     @Test
     fun `an unknown transaction ends the poll`() = runTest {
-        service.statusEnvelopeFailure = ApiEnvelope(
-            status = false,
-            message = "Transaction not found",
-            data = null,
-            code = "TRANSACTION_NOT_FOUND",
-        )
+        service.statusEnvelopes = listOf(notFound)
 
         val results = processor.process(tender(500_000)).untilTerminal()
 
         assertTrue(results.last() is PaymentResult.Failed)
         assertEquals(1, service.statusCalls)
+    }
+
+    /**
+     * The poll follows the same #45 taxonomy the upload queue does, for the one question they share:
+     * which answers from the server are final. A considered refusal reads the same on the next poll.
+     */
+    @Test
+    fun `any considered refusal ends the poll`() = runTest {
+        service.statusEnvelopes = listOf(amountMismatch)
+
+        val results = processor.process(tender(500_000)).untilTerminal()
+
+        assertTrue(results.last() is PaymentResult.Failed)
+        assertEquals(1, service.statusCalls)
+    }
+
+    /**
+     * And a *not yet* does not. `PAYMENT_NOT_CONFIRMED` is the refusal that becomes a success on its
+     * own — the poll is precisely what is waiting for it to.
+     */
+    @Test
+    fun `a not-yet refusal keeps the poll waiting`() = runTest {
+        // The server refuses twice, then payment lands. Under the old taxonomy the first refusal
+        // was terminal and this sale died with the customer's money already taken.
+        service.statusEnvelopes = listOf(paymentNotConfirmed, paymentNotConfirmed)
+        service.statuses = listOf("PAID")
+
+        val results = processor.process(tender(500_000)).untilTerminal()
+
+        assertTrue(results.last() is PaymentResult.Success)
+        assertEquals(3, service.statusCalls)
     }
 
     /** The server's own window, read off the authorise. Nothing here invents a timeout. */
@@ -520,8 +561,12 @@ private class FakePumpApiService(var config: PumpConfigResponse) : PumpApiServic
     var statuses: List<String> = listOf("PAID")
     var statusFailures: List<Throwable?> = emptyList()
 
-    /** A `status:false` envelope — the shape a business refusal actually arrives in. */
-    var statusEnvelopeFailure: ApiEnvelope<PumpTransactionResponse>? = null
+    /**
+     * Per-call `status:false` envelopes — the shape a business refusal actually arrives in. Indexed
+     * by call, so a test can have the server refuse and then change its mind, which is exactly what
+     * `PAYMENT_NOT_CONFIRMED` does.
+     */
+    var statusEnvelopes: List<ApiEnvelope<PumpTransactionResponse>?> = emptyList()
     var statusCalls = 0; private set
     var lastPolledId: String? = null
 
@@ -530,7 +575,7 @@ private class FakePumpApiService(var config: PumpConfigResponse) : PumpApiServic
         val index = statusCalls
         statusCalls++
         statusFailures.getOrNull(index)?.let { throw it }
-        statusEnvelopeFailure?.let { return it }
+        statusEnvelopes.getOrNull(index)?.let { return it }
         return ApiEnvelope(
             status = true,
             message = "Transaction status",

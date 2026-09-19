@@ -11,6 +11,8 @@ import app.balancee.smartpump.display.data.config.formatNaira
 import app.balancee.smartpump.display.data.network.ApiError
 import app.balancee.smartpump.display.data.network.ApiResult
 import app.balancee.smartpump.display.data.network.PumpApiClient
+import app.balancee.smartpump.display.data.network.RetryPolicy
+import app.balancee.smartpump.display.data.network.retryPolicy
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
 import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
@@ -315,23 +317,27 @@ private fun String.toInstantOrNull(): Instant? =
 /**
  * Whether a failed poll is worth giving up on, as opposed to waiting out.
  *
- * True only where every subsequent poll would fail the same way: the server has no such
- * transaction, or this device has no credentials to ask with. A 500, a dropped connection and a
- * reply that would not parse are all things that come back.
+ * **This is not the same question [retryPolicy] answers, and the difference is the deadline.** The
+ * poll is bounded by the server's own `expiresAt`, so waiting out a failure it cannot classify
+ * costs a wait that ends on its own; an upload queue has no such bound. So where the shared
+ * taxonomy calls a 500, a dropped connection or an unparseable reply terminal-or-not, the poll
+ * simply keeps asking.
+ *
+ * What it does share — and what #45 put in one place — is **which answers from the server are
+ * final**. A considered refusal will read the same on the next poll, and `PAYMENT_NOT_CONFIRMED`
+ * will not, so both follow [retryPolicy] rather than a second list of codes kept in step by hand.
  */
 private val ApiError.isPollTerminal: Boolean
     get() = when (this) {
+        // No credentials to ask with; every subsequent poll fails identically.
         is ApiError.NotActivated -> true
-        is ApiError.Business -> code == CODE_TRANSACTION_NOT_FOUND
+        is ApiError.Business -> retryPolicy == RetryPolicy.TERMINAL
         else -> false
     }
 
 /** Observed at the #32 gate: `PENDING_PAYMENT` → `PAID` → `DISPENSED`. */
 private const val STATUS_PAID = "PAID"
 private const val STATUS_DISPENSED = "DISPENSED"
-
-/** One of the server's stable codes (TODO #18f). Matched on `code`, never on the prose. */
-private const val CODE_TRANSACTION_NOT_FOUND = "TRANSACTION_NOT_FOUND"
 
 /** The cadence OQ #8 settled on. A twenty-minute window is ~120 requests per unpaid sale. */
 private val POLL_INTERVAL: Duration = Duration.ofSeconds(10)
