@@ -1086,6 +1086,17 @@ captures are the test fixtures.
   *endpoints*; this proves the *app*. A real small sale end to end through the customer UI against
   `SN-TEST-001`, scanning the QR with a phone. Sized like the #32 sitting. Nothing merges until it
   passes.
+  - **Runbook written 2026-09-19: [`GATE_10G_RUNBOOK.md`](GATE_10G_RUNBOOK.md).** Nine steps, each
+    with its own pass criterion, built on the #32 runbook's shape.
+  - **⚠️ Do not uninstall the `.prod` app before the sitting.** The tablet holds the **schema v4**
+    database #32 wrote, including the real ₦149 row. Installing over it runs `MIGRATION_4_5` on
+    real production data — the only chance this project gets to test that migration against data
+    it did not create itself. It also tests `getPendingSync`'s `paymentReference IS NOT NULL`
+    filter on a genuinely pre-10f row, which must be ignored by the upload job forever.
+  - **The debug hotspot is off-limits for the whole sitting.** `debugProd` is `initWith(debug)`,
+    so payment force-resolve is present; using it proves the button, not the payment.
+  - Pre-flight done 2026-09-19: **432 tests / 45 classes** green, `assembleDebugProd` clean, APK
+    builds. No tablet was attached, so nothing on the device half has run.
 
 ### Risks worth naming before starting
 
