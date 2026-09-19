@@ -29,6 +29,7 @@ import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
+import app.balancee.smartpump.display.domain.sync.TransactionUploadScheduler
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
 import kotlinx.coroutines.Dispatchers
@@ -178,17 +179,24 @@ class FakePaymentProcessor : PaymentProcessor {
         lastExpectedLitres = request.expectedLitres
     }
 
+    /**
+     * [paymentReference] defaults to a real-shaped one because every digital sale has one — it is
+     * what `/transactions/upload` quotes, and a default of null would let a test pass against a
+     * record the upload could never use (10f).
+     */
     fun succeed(
         ref: String = pendingRef,
         amountKobo: Long = lastAmountKobo,
         method: PaymentMethod = lastMethod ?: PaymentMethod.BALANCEE_APP,
         litresAuthorised: Double? = null,
+        paymentReference: String? = "BPM-TEST-0001",
     ) {
         terminals.tryEmit(
             PaymentResult.Success(
                 transactionRef = ref,
                 amountKobo = amountKobo,
                 method = method,
+                paymentReference = paymentReference,
                 litresAuthorised = litresAuthorised,
             )
         )
@@ -314,6 +322,12 @@ class FakeEventRepository : EventRepository {
     val last: Recorded? get() = recorded.lastOrNull()
 }
 
+/** Counts the asks. What is *in* the queue is TransactionUploader's business, not the VM's. */
+class FakeUploadScheduler : TransactionUploadScheduler {
+    var requests = 0; private set
+    override fun requestUpload() { requests++ }
+}
+
 class FakeTransactionRepository : TransactionRepository {
     val saved = mutableListOf<Transaction>()
     override suspend fun saveTransaction(transaction: Transaction) { saved += transaction }
@@ -356,6 +370,7 @@ class VmHarness {
     val pulseRepo = FakePulseRepository()
     val transactions = FakeTransactionRepository()
     val events = FakeEventRepository()
+    val uploadScheduler = FakeUploadScheduler()
 
     /** The real use case, not a fake — it is pure, and stubbing it would test nothing. */
     fun build(): CustomerViewModel = CustomerViewModel(
@@ -369,5 +384,6 @@ class VmHarness {
         reconcilePulseGap = ReconcilePulseGapUseCase(),
         relay = relay,
         transactions = transactions,
+        uploadScheduler = uploadScheduler,
     )
 }

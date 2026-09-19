@@ -47,6 +47,24 @@
                 android:resource="@xml/usb_device_filter" />
         </activity>
 
+        <!--
+          Phase 10f. WorkManager's default initializer is removed so the app can supply its own
+          Configuration from SmartPumpApplication — the upload worker is built by Hilt and needs
+          the repository, the API client and the credential store, which the default no-arg
+          factory cannot provide. Leaving both in place is how an app ends up working in debug and
+          failing to instantiate its worker in the field.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
     </application>
 
 </manifest>

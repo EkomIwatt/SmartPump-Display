@@ -65,6 +65,7 @@ import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
+import app.balancee.smartpump.display.domain.sync.TransactionUploadScheduler
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
 import app.balancee.smartpump.display.ui.util.buildReceiptText
@@ -142,6 +143,7 @@ class CustomerViewModel @Inject constructor(
     private val reconcilePulseGap: ReconcilePulseGapUseCase,
     private val relay: RelayController,
     private val transactions: TransactionRepository,
+    private val uploadScheduler: TransactionUploadScheduler,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CustomerUiState())
@@ -211,6 +213,11 @@ class CustomerViewModel @Inject constructor(
         // sequence above holds the relay-open invariant and a possibly-resumed live sale. Nothing
         // that safety-critical waits on a server that may be unreachable.
         viewModelScope.launch { syncPriceOnBoot() }
+        // The queue's catch-up (10f). A sale that completed while the forecourt had no internet,
+        // or while the tablet was off, is reported the next time the app opens — without this the
+        // only thing that ever asks is a *new* sale, so a pump that goes quiet keeps its records
+        // to itself. Costs nothing when the queue is empty.
+        uploadScheduler.requestUpload()
     }
 
     /**
@@ -1482,11 +1489,19 @@ class CustomerViewModel @Inject constructor(
 
     private suspend fun completeAndRecord(complete: TransactionState.Complete) {
         setState(complete)
+        val record = complete.toAuditRecord(priceKoboPerLitre)
         try {
-            transactions.saveTransaction(complete.toAuditRecord(priceKoboPerLitre))
+            transactions.saveTransaction(record)
         } catch (t: Throwable) {
             android.util.Log.e("CustomerVM", "Failed to persist transaction ${complete.txnId}", t)
+            // Nothing to upload: the row the job reads does not exist. Asking anyway would send
+            // the queue looking for a record that was never written.
+            return
         }
+        // Only a sale the backend can accept. A cash sale has no paymentReference and is outside
+        // the upload path, not behind in it (10f) — and this is deliberately not awaited, because
+        // the customer already has their fuel and the screen has to move on.
+        if (record.isUploadable) uploadScheduler.requestUpload()
     }
 
     private fun TransactionState.Complete.toAuditRecord(priceKoboPerLitre: Long): Transaction =

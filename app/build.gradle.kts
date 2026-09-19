@@ -208,6 +208,12 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
 
+    // Background work (Phase 10f — the durable dispense upload queue). androidx.hilt's own
+    // compiler is what generates the @HiltWorker factory; Dagger's does not cover workers.
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
     // Room
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
