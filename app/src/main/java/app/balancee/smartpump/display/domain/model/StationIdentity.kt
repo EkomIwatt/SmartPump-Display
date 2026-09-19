@@ -3,7 +3,9 @@
 // changes after, whereas DeviceConfig is operator-pushable any time, and (b) it carries
 // security material (PIN hash + salt) that should not be intermixed with config fields.
 //
-// The Idle screen and receipts read displayName / logoBytes from here. The PIN gate on the
+// The Idle screen and the dispensing screens read displayName / logoBytes from here. **Receipts do
+// not** — they read DeviceConfig.stationName, which the backend owns. This comment claimed
+// otherwise until 10g (2026-09-19). The PIN gate on the
 // attendant overlay reads pinHash + pinSalt for verification — never the raw PIN.
 package app.balancee.smartpump.display.domain.model
 
@@ -12,7 +14,9 @@ import androidx.compose.runtime.Immutable
 /**
  * @param stationId    Backend station identifier typed by the operator on install
  *                     (e.g. "BLC-LAG-0042"). Never derived from the device.
- * @param displayName  Human-readable station name shown on Idle screen + receipts.
+ * @param displayName  Human-readable station name shown on the Idle and dispensing screens.
+ *                     Branding, set with the logo at onboarding and mutable on the device.
+ *                     Receipts do **not** read this — see `DeviceConfig.stationName`.
  * @param logoBytes    Optional PNG bytes (≤512px on longer side). Null = fall back to
  *                     [displayName] rendered in the hero-serif style on the Idle screen.
  * @param pinHash      Base64-encoded PBKDF2-HMAC-SHA256 hash of the 4-digit PIN.

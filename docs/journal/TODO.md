@@ -1082,6 +1082,24 @@ captures are the test fixtures.
     Pinned by its own test.
   - **Not yet proven on a device.** The four new migration tests and the worker's real scheduling
     both need the tablet; they go with **10g**.
+- [ ] **NEW (10g) — the receipt's station name is not pinned to the sale.** `transactions` has no
+  station-name column, so `ReceiptText` reads the **current** `DeviceConfig`. Now that the backend
+  owns that name, a rename changes the name on every past receipt re-shared. Exactly #37's shape —
+  which was fixed by storing `priceKoboPerLitre` **on the row** — and it needs the same answer: a
+  `stationName` column at **schema v6**. Deliberately not folded into the 10g fixes; v5 has only
+  just been proven on a device once, and a second migration deserves its own run at the gate.
+
+- [ ] **NEW (10g) — backend ask: does a transaction ever leave `PENDING_PAYMENT`?** Observed on
+  production 2026-09-19: **3m16s** after a transaction's own `expiresAt`, `GET /transactions/{id}`
+  still answered `200` / `PENDING_PAYMENT` with the same live Paystack `authorizationUrl`
+  (`docs/api-probes/2026-09-19-10g/`). So `expiresAt` is reported, not enforced, and a customer can
+  pay after the pump has stopped watching — money out, no fuel, no local record. Two questions, and
+  the client cannot answer either by guessing:
+  1. Does the record ever transition on its own, and to what?
+  2. Is the checkout URL still payable after `expiresAt`?
+  Until then the polling policy is **unchanged on purpose** and `PAYMENT_ABANDONED` records the
+  transaction id so an orphaned payment is at least answerable. Goes with **#18**.
+
 - [ ] **10g — Gate: run it on the tablet against production.** The probe panel proved the
   *endpoints*; this proves the *app*. A real small sale end to end through the customer UI against
   `SN-TEST-001`, scanning the QR with a phone. Sized like the #32 sitting. Nothing merges until it

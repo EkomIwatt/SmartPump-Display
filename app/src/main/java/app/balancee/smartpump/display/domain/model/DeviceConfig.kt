@@ -9,7 +9,12 @@ import androidx.compose.runtime.Immutable
  *                             NOT the API's `pumpId`, which is the backend UUID held on
  *                             PumpCredentials and required in /authorise bodies. Renamed from
  *                             `pumpId` to kill that collision (TODO #13).
- * @param stationName          Station name shown on receipts, e.g. "Total Lekki Ph2".
+ * @param stationName          Station name printed on **receipts**, e.g. "Total Lekki Ph2".
+ *                             Owned by the backend: `/config` carries it and [PumpConfigSync]
+ *                             writes it through, the operator's typed value being the
+ *                             pre-activation / offline fallback. It is *not* what the customer
+ *                             screens show — that is `StationIdentity.displayName`, which is
+ *                             branding and stays local.
  * @param koboPerLitre         Current fuel price in kobo (100 kobo = ₦1). e.g. 87_000 = ₦870/L.
  * @param fuelType             Which fuel this pump dispenses. **Null until an operator sets it** —
  *                             `/authorise` requires it and nothing in the API supplies it

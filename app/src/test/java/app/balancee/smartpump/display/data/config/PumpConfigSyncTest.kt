@@ -92,10 +92,83 @@ class PumpConfigSyncTest {
 
         assertEquals("PUMP 3", deviceConfig.config?.pumpLabel)
         assertEquals("0123456789", deviceConfig.config?.virtualAccountNumber)
-        // The response carries "Kachi", and it is deliberately NOT taken: receipts read this field
-        // while every customer screen reads StationIdentity.displayName, and reconciling those two
-        // is its own decision rather than a side effect of a price sync.
+    }
+
+    // ---- the station name (10g) ----------------------------------------------------
+
+    /**
+     * The receipt's name is the backend's, as of 10g.
+     *
+     * It was deliberately left alone by 10c-bis, on the grounds that a price sync was the wrong
+     * place to resolve a name duplication. Resolved on its own terms since: a receipt is a
+     * financial document, so it carries the name the operator's books use — not one an attendant
+     * typed. The screens keep `StationIdentity.displayName`, which is branding.
+     */
+    @Test
+    fun `the station name on receipts comes from the backend`() = runTest {
+        deviceConfig.config = DeviceConfig(
+            stationName = "Total Lekki Ph2",
+            koboPerLitre = 149_000,
+            fuelType = FuelType.PETROL,
+        )
+
+        sync.refresh()
+
+        assertEquals("Kachi", deviceConfig.config?.stationName)
+    }
+
+    /** A name change alone is a change, and must be stored even when the price has not moved. */
+    @Test
+    fun `a station name change alone is written`() = runTest {
+        deviceConfig.config = DeviceConfig(
+            stationName = "Total Lekki Ph2",
+            koboPerLitre = 149_000,
+            fuelType = FuelType.PETROL,
+        )
+
+        sync.refresh()
+
+        assertEquals(1, deviceConfig.saveCount)
+    }
+
+    /** It is a name, not a price: moving it must not put a price-change row in the log. */
+    @Test
+    fun `a station name change alone is not logged as a price change`() = runTest {
+        deviceConfig.config = DeviceConfig(
+            stationName = "Total Lekki Ph2",
+            koboPerLitre = 149_000,
+            fuelType = FuelType.PETROL,
+        )
+
+        sync.refresh()
+
+        assertTrue(events.recorded.none { it.type == EventType.PRICE_SYNCED })
+    }
+
+    /**
+     * A blank name from the backend is treated as a gap in its record, not as a rename. Receipts
+     * printing an empty line are worse than receipts printing a stale name.
+     */
+    @Test
+    fun `a blank station name from the backend is ignored`() = runTest {
+        service.config = serverConfig.copy(stationName = "   ")
+        deviceConfig.config = DeviceConfig(
+            stationName = "Total Lekki Ph2",
+            koboPerLitre = 149_000,
+            fuelType = FuelType.PETROL,
+        )
+
+        sync.refresh()
+
         assertEquals("Total Lekki Ph2", deviceConfig.config?.stationName)
+    }
+
+    /** An unconfigured pump takes the backend's name along with its price. */
+    @Test
+    fun `an unconfigured pump takes the station name too`() = runTest {
+        sync.refresh()
+
+        assertEquals("Kachi", deviceConfig.config?.stationName)
     }
 
     /**
@@ -105,7 +178,14 @@ class PumpConfigSyncTest {
      */
     @Test
     fun `nothing is written when nothing moved`() = runTest {
-        deviceConfig.config = DeviceConfig(koboPerLitre = 149_000, fuelType = FuelType.PETROL)
+        // The station name is part of "nothing moved" since 10g, so the fixture carries the
+        // server's name. Without it this test passes for the wrong reason — a name that differs
+        // is a change, and writing it is correct.
+        deviceConfig.config = DeviceConfig(
+            stationName = "Kachi",
+            koboPerLitre = 149_000,
+            fuelType = FuelType.PETROL,
+        )
 
         sync.refresh()
 

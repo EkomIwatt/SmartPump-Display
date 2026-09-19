@@ -186,7 +186,8 @@ fun OperatorConfigScreen(
             LabelText(text = "Identification")
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Station name prints on receipts. Pump label is the caption on this screen.",
+                text = "Station name prints on receipts, and the backend's name replaces it once " +
+                    "this pump is activated. Pump label is the caption on this screen.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
             )
