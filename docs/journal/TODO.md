@@ -1082,6 +1082,23 @@ captures are the test fixtures.
     Pinned by its own test.
   - **Not yet proven on a device.** The four new migration tests and the worker's real scheduling
     both need the tablet; they go with **10g**.
+- [ ] **NEW (10g, raised by the user 2026-09-19) — round the litres, not the money.** A customer
+  who types **₦200** is quoted **₦199.66** for 0.134 L, and the round figure is the one that gives
+  way. Asked for the opposite: hold the naira, approximate the litres.
+  - **Cash sales already behave the way he wants** — `onCashFixedAuthorise` keeps `cashAmountKobo`
+    exactly as typed and floors `litresCutoff` to 2 dp (pinned by `CustomerViewModelMoneyTest`).
+    So this is not a change to cash; it is **digital diverging from cash**, which is the better
+    argument for doing something about it.
+  - **What forces it:** the server checks `amount == expectedLitres × pricePerUnit` exactly, so the
+    amount has to land on a payable litre step (`SaleQuote.litreStepMicrosFor`). At ₦1,490/L,
+    ₦200 buys 0.134228… L, which is not expressible — so either the litres carry more precision
+    than the server accepts, or the money moves. Today the money moves.
+  - **So it is probably a backend question, not a client one:** how many decimal places will
+    `expectedLitres` accept, and will the check tolerate a rounding delta? #18f asked a neighbouring
+    question at the #32 gate. Goes with the `expiresAt` ask.
+  - Not a defect — the quote floors, so the customer is never charged more than they tendered.
+    Discuss after the 10g sitting.
+
 - [ ] **NEW (10g) — the receipt's station name is not pinned to the sale.** `transactions` has no
   station-name column, so `ReceiptText` reads the **current** `DeviceConfig`. Now that the backend
   owns that name, a rename changes the name on every past receipt re-shared. Exactly #37's shape —
@@ -1100,7 +1117,41 @@ captures are the test fixtures.
   Until then the polling policy is **unchanged on purpose** and `PAYMENT_ABANDONED` records the
   transaction id so an orphaned payment is at least answerable. Goes with **#18**.
 
-- [ ] **10g — Gate: run it on the tablet against production.** The probe panel proved the
+- [~] **10g — Gate: run it on the tablet against production. SITTING 2 PASSED 2026-09-19**, after
+  sitting 1 found four defects and was stopped before payment. Two real paid sales against
+  `SN-TEST-001`, **₦399.32** total, both reported and reconciled. Evidence:
+  `docs/api-probes/2026-09-19-10g/`.
+  - **0 · migration** — `MIGRATION_4_5` ran on the real v4 database, first time outside a harness.
+  - **1 · credentials + price** — `/config` 200 on #32's KeyStore credentials; ₦870 seed → ₦1,490;
+    `stationName` now "Kachi".
+  - **2 · Flow 1 pre-pay** — ₦200 typed → **₦199.66 / 0.134 L** on the wire, dispensed to the
+    millilitre, completion screen showing ₦1,490/L. `PAID` found by poll after 11 cycles.
+  - **3 · upload** — `paymentReference` survived `/authorise` → upload; 200 "Transaction recorded",
+    `syncedAt` 936 ms after the record, no `uploadError`.
+  - **4 · offline** — ~4 minutes in airplane mode, ~24 failed polls, recovered on the next cycle
+    and uploaded. **The durable-queue half (drains while the process is dead) was skipped** — the
+    upload lands ~1 s after completion, leaving no window to force-stop into, and it tests
+    WorkManager's guarantee rather than our code.
+  - **5 · boot-resume trap** — force-stop on a **live** deadline: same `transactionId`, **same
+    `expiresAtEpochMs`** (restored, not re-granted), and `POST /authorise` still at 2. Also passed
+    accidentally across a full reinstall earlier.
+  - **6 · Flow 3 fill-up — SKIPPED.** The mock tank is **60 L**, which at ₦1,490/L is a **₦89,400**
+    real charge, and a fill-up fixes its amount before the QR appears. Needs the debug screen's
+    tank set to ~0.15 L first. `quoteForDispensed` and the fill-up QR path stay unproven against
+    production.
+  - **7 · a real failure** — answered, in the negative: an expired unpaid transaction is a **200
+    carrying `PENDING_PAYMENT`**, so there is no expiry code to un-park a Catalogue A row with.
+  - **8 · instrumented** — **19/19 green on the SM-T220**, including the four 10f migration tests
+    and the v2→v5 chain, none of which had run on a device before.
+  - **Still open before merge:** #3's `PAYMENT_ABANDONED` has no JVM test, and finding #5 (below)
+    is unfixed.
+
+- [ ] **NEW (10g, sitting 2) — the expiry copy tells an attendant two things that are false.**
+  `BalanceePaymentProcessor.kt:205` says *"The server's payment window expired before the money
+  landed. Nothing was charged — start a new sale."* The probe disproved both halves: the server
+  does **not** expire the transaction, and we cannot know nothing was charged, because the app
+  stopped watching. It converts an unknown into a confident denial, on the one line an attendant
+  reads when a customer says they paid. Wording only, no logic. Goes with the `expiresAt` ask. The probe panel proved the
   *endpoints*; this proves the *app*. A real small sale end to end through the customer UI against
   `SN-TEST-001`, scanning the QR with a phone. Sized like the #32 sitting. Nothing merges until it
   passes.

@@ -239,11 +239,18 @@ Carried over from 10f. Run these **last**: the Room tests build their own databa
 not want them anywhere near the real one before step 3 has read it.
 
 ```bash
-./gradlew connectedDebugProdAndroidTest
+./gradlew connectedDebugAndroidTest
 ```
 
-- [ ] 11 migration tests (4 of them new in 10f) green
-- [ ] 5 Keystore + 2 deviceId tests green
+**Not `connectedDebugProdAndroidTest`** — an earlier draft of this runbook named that, and it does
+not exist. `androidTest` builds against the `debug` build type only (`testBuildType`), so there is
+no per-build-type connected task. That is fine for what these cover: migrations, KeyStore crypto
+and the device id are all local, with no network in them, and the `debug` app id keeps them in
+their own sandbox well away from the `.prod` data.
+
+- [x] 11 migration tests (4 of them new in 10f) green
+- [x] 6 Keystore + 2 deviceId tests green
+- **Run 2026-09-19: 19/19 on the SM-T220, 0 failures.**
 
 ---
 
