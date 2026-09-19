@@ -23,6 +23,7 @@ import app.balancee.smartpump.display.domain.model.PulseMessage
 import app.balancee.smartpump.display.domain.model.Transaction
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
+import app.balancee.smartpump.display.domain.config.DeviceConfigSync
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
@@ -173,6 +174,25 @@ class FakeDeviceConfigRepository(
     override fun observeConfig(): Flow<DeviceConfig?> = MutableStateFlow(config)
 }
 
+/**
+ * The boot price sync (10c-bis). Inert by default — a pump that cannot reach Balanceè keeps the
+ * price it had, which is both the contract and what every flow test wants. Set [priceToSync] to
+ * drive the case where the operator's price has moved underneath the device.
+ */
+class FakeDeviceConfigSync(private val repo: FakeDeviceConfigRepository) : DeviceConfigSync {
+    var refreshCount = 0; private set
+
+    /** Null = the refresh failed and nothing changed. */
+    var priceToSync: Long? = null
+
+    override suspend fun refresh() {
+        refreshCount++
+        val price = priceToSync ?: return
+        repo.config = repo.config?.copy(koboPerLitre = price)
+            ?: DeviceConfig(koboPerLitre = price, fuelType = FuelType.PETROL)
+    }
+}
+
 class FakePulseRepository : PulseRepository {
     /** Seed before building the VM to drive a boot-resume path. */
     var stateToRestore: TransactionState = TransactionState.Idle
@@ -255,6 +275,7 @@ class VmHarness {
     val relay = FakeRelayController()
     val payment = FakePaymentProcessor()
     val deviceConfig = FakeDeviceConfigRepository()
+    val deviceConfigSync = FakeDeviceConfigSync(deviceConfig)
     val pulseRepo = FakePulseRepository()
     val transactions = FakeTransactionRepository()
     val events = FakeEventRepository()
@@ -263,6 +284,7 @@ class VmHarness {
     fun build(): CustomerViewModel = CustomerViewModel(
         canStartTransaction = CanStartTransactionUseCase(deviceConfig),
         deviceConfigRepository = deviceConfig,
+        deviceConfigSync = deviceConfigSync,
         events = events,
         paymentProcessor = payment,
         pulseSource = pulseSource,

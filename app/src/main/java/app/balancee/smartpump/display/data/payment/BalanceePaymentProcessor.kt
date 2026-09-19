@@ -6,11 +6,14 @@
 // by its tests until 10d flips it.
 package app.balancee.smartpump.display.data.payment
 
+import app.balancee.smartpump.display.data.config.PumpConfigSync
+import app.balancee.smartpump.display.data.config.SyncedConfig
+import app.balancee.smartpump.display.data.config.formatNaira
 import app.balancee.smartpump.display.data.network.ApiError
 import app.balancee.smartpump.display.data.network.ApiResult
 import app.balancee.smartpump.display.data.network.PumpApiClient
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
-import app.balancee.smartpump.display.data.network.dto.PumpConfigResponse
+import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.SaleBasis
@@ -18,6 +21,7 @@ import app.balancee.smartpump.display.domain.model.SaleQuote
 import app.balancee.smartpump.display.domain.model.quoteForDispensed
 import app.balancee.smartpump.display.domain.model.quoteForTender
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
+import app.balancee.smartpump.display.domain.repository.EventRepository
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -30,21 +34,27 @@ import javax.inject.Singleton
 @Singleton
 class BalanceePaymentProcessor @Inject constructor(
     private val client: PumpApiClient,
+    private val configSync: PumpConfigSync,
+    private val events: EventRepository,
     private val transactionIds: TransactionIdFactory,
 ) : PaymentProcessor {
 
     override fun process(request: PaymentRequest): Flow<PaymentResult> = flow {
         // The correctness guarantee (OQ #8): fetch the price immediately before authorising, every
         // time. Push is a freshness optimisation and is allowed to be missing or late; this is not.
-        val config = when (val result = client.config()) {
+        //
+        // 10c-bis: the fetch now stores what it reads, so the price on the customer's screen is the
+        // one this sale is about to be authorised at rather than a number an operator typed once.
+        val synced = when (val result = configSync.fetch()) {
             is ApiResult.Success -> result.data
             is ApiResult.Failure -> {
                 emit(PaymentResult.Failed(reason = result.error.describe("could not read the price")))
                 return@flow
             }
         }
+        val config = synced.config
 
-        val quote = quoteFor(request, config)
+        val quote = quoteFor(request, synced.koboPerLitre)
         if (quote.amountKobo <= 0) {
             emit(PaymentResult.Failed(reason = "That amount does not buy any fuel at the current price."))
             return@flow
@@ -85,6 +95,8 @@ class BalanceePaymentProcessor @Inject constructor(
             return@flow
         }
 
+        recordPriceRaceIfAny(request, synced, quote, authorised.transactionId)
+
         emit(
             PaymentResult.Pending(
                 transactionRef = authorised.transactionId,
@@ -115,12 +127,37 @@ class BalanceePaymentProcessor @Inject constructor(
      * the alternative is a sale that cannot be authorised at all. Flagged on the board rather than
      * papered over.
      */
-    private fun quoteFor(request: PaymentRequest, config: PumpConfigResponse): SaleQuote {
-        val koboPerLitre = config.pricePerUnit * KOBO_PER_NAIRA
-        return when (request.basis) {
+    private fun quoteFor(request: PaymentRequest, koboPerLitre: Long): SaleQuote =
+        when (request.basis) {
             SaleBasis.Tender -> quoteForTender(request.amountKobo, koboPerLitre)
             SaleBasis.Dispensed -> quoteForDispensed(request.expectedLitres, koboPerLitre)
         }
+
+    /**
+     * Log the seconds-wide race that 10c-bis could not close: the price moved between the nozzle
+     * clicking off and this authorise, so a fill-up customer is charged an amount other than the one
+     * they watched climb.
+     *
+     * Only for [SaleBasis.Dispensed]. A pre-pay customer has taken nothing yet and is buying a sum
+     * rather than a volume, so a re-price simply buys them fewer litres — correct, and not an event.
+     *
+     * Recorded after the authorise succeeds, so the log never carries a discrepancy for a sale that
+     * never happened.
+     */
+    private suspend fun recordPriceRaceIfAny(
+        request: PaymentRequest,
+        synced: SyncedConfig,
+        quote: SaleQuote,
+        transactionRef: String,
+    ) {
+        if (request.basis != SaleBasis.Dispensed || !synced.priceChanged) return
+        events.record(
+            type = EventType.PRICE_CHANGED_MID_SALE,
+            transactionRef = transactionRef,
+            detail = "Price changed during this fill-up: " +
+                "${formatNaira(synced.previousKoboPerLitre!!)} → ${formatNaira(synced.koboPerLitre)} per litre. " +
+                "Displayed ${formatNaira(request.amountKobo)}, charged ${formatNaira(quote.amountKobo)}.",
+        )
     }
 }
 
@@ -163,5 +200,3 @@ private fun String.toInstantOrNull(): Instant? =
     } catch (_: DateTimeParseException) {
         null
     }
-
-private const val KOBO_PER_NAIRA = 100L

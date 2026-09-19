@@ -20,3 +20,6 @@ keystore.properties
 
 # Generated reports / exports (not source)
 /reports/
+
+# Kotlin build-tools session dir (generated; appears on any gradle run)
+.kotlin/

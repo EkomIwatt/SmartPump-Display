@@ -6,6 +6,7 @@
 // docs/api-probes/2026-09-16-prod-gate/ and …-prod-config/.
 package app.balancee.smartpump.display.data.payment
 
+import app.balancee.smartpump.display.data.config.PumpConfigSync
 import app.balancee.smartpump.display.data.network.PumpApiClient
 import app.balancee.smartpump.display.data.network.PumpApiService
 import app.balancee.smartpump.display.data.network.dto.ActivateRequest
@@ -15,12 +16,16 @@ import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
 import app.balancee.smartpump.display.data.network.dto.PumpConfigResponse
 import app.balancee.smartpump.display.data.network.dto.PumpTransactionResponse
 import app.balancee.smartpump.display.data.network.dto.UploadTransactionRequest
+import app.balancee.smartpump.display.domain.model.DeviceConfig
+import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.SaleBasis
 import app.balancee.smartpump.display.domain.network.DeviceIdProvider
+import app.balancee.smartpump.display.ui.customer.FakeDeviceConfigRepository
+import app.balancee.smartpump.display.ui.customer.FakeEventRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -44,8 +49,18 @@ class BalanceePaymentProcessorTest {
     )
 
     private val service = FakePumpApiService(config)
+    private val client = PumpApiClient(service, FixedDeviceId)
+
+    /** Starts holding the server's price, so a test that wants a change has to make one. */
+    private val deviceConfig = FakeDeviceConfigRepository(
+        DeviceConfig(koboPerLitre = 149_000, fuelType = FuelType.PETROL),
+    )
+    private val events = FakeEventRepository()
+
     private val processor = BalanceePaymentProcessor(
-        client = PumpApiClient(service, FixedDeviceId),
+        client = client,
+        configSync = PumpConfigSync(client, deviceConfig, events),
+        events = events,
         transactionIds = { "txn-fixed-0001" },
     )
 
@@ -195,6 +210,71 @@ class BalanceePaymentProcessorTest {
         val result = processor.process(tender(500_000)).first()
 
         assertEquals("Amount mismatch for PETROL", (result as PaymentResult.Failed).reason)
+    }
+
+    // ---- the price the customer sees (10c-bis) ------------------------------------
+
+    /**
+     * The whole point of 10c-bis: authorising a sale leaves the device holding the price it was
+     * authorised at. Before this, `/config` was fetched, used and thrown away, so the figure on the
+     * customer's screen stayed whatever an operator last typed.
+     */
+    @Test
+    fun `authorising stores the server's price on the device`() = runTest {
+        deviceConfig.config = DeviceConfig(koboPerLitre = 87_000, fuelType = FuelType.PETROL)
+
+        processor.process(tender(500_000)).first()
+
+        assertEquals(149_000L, deviceConfig.config?.koboPerLitre)
+    }
+
+    /** The fuel type too — the sale is authorised against it, so the display must not disagree. */
+    @Test
+    fun `authorising stores the server's fuel type on the device`() = runTest {
+        deviceConfig.config = DeviceConfig(koboPerLitre = 149_000, fuelType = FuelType.DIESEL)
+
+        processor.process(tender(500_000)).first()
+
+        assertEquals(FuelType.PETROL, deviceConfig.config?.fuelType)
+    }
+
+    /**
+     * A fill-up's fuel is already in the tank, so a price change between the nozzle clicking off
+     * and this authorise changes what is owed — and the customer watched the old figure climb.
+     * Unavoidable (the server checks against its own price), so it is logged rather than hidden.
+     */
+    @Test
+    fun `a price change during a fill-up is recorded against the sale`() = runTest {
+        deviceConfig.config = DeviceConfig(koboPerLitre = 87_000, fuelType = FuelType.PETROL)
+
+        processor.process(dispensed(litres = 10.0)).first()
+
+        val race = events.recorded.single { it.type == EventType.PRICE_CHANGED_MID_SALE }
+        assertEquals("txn-fixed-0001", race.transactionRef)
+        // What the customer saw, and what they are actually being charged.
+        assertTrue(race.detail!!.contains("₦870.00 → ₦1,490.00"))
+        assertTrue(race.detail.contains("charged ₦14,900.00"))
+    }
+
+    /**
+     * A pre-pay customer has taken nothing yet and is buying a sum, not a volume, so a re-price just
+     * buys them fewer litres. Correct, and not something an operator needs to reconcile.
+     */
+    @Test
+    fun `a price change during a pre-pay sale is not a mid-sale event`() = runTest {
+        deviceConfig.config = DeviceConfig(koboPerLitre = 87_000, fuelType = FuelType.PETROL)
+
+        processor.process(tender(500_000)).first()
+
+        assertTrue(events.recorded.none { it.type == EventType.PRICE_CHANGED_MID_SALE })
+    }
+
+    /** No change, no row. The log is a record of price moves, not of every authorise. */
+    @Test
+    fun `an unchanged price logs nothing`() = runTest {
+        processor.process(dispensed(litres = 10.0)).first()
+
+        assertTrue(events.recorded.isEmpty())
     }
 
     /** A tender too small to buy a single step of fuel is refused here, not by the server. */

@@ -41,6 +41,7 @@ package app.balancee.smartpump.display.ui.customer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.balancee.smartpump.display.BuildConfig
+import app.balancee.smartpump.display.domain.config.DeviceConfigSync
 import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
@@ -131,6 +132,7 @@ data class CustomerUiState(
 class CustomerViewModel @Inject constructor(
     private val canStartTransaction: CanStartTransactionUseCase,
     private val deviceConfigRepository: DeviceConfigRepository,
+    private val deviceConfigSync: DeviceConfigSync,
     private val events: EventRepository,
     private val paymentProcessor: PaymentProcessor,
     private val pulseSource: PulseSource,
@@ -202,6 +204,31 @@ class CustomerViewModel @Inject constructor(
                 _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
             }
             bootResume()
+        }
+        // Price sync (10c-bis), on its own coroutine on purpose: it is a network call, and the boot
+        // sequence above holds the relay-open invariant and a possibly-resumed live sale. Nothing
+        // that safety-critical waits on a server that may be unreachable.
+        viewModelScope.launch { syncPriceOnBoot() }
+    }
+
+    /**
+     * Pull the operator's current price down at start-up.
+     *
+     * Every transaction start already re-reads [DeviceConfig] through [canStartTransaction], so a
+     * price that lands here is picked up by the next sale without anything else observing it. What
+     * this adds is the **idle screen**, which would otherwise keep showing the boot-time figure
+     * until someone bought fuel.
+     *
+     * Applied to the display only when the pump is idle. A resumed dispense has already struck its
+     * price and its litre target; moving the figure under a customer mid-sale would make the screen
+     * disagree with the sale they are watching, which is worse than a stale idle price.
+     */
+    private suspend fun syncPriceOnBoot() {
+        deviceConfigSync.refresh()
+        if (_ui.value.state !is TransactionState.Idle) return
+        deviceConfigRepository.getConfig()?.let { config ->
+            priceKoboPerLitre = config.koboPerLitre
+            _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
         }
     }
 
