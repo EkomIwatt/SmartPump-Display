@@ -1,6 +1,31 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-19, later (10d: a digital sale can now complete, and a restart cannot sell twice)
+## Current status — 2026-09-19, later still (10e's taxonomy half; **the branch is finally pushed**)
+
+**`feature/phase-10-payments` is on `origin` for the first time.** It had never been pushed at all —
+no remote branch, twenty commits of 10a–10d existing only on one laptop. That was a bigger exposure
+than anything on the board, and it is closed.
+
+**#45 is done** (`6162027`). `RetryPolicy` is `RETRY_NOW` / `RETRY_LATER` / `TERMINAL`, keyed on the
+server's `code`. `PAYMENT_NOT_CONFIRMED` is the one refusal that becomes a success on its own, and
+an upload job reading it as final would drop the record permanently — the single outcome 10f exists
+to prevent. `RETRY_LATER` is **not** retried in-flight, because a second and a half of backoff will
+not outlast a payment confirming. It also retired the duplication 10d created an hour earlier:
+`isPollTerminal` had its own private code constant and now defers to the shared taxonomy for the
+question the two genuinely share.
+
+**10e's copy half is deliberately not started.** Per the authority order the strict design screens
+govern copy, so wiring `ERROR_COPY_DRAFT.md` Catalogue A is a reading-and-wording pass that wants
+fresh eyes rather than the tail of a long build session. **That is where the next session opens.**
+
+**Branch state:** `feature/phase-10-payments`, **21 commits, pushed**, working tree clean, JVM
+**388 tests / 42 classes** green, `compileDebugRealHwKotlin`, `lintDebug` and `assembleDebugProd`
+clean. (Run `lintDebug` and `assembleDebugProd` in **separate** invocations — together they race on
+generated Hilt sources and lint dies with an internal error that is not a code defect.)
+
+---
+
+## Previous status — 2026-09-19, later (10d: a digital sale can now complete, and a restart cannot sell twice)
 
 **A digital sale works end to end in code for the first time.** The QR goes up, the poll watches
 `GET /transactions/{id}` on a 10 s cadence, and `PAID` starts the fuel. `BalanceePaymentProcessor`

@@ -5,7 +5,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-19, later (10d built and the real processor is bound; **10e — error mapping — is next**)_
+_Last updated: 2026-09-19, later still (10e's taxonomy half done and the branch is PUSHED; **next session opens on 10e's copy half**)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
@@ -425,7 +425,21 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
     kobo, so it cannot express more than two — yet `price × litres` exceeds two whenever the price is
     not a multiple of ten (₦1491 × 2.357 L = ₦3,514.287). Today's ₦1490 hides it. The probe is litres
     **2.3571** → 3512.079.
-- [ ] **45. `PAYMENT_NOT_CONFIRMED` is a refusal that can become a success — and our taxonomy has no
+- [x] **45. `PAYMENT_NOT_CONFIRMED` — the taxonomy now has a word for it. DONE 2026-09-19**
+  (`6162027`). `RetryPolicy` is `RETRY_NOW` / `RETRY_LATER` / `TERMINAL`, keyed on the server's
+  `code` and never on its prose. **`RETRY_LATER` is deliberately not retried in-flight** — three
+  attempts over a second and a half will not outlast a payment confirming, and burning them hands
+  the durable queue a call that has already given up; `isRetryable` survives as
+  `retryPolicy == RETRY_NOW`, so `retryingApiCall` is unchanged. A `Business` with **no** code is
+  terminal: the app cannot tell a temporary refusal from a permanent one without being told.
+  `PumpErrorCodes` collects the four codes observed at the gate, with `NOT_YET` as the set that
+  earns `RETRY_LATER` — one entry today, and each future one wants an observation behind it.
+  **It also retired the duplication 10d had just created**: `BalanceePaymentProcessor`'s
+  `isPollTerminal` had its own private code constant, and now defers to `retryPolicy` for the
+  question the two share while keeping its own answer for the rest (the poll is bounded by
+  `expiresAt`; an upload queue is not). That widened the poll correctly — *any* considered refusal
+  ends it, not only `TRANSACTION_NOT_FOUND`. _(original entry)_
+  **`PAYMENT_NOT_CONFIRMED` is a refusal that can become a success — and our taxonomy has no
   word for that.** Observed 2026-09-16 (`docs/api-probes/2026-09-16-prod-gate/`):
   ```
   POST /api/pump/transactions/upload → 409
@@ -1000,7 +1014,19 @@ captures are the test fixtures.
       already paid for the first. Because `transactionId` is ours, the correct behaviour is to resume
       polling the existing id. Tests first, on that path specifically.
 
-- [ ] **10e — Error mapping (#14's mapping half, #45).**
+- [~] **10e — Error mapping (#14's mapping half, #45). HALF DONE 2026-09-19.**
+  - [x] **The taxonomy half (#45)** — `6162027`. Detail under #45 below. Done first and on its own
+    because it is what 10f's upload job rests on, and because 10d had just created a second,
+    private answer to the same question that was going to drift.
+  - [ ] **The copy half — START HERE NEXT SESSION.** Wire `ERROR_COPY_DRAFT.md` Catalogue A (123
+    lines) into the customer's one plain line and the attendant panel's detail. Deliberately left
+    for fresh eyes: per the authority order the **strict design screens govern copy**, so this is a
+    reading-and-wording pass against `docs/Strict design screens/` and the draft, not a continuation
+    of the payment plumbing. `BalanceePaymentProcessor.describe()` is the placeholder it replaces —
+    it carries the server's own `message` through verbatim rather than paraphrasing, because a
+    paraphrase written in passing is copy nobody agreed.
+  - A `RETRY_LATER` failure should also **not read to an attendant as a failed sale**. That is the
+    one place the taxonomy half reaches into the copy half.
   - **#45 — the taxonomy needs a third outcome.** `PAYMENT_NOT_CONFIRMED` is a 409 that parses as
     `ApiError.Business`, and `ApiResult.kt:52` makes every `Business` non-retryable — documented as
     "a considered refusal". This one is not: it is true now and false in a minute. Add *retry later,
