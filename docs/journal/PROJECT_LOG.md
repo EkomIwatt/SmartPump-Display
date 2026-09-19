@@ -1,6 +1,36 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-17 (the gate's docs debt paid; Phase 10 planned and started)
+## Current status — 2026-09-19 (10c-bis: the displayed price and the charged price are finally the same number)
+
+**The divergence is closed.** Nothing in this app had ever written the server's price into
+`DeviceConfig` — `PumpConfigResponse` had three consumers and none of them stored anything, while
+the only writers of `DeviceConfig` were two settings screens and a debug-build seed. The price the
+customer read and the price `/authorise` was checked against were unrelated numbers, agreeing only
+because someone had typed one to match the other. `PumpConfigSync` now stores what the
+fetch-before-authorise already read, and the boot path fetches too. **#18(a) / 7b's second half is
+done**, and `BOSS_CONFIRMATIONS_DRAFT.md` item 1 — the ask marked *highest* — is retired in code.
+
+**All three 10c-bis calls went the recommended way:** build it before 10d; the server wins and the
+operator's typed price becomes the pre-activation / offline fallback; the residual seconds-wide
+fill-up race proceeds at the server's price and is logged rather than refused.
+
+**Two new event types, and the fuel-log card is now the Pump log.** `PRICE_SYNCED` is the operator's
+only evidence the screen's price changed with nobody at the pump; `PRICE_CHANGED_MID_SALE` records
+what a fill-up customer watched beside what they were charged. Both written only when something
+actually moved.
+
+**Two follow-ups were declined on purpose rather than folded in:** the two station names
+(`DeviceConfig.stationName` vs `StationIdentity.displayName`, plus a third on `/config`), and the
+backend ask that would let a fill-up be charged at the price it was struck at. Both on the board.
+
+**Branch state:** `feature/phase-10-payments`, **13 commits, local only, working tree clean**, JVM
+**357 tests / 40 classes** green, `compileDebugRealHwKotlin` + `lintDebug` clean. Not pushed.
+**Next is 10d** — PAID detection by poll, carrying the boot-resume trap that would otherwise
+authorise a second sale for a customer who has already paid.
+
+---
+
+## Previous status — 2026-09-17 (the gate's docs debt paid; Phase 10 planned and started)
 
 **`main` is pushed** — `origin/main` = `84d6f49`, carrying the whole gate. The docs the gate made
 stale are corrected: `V1_BLOCKERS.md` §4 no longer claims the API line is blocked on the backend,
