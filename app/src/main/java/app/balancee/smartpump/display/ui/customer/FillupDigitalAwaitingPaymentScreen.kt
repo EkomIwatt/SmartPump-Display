@@ -1,8 +1,10 @@
 // Flow 3, post-fill-up digital-payment wait. After the nozzle shuts (verified litres locked),
-// the customer chose "Pay digitally". A dynamic NIP-transfer QR is generated encoding the
-// station's virtual account, the exact amount due, and the transaction reference. Card stays
-// gold (waiting) until the webhook confirms — then it flips to Complete (green). On 5-min
-// expiry, falls back to FillupAwaitingCashConfirm.
+// the customer chose "Pay digitally". The QR is the **Paystack checkout URL** the backend returned
+// for this sale's exact amount. Until 10d it was a `nip://transfer?…` payload this app fabricated
+// against the operator's virtual account — well-formed, unscannable by any bank, and therefore
+// unpayable; OQ #6 had retired the virtual account when payments moved to Paystack and this screen
+// was the last thing still using it. Card stays gold (waiting) until the poll reports PAID — then
+// it flips to Complete (green). On expiry, falls back to FillupAwaitingCashConfirm.
 //
 // Single gold card (like PrepayAwaitingPaymentScreen) with a QR | info split. Adopts the
 // dispensing-family language: in-card StateChip + word header, an AMOUNT DUE hero, and the
@@ -46,6 +48,7 @@ import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SmartPumpDisplayTheme
 import app.balancee.smartpump.display.ui.theme.SurfaceVariant
 import app.balancee.smartpump.display.ui.theme.TextSecondary
+import app.balancee.smartpump.display.ui.theme.TextTertiary
 import app.balancee.smartpump.display.ui.util.formatNaira
 import app.balancee.smartpump.display.ui.util.isPortrait
 
@@ -94,7 +97,7 @@ fun FillupDigitalAwaitingPaymentScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     StateChip(label = "Scan to pay", color = accent)
-                    LabelText(text = "Bank QR · NIP")
+                    LabelText(text = "Bank QR · card")
                 }
 
                 // Body: QR artefact + amount/ledger. Side-by-side on landscape, stacked portrait.
@@ -107,6 +110,7 @@ fun FillupDigitalAwaitingPaymentScreen(
                     ) {
                         QrPane(
                             qrContent = qrContent,
+                            txnId = txnId,
                             accent = accent,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -133,6 +137,7 @@ fun FillupDigitalAwaitingPaymentScreen(
                     ) {
                         QrPane(
                             qrContent = qrContent,
+                            txnId = txnId,
                             accent = accent,
                             modifier = Modifier
                                 .weight(1f)
@@ -155,8 +160,8 @@ fun FillupDigitalAwaitingPaymentScreen(
         }
 
         Text(
-            text = "QR encodes the exact fill-up amount — dynamic, per transaction. " +
-                "Walk away and the screen falls back to cash collection.",
+            text = "QR opens a secure checkout for the exact fill-up amount — dynamic, per " +
+                "transaction. Walk away and the screen falls back to cash collection.",
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary,
             textAlign = TextAlign.Center,
@@ -171,10 +176,40 @@ fun FillupDigitalAwaitingPaymentScreen(
     }
 }
 
+/**
+ * No checkout URL: show the reference an attendant can quote, never an unpayable QR.
+ *
+ * Reachable when `/authorise` returned no `authorizationUrl`. It is not the old failure mode —
+ * until 10d this screen rendered a fabricated `nip://transfer?…` payload that always looked fine
+ * and could never be paid.
+ */
+@Composable
+private fun UnavailableQrPrompt(txnId: String) {
+    Column(
+        modifier = Modifier.padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Payment code unavailable",
+            style = MaterialTheme.typography.bodyLarge,
+            color = TextSecondary,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = "Ask the attendant, quoting $txnId",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
 /** QR in a tinted inset box (borrowed from PrepayAwaitingPaymentScreen) + scan captions. */
 @Composable
 private fun QrPane(
     qrContent: String,
+    txnId: String,
     accent: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
 ) {
@@ -195,8 +230,14 @@ private fun QrPane(
                 .padding(20.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Box(modifier = Modifier.size(200.dp)) {
-                QrCodeView(content = qrContent, sizeDp = 200.dp)
+            if (qrContent.isBlank()) {
+                // Never render a QR of nothing. Same rule as the pre-pay screen: a code that
+                // cannot be paid is worse than no code, because the customer scans it and waits.
+                UnavailableQrPrompt(txnId = txnId)
+            } else {
+                Box(modifier = Modifier.size(200.dp)) {
+                    QrCodeView(content = qrContent, sizeDp = 200.dp)
+                }
             }
         }
         Text(
@@ -285,7 +326,7 @@ private fun FillupDigitalAwaitingPaymentPreview() {
             verifiedLitres = 38.10,
             amountDueKobo = 3_316_605,
             priceKoboPerLitre = 87_050,
-            qrContent = "nip://transfer?account=0123456789&amount=33166.05&ref=BLC-00921",
+            qrContent = "https://checkout.paystack.com/jn0ej3u6def5150",
             expiresInSeconds = 287,
             onCancel = {},
         )
@@ -301,7 +342,7 @@ private fun FillupDigitalAwaitingPaymentPortraitPreview() {
             verifiedLitres = 38.10,
             amountDueKobo = 3_316_605,
             priceKoboPerLitre = 87_050,
-            qrContent = "nip://transfer?account=0123456789&amount=33166.05&ref=BLC-00921",
+            qrContent = "https://checkout.paystack.com/jn0ej3u6def5150",
             expiresInSeconds = 287,
             onCancel = {},
         )
