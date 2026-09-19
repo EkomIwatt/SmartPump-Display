@@ -23,7 +23,7 @@ actually moved.
 (`DeviceConfig.stationName` vs `StationIdentity.displayName`, plus a third on `/config`), and the
 backend ask that would let a fill-up be charged at the price it was struck at. Both on the board.
 
-**Branch state:** `feature/phase-10-payments`, **13 commits, local only, working tree clean**, JVM
+**Branch state:** `feature/phase-10-payments`, **14 commits, local only, working tree clean**, JVM
 **357 tests / 40 classes** green, `compileDebugRealHwKotlin` + `lintDebug` clean. Not pushed.
 **Next is 10d** — PAID detection by poll, carrying the boot-resume trap that would otherwise
 authorise a second sale for a customer who has already paid.
