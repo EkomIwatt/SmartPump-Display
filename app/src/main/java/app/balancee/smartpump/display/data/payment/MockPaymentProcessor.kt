@@ -12,6 +12,7 @@ import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -62,12 +64,14 @@ class MockPaymentProcessor @Inject constructor(
     override fun process(request: PaymentRequest): Flow<PaymentResult> = flow {
         instantResolve.tryReceive() // drain any stale signal from a previous transaction
         val ref = nextRef()
-        val method = request.method
-        val amountKobo = request.amountKobo
         emit(
             PaymentResult.Pending(
                 transactionRef = ref,
-                method = method,
+                method = request.method,
+                // The mock does not re-price, so the requested figures ARE the authorised ones.
+                // The real processor quotes against the server and the two come apart there.
+                amountKobo = request.amountKobo,
+                litres = request.expectedLitres,
                 // Shaped like the real thing so the screens that consume it in 10c are exercised
                 // by the debug path too — but pointed at a host that cannot take a payment, so a
                 // mock QR scanned by accident fails instead of charging someone.
@@ -76,7 +80,29 @@ class MockPaymentProcessor @Inject constructor(
                 paymentReference = "BPM-MOCK-$ref",
             )
         )
+        awaitResolution(ref, request)
+    }
 
+    /**
+     * Resume is the same wait without a new reference (Phase 10d).
+     *
+     * The mock cannot reproduce the defect this method exists for — re-running `process` costs it
+     * nothing — but it must honour the same contract, or the debug build exercises a shape the
+     * release build does not have. No `Pending`: the caller restored the QR from disk.
+     */
+    override fun resume(
+        transactionRef: String,
+        request: PaymentRequest,
+        deadline: Instant?,
+    ): Flow<PaymentResult> = flow {
+        instantResolve.tryReceive()
+        awaitResolution(transactionRef, request)
+    }
+
+    private suspend fun FlowCollector<PaymentResult>.awaitResolution(
+        ref: String,
+        request: PaymentRequest,
+    ) {
         val delayMs = _pendingDelayMs.value
         if (delayMs > 0) {
             // Wait the configured delay OR until the debug "force resolve" fires.
@@ -87,9 +113,10 @@ class MockPaymentProcessor @Inject constructor(
             emit(
                 PaymentResult.Success(
                     transactionRef = ref,
-                    amountKobo = amountKobo,
-                    method = method,
+                    amountKobo = request.amountKobo,
+                    method = request.method,
                     paymentReference = "BPM-MOCK-$ref",
+                    litresAuthorised = request.expectedLitres,
                 )
             )
         } else {

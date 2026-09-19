@@ -25,6 +25,19 @@ sealed class PaymentResult {
         val amountKobo: Long,
         val method: PaymentMethod,
         val paymentReference: String? = null,
+        /**
+         * Litres the server authorised, when a server authorised any.
+         *
+         * Without it the caller re-derives litres from [amountKobo] at the device's own cutoff, and
+         * gets a **different** number: the quote lands on a payable litre step
+         * (`SaleQuote.litreStepMicros`) while `DeviceConfig.litresCutoff` floors to 2 dp. At ₦1,490
+         * a ₦5,000 tender authorises 3.355 L and re-derivation gives 3.35 — the pump would stop
+         * 5 ml short of what the customer paid for, every time, on a figure 10f will later
+         * reconcile against the server's own record.
+         *
+         * Null for processors with nothing authoritative to offer; the caller keeps its fallback.
+         */
+        val litresAuthorised: Double? = null,
     ) : PaymentResult()
 
     /** Payment definitively failed. [transactionRef] is null if we never received a ref. */
@@ -50,6 +63,19 @@ sealed class PaymentResult {
     data class Pending(
         val transactionRef: String,
         val method: PaymentMethod,
+        /**
+         * **What will actually be collected**, which is not what the customer tendered.
+         *
+         * The server checks `amount == expectedLitres × pricePerUnit` exactly and Paystack charges
+         * whole kobo, so a round tender is usually not payable: at ₦1,490/L a ₦5,000 pre-pay is
+         * authorised at ₦4,998.95 (`SaleQuote`). Until 10d the screen went on showing ₦5,000 beside
+         * a checkout page that said ₦4,998.95 — two numbers for one sale, with the customer looking
+         * at both. Required rather than defaulted: a processor that does not answer this is
+         * showing someone the wrong price.
+         */
+        val amountKobo: Long,
+        /** Litres [amountKobo] buys, on a payable step. The figure the dispense counts toward. */
+        val litres: Double,
         val checkoutUrl: String? = null,
         val expiresAt: Instant? = null,
         val paymentReference: String? = null,

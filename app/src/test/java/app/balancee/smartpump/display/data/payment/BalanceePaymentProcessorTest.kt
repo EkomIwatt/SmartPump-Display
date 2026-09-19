@@ -26,7 +26,10 @@ import app.balancee.smartpump.display.domain.model.SaleBasis
 import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import app.balancee.smartpump.display.ui.customer.FakeDeviceConfigRepository
 import app.balancee.smartpump.display.ui.customer.FakeEventRepository
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
@@ -35,7 +38,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 class BalanceePaymentProcessorTest {
 
@@ -57,12 +63,20 @@ class BalanceePaymentProcessorTest {
     )
     private val events = FakeEventRepository()
 
+    /** Fixed, and well before any expiry the tests use, so only a test that means to expire does. */
+    private val clock = MutableClock(Instant.parse("2026-09-19T12:00:00Z"))
+
     private val processor = BalanceePaymentProcessor(
         client = client,
         configSync = PumpConfigSync(client, deviceConfig, events),
         events = events,
         transactionIds = { "txn-fixed-0001" },
+        clock = clock,
     )
+
+    /** Everything up to and including the first terminal. Virtual time, so the 10 s poll is free. */
+    private suspend fun Flow<PaymentResult>.untilTerminal(): List<PaymentResult> =
+        transformWhile { emit(it); it is PaymentResult.Pending }.toList()
 
     private fun tender(amountKobo: Long) = PaymentRequest(
         method = PaymentMethod.BALANCEE_APP,
@@ -152,7 +166,7 @@ class BalanceePaymentProcessorTest {
         val pending = processor.process(tender(500_000)).first() as PaymentResult.Pending
 
         assertEquals("https://checkout.paystack.com/jn0ej3u6def5150", pending.checkoutUrl)
-        assertEquals(Instant.parse("2026-09-17T21:46:11.090Z"), pending.expiresAt)
+        assertEquals(Instant.parse("2026-09-19T12:20:00.000Z"), pending.expiresAt)
         assertEquals("BPM-990f0b736cb8436fbc8673469f2d1671", pending.paymentReference)
         assertEquals("txn-fixed-0001", pending.transactionRef)
     }
@@ -277,6 +291,170 @@ class BalanceePaymentProcessorTest {
         assertTrue(events.recorded.isEmpty())
     }
 
+    // ---- the poll (10d) -----------------------------------------------------------
+
+    /** The terminal the whole phase exists for. */
+    @Test
+    fun `a PAID poll resolves the sale`() = runTest {
+        service.statuses = listOf("PENDING_PAYMENT", "PENDING_PAYMENT", "PAID")
+
+        val results = processor.process(tender(500_000)).untilTerminal()
+
+        val success = results.last() as PaymentResult.Success
+        assertEquals("txn-fixed-0001", success.transactionRef)
+        assertEquals("txn-fixed-0001", service.lastPolledId)
+        assertEquals(3, service.statusCalls)
+    }
+
+    /**
+     * The figures on the terminal are the ones that were authorised, not the ones requested.
+     * Re-deriving litres from the amount would give 3.35 against an authorised 3.355 and stop the
+     * pump 5 ml short of what the customer paid for.
+     */
+    @Test
+    fun `success carries the authorised amount and litres`() = runTest {
+        val success = processor.process(tender(500_000)).untilTerminal()
+            .last() as PaymentResult.Success
+
+        assertEquals(499_895L, success.amountKobo)
+        assertEquals(3.355, success.litresAuthorised!!, 0.0)
+        assertEquals("BPM-990f0b736cb8436fbc8673469f2d1671", success.paymentReference)
+    }
+
+    /** Pending has to agree with the checkout page, or the customer reads two different prices. */
+    @Test
+    fun `pending carries what will actually be collected`() = runTest {
+        val pending = processor.process(tender(500_000)).first() as PaymentResult.Pending
+
+        assertEquals(499_895L, pending.amountKobo)   // not the 500_000 tendered
+        assertEquals(3.355, pending.litres, 0.0)
+    }
+
+    /** A sale that completed and uploaded before a restart is a paid sale. */
+    @Test
+    fun `a DISPENSED poll resolves the sale`() = runTest {
+        service.statuses = listOf("DISPENSED")
+
+        val results = processor.process(tender(500_000)).untilTerminal()
+
+        assertTrue(results.last() is PaymentResult.Success)
+    }
+
+    /**
+     * The asymmetry that keeps a paid customer from being refused fuel over a word nobody has
+     * observed: an unrecognised status waits rather than failing.
+     */
+    @Test
+    fun `an unrecognised status keeps polling rather than failing`() = runTest {
+        service.statuses = listOf("SOMETHING_NEW", "SOMETHING_NEW", "PAID")
+
+        val results = processor.process(tender(500_000)).untilTerminal()
+
+        assertTrue(results.last() is PaymentResult.Success)
+        assertEquals(3, service.statusCalls)
+    }
+
+    /** Same rule for the transport: a blip is not an answer. */
+    @Test
+    fun `a network blip mid-poll does not end the sale`() = runTest {
+        service.statusFailures = listOf(IOException("blip"), IOException("blip"))
+        service.statuses = listOf("PENDING_PAYMENT", "PENDING_PAYMENT", "PAID")
+
+        val results = processor.process(tender(500_000)).untilTerminal()
+
+        assertTrue(results.last() is PaymentResult.Success)
+    }
+
+    /** A server that has never heard of this sale will not start hearing of it. */
+    @Test
+    fun `an unknown transaction ends the poll`() = runTest {
+        service.statusEnvelopeFailure = ApiEnvelope(
+            status = false,
+            message = "Transaction not found",
+            data = null,
+            code = "TRANSACTION_NOT_FOUND",
+        )
+
+        val results = processor.process(tender(500_000)).untilTerminal()
+
+        assertTrue(results.last() is PaymentResult.Failed)
+        assertEquals(1, service.statusCalls)
+    }
+
+    /** The server's own window, read off the authorise. Nothing here invents a timeout. */
+    @Test
+    fun `the poll gives up when the server's window closes`() = runTest {
+        service.expiresAt = "2026-09-19T12:00:30Z"   // 30 s after the fixed clock
+        service.statuses = listOf("PENDING_PAYMENT")
+
+        val flow = processor.process(tender(500_000))
+        clock.now = Instant.parse("2026-09-19T12:01:00Z")
+        val results = flow.untilTerminal()
+
+        val failed = results.last() as PaymentResult.Failed
+        assertEquals("txn-fixed-0001", failed.transactionRef)
+        assertEquals(0, service.statusCalls)   // already past it; never asked
+    }
+
+    // ---- resume (10d's boot-resume trap) --------------------------------------------
+
+    /**
+     * **The defect this phase exists for.** Resuming must ask about the sale that exists, never
+     * create a second one — against a real server the old `process()` call would have authorised a
+     * fresh sale for a customer who had already paid.
+     */
+    @Test
+    fun `resume polls the existing sale and never authorises`() = runTest {
+        service.statuses = listOf("PAID")
+
+        val results = processor
+            .resume("txn-already-live", tender(500_000), deadline = null)
+            .untilTerminal()
+
+        assertNull(service.lastAuthorise)
+        assertEquals(0, service.configCalls)
+        assertEquals("txn-already-live", service.lastPolledId)
+        assertEquals("txn-already-live", (results.last() as PaymentResult.Success).transactionRef)
+    }
+
+    /** No Pending on this path: the caller restored the QR and the deadline from disk. */
+    @Test
+    fun `resume emits only a terminal`() = runTest {
+        val results = processor
+            .resume("txn-already-live", tender(500_000), deadline = null)
+            .untilTerminal()
+
+        assertEquals(1, results.size)
+    }
+
+    /** The reference the authorise returned was lost in the restart; the poll hands it back. */
+    @Test
+    fun `resume recovers the payment reference from the poll`() = runTest {
+        val success = processor
+            .resume("txn-already-live", tender(500_000), deadline = null)
+            .untilTerminal()
+            .last() as PaymentResult.Success
+
+        assertEquals("BPM-990f0b736cb8436fbc8673469f2d1671", success.paymentReference)
+    }
+
+    /** The window kept running while the app was down, so a restored deadline is honoured. */
+    @Test
+    fun `resume honours a deadline that has already passed`() = runTest {
+        service.statuses = listOf("PENDING_PAYMENT")
+
+        val results = processor
+            .resume(
+                "txn-already-live",
+                tender(500_000),
+                deadline = Instant.parse("2026-09-19T11:00:00Z"),   // an hour before the clock
+            )
+            .untilTerminal()
+
+        assertTrue(results.last() is PaymentResult.Failed)
+        assertEquals(0, service.statusCalls)
+    }
+
     /** A tender too small to buy a single step of fuel is refused here, not by the server. */
     @Test
     fun `an amount that buys no fuel never reaches the server`() = runTest {
@@ -303,7 +481,12 @@ private class FakePumpApiService(var config: PumpConfigResponse) : PumpApiServic
     var configFailure: Throwable? = null
     var authoriseEnvelope: ApiEnvelope<PumpTransactionResponse>? = null
     var authorizationUrl: String? = "https://checkout.paystack.com/jn0ej3u6def5150"
-    var expiresAt: String? = "2026-09-17T21:46:11.090Z"
+    /**
+      * Twenty minutes after the test clock, matching the window measured on production (#43).
+      * The gate capture's own timestamp is in the past relative to that clock, so using it here
+      * would expire every sale on its first poll — which is a fixture artefact, not a behaviour.
+      */
+    var expiresAt: String? = "2026-09-19T12:20:00.000Z"
 
     override suspend fun config(): ApiEnvelope<PumpConfigResponse> {
         configCalls++
@@ -333,10 +516,42 @@ private class FakePumpApiService(var config: PumpConfigResponse) : PumpApiServic
     override suspend fun authoriseRaw(body: JsonObject): ApiEnvelope<PumpTransactionResponse> =
         error("authoriseRaw is the probe panel's, not the processor's")
 
-    override suspend fun transactionStatus(transactionId: String): ApiEnvelope<PumpTransactionResponse> =
-        error("polling arrives in 10d")
+    /** Successive poll answers; the last one repeats once the list runs out. */
+    var statuses: List<String> = listOf("PAID")
+    var statusFailures: List<Throwable?> = emptyList()
+
+    /** A `status:false` envelope — the shape a business refusal actually arrives in. */
+    var statusEnvelopeFailure: ApiEnvelope<PumpTransactionResponse>? = null
+    var statusCalls = 0; private set
+    var lastPolledId: String? = null
+
+    override suspend fun transactionStatus(transactionId: String): ApiEnvelope<PumpTransactionResponse> {
+        lastPolledId = transactionId
+        val index = statusCalls
+        statusCalls++
+        statusFailures.getOrNull(index)?.let { throw it }
+        statusEnvelopeFailure?.let { return it }
+        return ApiEnvelope(
+            status = true,
+            message = "Transaction status",
+            data = PumpTransactionResponse(
+                status = statuses.getOrElse(index) { statuses.last() },
+                transactionId = transactionId,
+                paymentReference = "BPM-990f0b736cb8436fbc8673469f2d1671",
+                authorizationUrl = authorizationUrl,
+                expiresAt = expiresAt,
+            ),
+        )
+    }
 
     override suspend fun uploadTransaction(
         body: UploadTransactionRequest,
     ): ApiEnvelope<PumpTransactionResponse> = error("upload arrives in 10f")
+}
+
+/** A clock a test can push forward, for the expiry deadline. */
+private class MutableClock(var now: Instant) : Clock() {
+    override fun getZone(): ZoneId = ZoneOffset.UTC
+    override fun withZone(zone: ZoneId): Clock = this
+    override fun instant(): Instant = now
 }

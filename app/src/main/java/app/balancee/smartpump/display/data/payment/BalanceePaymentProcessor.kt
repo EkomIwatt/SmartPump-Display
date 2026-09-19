@@ -1,9 +1,8 @@
-// The real payment processor: GET /config → POST /authorise → a QR the customer can actually pay.
+// The real payment processor: GET /config → POST /authorise → a QR the customer can pay → poll
+// GET /transactions/{id} until PAID.
 //
-// **NOT BOUND IN DI YET.** Phase 10c builds the authorise half; the terminal result — PAID, detected
-// by polling `GET /transactions/{id}` — is 10d. Binding this before the poll exists would give a
-// customer a QR that never resolves, so `PaymentModule` still binds the mock and this is exercised
-// by its tests until 10d flips it.
+// Phase 10c built the authorise half. **10d added the poll and the resume path**, which is what
+// makes the terminal result real and what lets `PaymentModule` bind this at all.
 package app.balancee.smartpump.display.data.payment
 
 import app.balancee.smartpump.display.data.config.PumpConfigSync
@@ -14,6 +13,7 @@ import app.balancee.smartpump.display.data.network.ApiResult
 import app.balancee.smartpump.display.data.network.PumpApiClient
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
 import app.balancee.smartpump.display.domain.model.EventType
+import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.SaleBasis
@@ -22,9 +22,12 @@ import app.balancee.smartpump.display.domain.model.quoteForDispensed
 import app.balancee.smartpump.display.domain.model.quoteForTender
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.EventRepository
-import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.flow
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeParseException
 import java.util.UUID
@@ -37,6 +40,8 @@ class BalanceePaymentProcessor @Inject constructor(
     private val configSync: PumpConfigSync,
     private val events: EventRepository,
     private val transactionIds: TransactionIdFactory,
+    // Injected so a test can reach the expiry deadline without waiting twenty real minutes.
+    private val clock: Clock,
 ) : PaymentProcessor {
 
     override fun process(request: PaymentRequest): Flow<PaymentResult> = flow {
@@ -97,21 +102,127 @@ class BalanceePaymentProcessor @Inject constructor(
 
         recordPriceRaceIfAny(request, synced, quote, authorised.transactionId)
 
+        val expiresAt = authorised.expiresAt?.toInstantOrNull()
         emit(
             PaymentResult.Pending(
                 transactionRef = authorised.transactionId,
                 method = request.method,
+                // The quote, not the request. What the customer tendered is not what Paystack will
+                // collect, and the screen has to show the figure the checkout page shows.
+                amountKobo = quote.amountKobo,
+                litres = quote.litres.toDouble(),
                 checkoutUrl = checkoutUrl,
-                expiresAt = authorised.expiresAt?.toInstantOrNull(),
+                expiresAt = expiresAt,
                 paymentReference = authorised.paymentReference,
             ),
         )
 
-        // TODO(10d): poll GET /transactions/{id} until PAID, expiry or cancellation, then emit the
-        //  terminal. Suspending rather than completing is deliberate — a flow that ended here would
-        //  look to a collector like a payment that resolved, and the collector's `when` would treat
-        //  the absence of a terminal as nothing having gone wrong.
-        awaitCancellation()
+        pollUntilTerminal(
+            transactionId = authorised.transactionId,
+            method = request.method,
+            amountKobo = quote.amountKobo,
+            litres = quote.litres.toDouble(),
+            paymentReference = authorised.paymentReference,
+            deadline = expiresAt,
+        )
+    }
+
+    /**
+     * Resume after a restart: poll the sale that already exists, and never authorise a second one.
+     *
+     * No `/config` and no `/authorise`. Re-pricing would be wrong here even if it were free — the
+     * customer may already have paid the figure they were quoted, and the sale the server is
+     * holding is the one to ask about.
+     */
+    override fun resume(
+        transactionRef: String,
+        request: PaymentRequest,
+        deadline: Instant?,
+    ): Flow<PaymentResult> = flow {
+        pollUntilTerminal(
+            transactionId = transactionRef,
+            method = request.method,
+            amountKobo = request.amountKobo,
+            litres = request.expectedLitres,
+            // Not known on this path — it came back on the authorise, before the restart. The poll
+            // returns it, and 10f's upload cannot go out without it.
+            paymentReference = null,
+            deadline = deadline,
+        )
+    }
+
+    /**
+     * Poll `GET /transactions/{id}` until the sale resolves, the window closes, or the collector
+     * goes away.
+     *
+     * **What ends the poll early is deliberately a short list**: `PAID`, `DISPENSED`, a server that
+     * says the transaction does not exist, and a device with no credentials to ask with. Everything
+     * else — an unrecognised status string, a reply that would not parse, a 500, no signal — keeps
+     * polling until the deadline.
+     *
+     * That asymmetry is the point. Giving up on a status nobody has observed would refuse fuel to
+     * someone who has paid, on a guess about a word. Riding to the deadline costs at worst a wait
+     * the server's own expiry bounds, and the caller's countdown cancels this flow at that same
+     * moment anyway. The statuses treated as terminal are the ones observed at the #32 gate
+     * (`PENDING_PAYMENT` → `PAID` → `DISPENSED`); `DISPENSED` counts because a sale that completed
+     * and uploaded before the restart is a paid sale.
+     */
+    private suspend fun FlowCollector<PaymentResult>.pollUntilTerminal(
+        transactionId: String,
+        method: PaymentMethod,
+        amountKobo: Long,
+        litres: Double,
+        paymentReference: String?,
+        deadline: Instant?,
+    ) {
+        var reference = paymentReference
+        while (true) {
+            if (deadline != null && !clock.instant().isBefore(deadline)) {
+                emit(
+                    PaymentResult.Failed(
+                        reason = "The payment window closed before this was paid.",
+                        transactionRef = transactionId,
+                    ),
+                )
+                return
+            }
+
+            when (val result = client.transactionStatus(transactionId)) {
+                is ApiResult.Success -> {
+                    // Keep the newest one: `resume` starts without a reference and the upload
+                    // cannot go out without it.
+                    result.data.paymentReference?.let { reference = it }
+                    when (result.data.status) {
+                        STATUS_PAID, STATUS_DISPENSED -> {
+                            emit(
+                                PaymentResult.Success(
+                                    transactionRef = transactionId,
+                                    amountKobo = amountKobo,
+                                    method = method,
+                                    paymentReference = reference,
+                                    litresAuthorised = litres,
+                                ),
+                            )
+                            return
+                        }
+                        // PENDING_PAYMENT, or a word this app has never seen. Both wait.
+                        else -> Unit
+                    }
+                }
+
+                is ApiResult.Failure -> if (result.error.isPollTerminal) {
+                    emit(
+                        PaymentResult.Failed(
+                            reason = result.error.describe("could not confirm the payment"),
+                            transactionRef = transactionId,
+                        ),
+                    )
+                    return
+                }
+            }
+
+            delay(POLL_INTERVAL.toMillis())
+        }
     }
 
     /**
@@ -200,3 +311,27 @@ private fun String.toInstantOrNull(): Instant? =
     } catch (_: DateTimeParseException) {
         null
     }
+
+/**
+ * Whether a failed poll is worth giving up on, as opposed to waiting out.
+ *
+ * True only where every subsequent poll would fail the same way: the server has no such
+ * transaction, or this device has no credentials to ask with. A 500, a dropped connection and a
+ * reply that would not parse are all things that come back.
+ */
+private val ApiError.isPollTerminal: Boolean
+    get() = when (this) {
+        is ApiError.NotActivated -> true
+        is ApiError.Business -> code == CODE_TRANSACTION_NOT_FOUND
+        else -> false
+    }
+
+/** Observed at the #32 gate: `PENDING_PAYMENT` → `PAID` → `DISPENSED`. */
+private const val STATUS_PAID = "PAID"
+private const val STATUS_DISPENSED = "DISPENSED"
+
+/** One of the server's stable codes (TODO #18f). Matched on `code`, never on the prose. */
+private const val CODE_TRANSACTION_NOT_FOUND = "TRANSACTION_NOT_FOUND"
+
+/** The cadence OQ #8 settled on. A twenty-minute window is ~120 requests per unpaid sale. */
+private val POLL_INTERVAL: Duration = Duration.ofSeconds(10)

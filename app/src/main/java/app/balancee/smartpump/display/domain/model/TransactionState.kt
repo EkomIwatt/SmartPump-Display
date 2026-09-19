@@ -57,6 +57,10 @@ sealed class TransactionState {
      * the countdown reads it; the five-minute constant survives only as the fallback for a response
      * that omitted it.
      *
+     * @param amountKobo **what will be collected**, not what the customer tendered. From 10d this
+     *   carries the authorised figure, because that is what the Paystack page shows: at ₦1,490/L a
+     *   ₦5,000 pre-pay is authorised at ₦4,998.95, and the screen used to print the ₦5,000 beside a
+     *   QR that would charge the other number.
      * @param checkoutUrl the Paystack page the QR encodes — **the only thing a customer can pay**.
      *   Null on a state persisted before 10c, and on the mock's fabricated sales; the screen falls
      *   back to showing the reference rather than a QR that goes nowhere.
@@ -72,6 +76,15 @@ sealed class TransactionState {
         val priceKoboPerLitre: Long,
         val checkoutUrl: String? = null,
         val expiresAtEpochMs: Long? = null,
+        /**
+         * Litres the server authorised, when it authorised any (10d).
+         *
+         * Persisted because a restart has to resume the sale that exists rather than re-derive it:
+         * the quote lands on a payable litre step while `DeviceConfig.litresCutoff` floors to 2 dp,
+         * so re-deriving stops the pump a few millilitres short of what was paid for. Null on a
+         * state written before 10d and on the mock's sales, where the fallback still applies.
+         */
+        val litresAuthorised: Double? = null,
     ) : TransactionState()
 
     /** USSD-specific: SMS expected on the pump SIM. */

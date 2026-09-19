@@ -123,21 +123,32 @@ class FakePaymentProcessor : PaymentProcessor {
     var lastRequest: PaymentRequest? = null; private set
     var processCount = 0; private set
 
+    /**
+     * How many times a restart re-attached instead of starting over (Phase 10d). A boot resume that
+     * bumps [processCount] is the defect: against the real backend that is a second `/authorise`.
+     */
+    var resumeCount = 0; private set
+    var lastResumedRef: String? = null; private set
+    var lastResumedDeadline: Instant? = null; private set
+
     /** Optional Pending extras, so a test can drive the 10c/10d screens without a real backend. */
     var pendingCheckoutUrl: String? = null
     var pendingExpiresAt: Instant? = null
     var pendingPaymentReference: String? = null
 
+    /** What the processor says the sale is worth. Null = echo the request, as the mock does. */
+    var pendingAmountKobo: Long? = null
+    var pendingLitres: Double? = null
+
     override fun process(request: PaymentRequest): Flow<PaymentResult> = flow {
         processCount++
-        lastRequest = request
-        lastMethod = request.method
-        lastAmountKobo = request.amountKobo
-        lastExpectedLitres = request.expectedLitres
+        record(request)
         emit(
             PaymentResult.Pending(
                 transactionRef = pendingRef,
                 method = request.method,
+                amountKobo = pendingAmountKobo ?: request.amountKobo,
+                litres = pendingLitres ?: request.expectedLitres,
                 checkoutUrl = pendingCheckoutUrl,
                 expiresAt = pendingExpiresAt,
                 paymentReference = pendingPaymentReference,
@@ -146,12 +157,40 @@ class FakePaymentProcessor : PaymentProcessor {
         emitAll(terminals)
     }
 
+    override fun resume(
+        transactionRef: String,
+        request: PaymentRequest,
+        deadline: Instant?,
+    ): Flow<PaymentResult> = flow {
+        resumeCount++
+        lastResumedRef = transactionRef
+        lastResumedDeadline = deadline
+        record(request)
+        // No Pending, per the contract: the caller restored the QR and the deadline from disk.
+        emitAll(terminals)
+    }
+
+    private fun record(request: PaymentRequest) {
+        lastRequest = request
+        lastMethod = request.method
+        lastAmountKobo = request.amountKobo
+        lastExpectedLitres = request.expectedLitres
+    }
+
     fun succeed(
         ref: String = pendingRef,
         amountKobo: Long = lastAmountKobo,
         method: PaymentMethod = lastMethod ?: PaymentMethod.BALANCEE_APP,
+        litresAuthorised: Double? = null,
     ) {
-        terminals.tryEmit(PaymentResult.Success(ref, amountKobo, method))
+        terminals.tryEmit(
+            PaymentResult.Success(
+                transactionRef = ref,
+                amountKobo = amountKobo,
+                method = method,
+                litresAuthorised = litresAuthorised,
+            )
+        )
     }
 
     fun fail(reason: String, ref: String? = pendingRef) {

@@ -294,7 +294,7 @@ class CustomerViewModel @Inject constructor(
                     amountDueKobo = restored.amountDueKobo,
                 )
                 startFillupDigitalExpiry(source)
-                startFillupDigitalPayment(source)
+                resumeFillupDigitalPayment(source, restored)
             }
 
             is TransactionState.FixedDispensing -> {
@@ -776,49 +776,92 @@ class CustomerViewModel @Inject constructor(
         )
     }
 
+    /**
+     * Flow 3: the customer chose to pay digitally for fuel already in the tank.
+     *
+     * **The screen no longer moves until the processor has something payable to show.** It used to
+     * transition immediately, rendering a `nip://transfer?…` payload this app invented against the
+     * operator's virtual account — a QR no scanner resolves and no bank honours, which is the same
+     * defect 10c fixed for pre-pay and left standing here (OQ #6 retired the virtual account with
+     * the move to Paystack; only this call site kept it alive). Now the checkout URL comes off the
+     * processor's `Pending`, exactly as Flow 1's does, and a failure before then falls back to cash
+     * with the tank's figure intact.
+     *
+     * Holding on `FillupTankFull` for the round trip mirrors Flow 1, where the state does not
+     * advance until `Pending` arrives either. A QR-shaped hole with a customer standing at it is
+     * worse than a second of the total they are already reading.
+     */
     fun onFillupPayDigital() {
         val current = currentState() as? TransactionState.FillupTankFull ?: return
-        viewModelScope.launch {
-            val account = deviceConfig()?.virtualAccountNumber
-                ?: DEFAULT_VIRTUAL_ACCOUNT
-            val qrContent = buildNipTransferQr(
-                account = account,
-                amountKobo = current.amountDueKobo,
-                txnId = current.txnId,
-            )
-            cancelInFlightJobs()
-            setState(
-                TransactionState.FillupDigitalAwaitingPayment(
-                    txnId = current.txnId,
-                    verifiedLitres = current.verifiedLitres,
-                    amountDueKobo = current.amountDueKobo,
-                    qrContent = qrContent,
-                )
-            )
-            startFillupDigitalExpiry(current)
-            startFillupDigitalPayment(current)
-        }
+        cancelInFlightJobs()
+        startFillupDigitalPayment(current)
     }
 
     private fun startFillupDigitalPayment(source: TransactionState.FillupTankFull) {
         paymentJob?.cancel()
-        val amountKobo = source.amountDueKobo
         paymentJob = viewModelScope.launch {
-            val request = PaymentRequest(
-                method = PaymentMethod.BANK_QR_TRANSFER,
-                amountKobo = amountKobo,
-                // The tank is already full: this is the metered figure, not one derived from price.
-                expectedLitres = source.verifiedLitres,
-                basis = SaleBasis.Dispensed,
-            )
-            paymentProcessor.process(request).collect { result ->
+            paymentProcessor.process(fillupDigitalRequest(source)).collect { result ->
                 when (result) {
-                    is PaymentResult.Pending -> Unit
+                    is PaymentResult.Pending -> onFillupDigitalPending(source, result)
                     is PaymentResult.Success -> onFillupDigitalSuccess(source)
                     is PaymentResult.Failed -> onFillupDigitalFailed(source, result.reason)
                 }
             }
         }
+    }
+
+    /**
+     * Re-attach to a fill-up payment restored from disk. The other half of 10d's boot-resume trap:
+     * this path also called [PaymentProcessor.process], which against the real backend authorises a
+     * second sale for fuel that was already dispensed and may already have been paid for.
+     */
+    private fun resumeFillupDigitalPayment(
+        source: TransactionState.FillupTankFull,
+        restored: TransactionState.FillupDigitalAwaitingPayment,
+    ) {
+        paymentJob?.cancel()
+        paymentJob = viewModelScope.launch {
+            paymentProcessor
+                .resume(
+                    transactionRef = restored.txnId,
+                    request = fillupDigitalRequest(source),
+                    deadline = restored.expiresAtEpochMs?.let(Instant::ofEpochMilli),
+                )
+                .collect { result ->
+                    when (result) {
+                        is PaymentResult.Pending -> Unit
+                        is PaymentResult.Success -> onFillupDigitalSuccess(source)
+                        is PaymentResult.Failed -> onFillupDigitalFailed(source, result.reason)
+                    }
+                }
+        }
+    }
+
+    private fun fillupDigitalRequest(source: TransactionState.FillupTankFull) = PaymentRequest(
+        method = PaymentMethod.BANK_QR_TRANSFER,
+        amountKobo = source.amountDueKobo,
+        // The tank is already full: this is the metered figure, not one derived from price.
+        expectedLitres = source.verifiedLitres,
+        basis = SaleBasis.Dispensed,
+    )
+
+    private fun onFillupDigitalPending(
+        source: TransactionState.FillupTankFull,
+        pending: PaymentResult.Pending,
+    ) {
+        if (currentState() !is TransactionState.FillupTankFull) return
+        setState(
+            TransactionState.FillupDigitalAwaitingPayment(
+                txnId = pending.transactionRef,
+                verifiedLitres = source.verifiedLitres,
+                // The processor's figure. The tank's litres are fixed, so a re-price moves the
+                // money — and the amount on screen has to be the one the checkout page charges.
+                amountDueKobo = pending.amountKobo,
+                qrContent = pending.checkoutUrl.orEmpty(),
+                expiresAtEpochMs = pending.expiresAt?.toEpochMilli(),
+            )
+        )
+        startFillupDigitalExpiry(source)
     }
 
     private suspend fun onFillupDigitalSuccess(source: TransactionState.FillupTankFull) {
@@ -870,10 +913,6 @@ class CustomerViewModel @Inject constructor(
             }
         }
     }
-
-    // NIP transfer amounts are in naira (major units) with 2 dp, derived losslessly from kobo.
-    private fun buildNipTransferQr(account: String, amountKobo: Long, txnId: String): String =
-        "nip://transfer?account=$account&amount=${"%.2f".format(amountKobo / 100.0)}&ref=$txnId"
 
     fun onAttendantCashReceived() {
         val current = currentState() as? TransactionState.FillupAwaitingCashConfirm ?: return
@@ -1131,7 +1170,7 @@ class CustomerViewModel @Inject constructor(
             paymentProcessor.process(request).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> onPaymentPending(amountKobo, method, result)
-                    is PaymentResult.Success -> onPaymentSuccess(amountKobo, method, result)
+                    is PaymentResult.Success -> onPaymentSuccess(result)
                     is PaymentResult.Failed -> onPaymentFailed(result)
                 }
             }
@@ -1139,11 +1178,16 @@ class CustomerViewModel @Inject constructor(
     }
 
     /**
-     * Restart the prepay payment listener for a state restored from disk. The original
-     * Pending event is gone — we go straight back into a fresh [paymentProcessor.process]
-     * call carrying the same amount + method and treat its Success as the resumed webhook.
-     * The transactionRef on the resumed state stays the in-memory one the customer is
-     * looking at; the new Pending event arrives with a fresh backend ref that we ignore.
+     * Re-attach to a prepay payment restored from disk — **without starting a second one**.
+     *
+     * This used to call `process` again. Against the mock that was free, which is why it survived
+     * this long; against the real backend it POSTs a second `/authorise` and creates a second sale
+     * for a customer who may already have paid for the first. The id is ours and it was persisted,
+     * so `resume` asks about the sale that exists (Phase 10d).
+     *
+     * The amount and litres come off the restored state because they are the **authorised** figures
+     * — what the checkout page quoted, not what the customer tendered — and nothing is re-priced on
+     * this path.
      */
     private fun resumePrepayPaymentListener(restored: TransactionState.PrepayAwaitingPayment) {
         paymentJob?.cancel()
@@ -1152,16 +1196,22 @@ class CustomerViewModel @Inject constructor(
             val request = PaymentRequest(
                 method = restored.method,
                 amountKobo = amountKobo,
-                expectedLitres = litresFor(amountKobo),
+                expectedLitres = restored.litresAuthorised ?: litresFor(amountKobo),
                 basis = SaleBasis.Tender,
             )
-            paymentProcessor.process(request).collect { result ->
-                when (result) {
-                    is PaymentResult.Pending -> Unit
-                    is PaymentResult.Success -> onPaymentSuccess(amountKobo, restored.method, result)
-                    is PaymentResult.Failed -> onPaymentFailed(result)
+            paymentProcessor
+                .resume(
+                    transactionRef = restored.txnId,
+                    request = request,
+                    deadline = restored.expiresAtEpochMs?.let(Instant::ofEpochMilli),
+                )
+                .collect { result ->
+                    when (result) {
+                        is PaymentResult.Pending -> Unit
+                        is PaymentResult.Success -> onPaymentSuccess(result)
+                        is PaymentResult.Failed -> onPaymentFailed(result)
+                    }
                 }
-            }
         }
     }
 
@@ -1173,29 +1223,38 @@ class CustomerViewModel @Inject constructor(
         setState(
             TransactionState.PrepayAwaitingPayment(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
-                amountKobo = amountKobo,
+                // The processor's figure, not the tendered [amountKobo] the caller asked for. The
+                // two differ whenever the tender is not an exact number of payable litres, and the
+                // one on screen has to be the one the checkout page will charge (10d).
+                amountKobo = pending.amountKobo,
                 method = method,
                 txnId = pending.transactionRef,
                 priceKoboPerLitre = priceKoboPerLitre,
                 checkoutUrl = pending.checkoutUrl,
                 expiresAtEpochMs = pending.expiresAt?.toEpochMilli(),
+                litresAuthorised = pending.litres,
             )
         )
         startExpiryCountdown(pending.expiresAt)
     }
 
-    private suspend fun onPaymentSuccess(
-        amountKobo: Long,
-        method: PaymentMethod,
-        success: PaymentResult.Success,
-    ) {
+    /**
+     * [success] is now the only source: its amount, litres and method are what the server
+     * authorised, and the caller's own copies were the pre-quote request. Passing those in
+     * alongside is how the two came apart in the first place.
+     */
+    private suspend fun onPaymentSuccess(success: PaymentResult.Success) {
+        val method = success.method
         expiryJob?.cancel()
-        // NOT litresFor(amountKobo): this path deliberately measures against the amount the
-        // processor confirmed, not the one we asked for. Harmless with the mock, where they are the
-        // same value — but with a real backend Success.amountKobo has been round-tripped, and 10c/10d
-        // should decide which of the two is authoritative rather than inherit the question silently.
-        val litresAuthorised = deviceConfig()?.litresCutoff(success.amountKobo)
-            ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
+        // **10d answers the question 10c left here.** The server's own figure wins when there is
+        // one: re-deriving litres from the amount gives a DIFFERENT number, because the quote lands
+        // on a payable litre step while litresCutoff floors to 2 dp — at ₦1,490 a ₦5,000 tender
+        // authorises 3.355 L and re-derivation gives 3.35, stopping the pump 5 ml short of what was
+        // paid for on the same figure 10f will reconcile against the server's record. The two
+        // fallbacks below are for processors that authorise nothing.
+        val litresAuthorised = success.litresAuthorised
+            ?: deviceConfig()?.litresCutoff(success.amountKobo)
+            ?: ((success.amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
 
         pulseBaseline = 0
         recoveredLitres = 0.0
@@ -1204,7 +1263,9 @@ class CustomerViewModel @Inject constructor(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
                 txnId = success.transactionRef,
                 priceKoboPerLitre = priceKoboPerLitre,
-                amountKobo = amountKobo,
+                // What was collected, not what was asked for — this is the figure the audit row and
+                // the receipt carry.
+                amountKobo = success.amountKobo,
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
                 method = method,
@@ -1454,6 +1515,5 @@ class CustomerViewModel @Inject constructor(
 
     private companion object {
         const val DEFAULT_KOBO_PER_LITRE = 87_000L
-        const val DEFAULT_VIRTUAL_ACCOUNT = "0123456789"
     }
 }
