@@ -5,152 +5,104 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-20**, end of day — 10g's gate passed, review #1 found 8 (all fixed), then
-the **re-review found 8 more**. Its finding 1 was the worst defect this branch has produced: a
-drifted clock condemned every queued dispense permanently. **Fixed, and #R4, #R5 and #R6 with it.
-All six blocking findings are closed; only #R3/#R8 remain, boarded as judgment calls.** The merge
-decision (item 5) is now the next thing. Still **NOT merged**._
+_Last updated: **2026-09-20**, end of day. **Round 3 closed #R4, #R5 and #R6 — every blocking
+review finding is fixed.** Branch `feature/phase-10-payments`, **50 commits**, pushed (`5b2731b`),
+**505 tests / 48 classes** green. **Still NOT merged.** What follows is a plan, not a list: do it in
+order. The completed findings are written up in `PROJECT_LOG.md` under **Phase 10h (round 3)**._
 
-### ⛳ Start here next session — `feature/phase-10-payments`, 45 commits, green
+### ⛳ Start here — the merge gate, in order
 
-1. ~~**Review finding #6 — `syncPriceOnBoot` races `bootResume`.**~~ ✅ **FIXED 2026-09-20**
-   (`28d8c03`). The decision now waits on `bootResumed`; **the fetch does not** — it still overlaps
-   the adapter wait, so the boot coroutine holding the relay-open invariant waits on nothing a
-   network can delay, which is why these were separate coroutines in the first place.
-   - **The test half mattered more than the fix.** Every fake resolved on the same tick, so the
-     resume always finished before the sync began — the opposite of production's order. The
-     rewritten test, plus two new ones, fail against the pre-fix file; the old one did not.
-   - **The finding's framing was one notch too broad, and the correction narrows the blast
-     radius:** the dispensing screens read `state.priceKoboPerLitre`, so a restored dispense never
-     displayed a moved price. See **#50** for what actually was exposed.
-6. **#50 — three screens read `uiState.priceKoboPerLitre` while holding a struck figure.**
-   Found while fixing #6, boarded rather than folded in. `FillupDigitalAwaitingPayment`,
-   `FillupAwaitingCashConfirm` and `CashFixedAmountEntry` display a ₦/L that lives outside the
-   state whose amount they are showing, so the two can disagree without the state being wrong.
-   `priceMayMoveFreely` is what currently keeps them honest — a guard doing a type's job. The
-   tidier answer is for those screens to read the price off their own state, which is what every
-   other struck screen already does; it touches `CustomerStateHost` and the state classes, so it
-   is a change of its own and not a review fix. **Not a defect today** — #6 closed the one path
-   that could actually move the figure.
-2. ~~**Review finding #5 — double-tap on fill-up pay → two `/authorise`.**~~ ✅ **FIXED
-   2026-09-20** (`c015bcf`). `authoriseJob` holds the one window where the state has not moved yet;
-   a Job rather than a flag, so cancellation reopens the gate for free and no exit path can wedge
-   the pump shut. **Flow 1 had the same defect** — `onFillupPayDigital`'s own comment says it
-   mirrors pre-pay, and pre-pay holds `ModeSelect` open for the same reason — so both are fixed.
-   USSD is unaffected (it moves its state before launching). 477 tests / 48 classes green; the 5
-   new double-tap assertions were confirmed to fail against the pre-fix file.
-   - **Test-fake defect fixed with it:** `FakePaymentProcessor` emitted `Pending` on the same tick,
-     so no test could sit in the window the defect lives in. `holdAuthorise()` opens it, and counts
-     entries rather than emissions.
-3. ~~**Review finding #7 — `pricePerUnit: 0` from `/config` kills the app.**~~ ✅ **FIXED
-   2026-09-20** (`202144e`). Screened at the boundary rather than at the caller that crashed:
-   `SyncedConfig.hasUsablePrice`, read by the sync (which no longer writes a 0 through — that
-   would have wiped the pump's last known price and stopped **cash** sales too) and by the
-   processor (which refuses the sale before quoting). New `PRICE_SYNC_REJECTED` event, logged once
-   per rejected figure per app run, with a row on the operator screen. The probe panel's
-   `PrecisionLine` divided by the same zero and is guarded too. 469 tests / 47 classes green.
-   - **Left open deliberately:** nothing tells the backend team a pump is being sent a 0. It is
-     their field to set, and item 6 below is the channel for it.
-4. **The re-review ran (`/code-review high main`, whole branch) and found 8.** Verified against
-   the code rather than taken on trust; 7 of 8 held up. **R1+R2 are FIXED** (`e26246e`); the rest:
-   - [x] ~~**#R4 — the fill-up abandon logs an id the backend never issued.**~~ ✅ **FIXED
-     2026-09-20.** `startFillupDigitalExpiry` now reads the live
-     `FillupDigitalAwaitingPayment` — which carries the server's id and the processor's amount —
-     instead of the `FillupTankFull` it was launched from, exactly as the pre-pay twin does. The
-     third appearance of one defect: `ed77e00` fixed it for `Complete.txnId` in this same flow
-     and left the expiry path standing.
-     - **The cash fall-back deliberately still reads `source`**, and the asymmetry is now stated
-       in the code and pinned by a test: what is owed in cash is the tank's litres at the pump's
-       own price — the same figure Flow 2 collects for the same tank — and the row it settles
-       into is a cash sale, which nothing authorised and nothing uploads.
-     - **Siblings checked:** `recordAbandonedPayment` has exactly two callers and the pre-pay one
-       was already right. USSD has no expiry path (its cancel gap is #R8). `txnRefFor`'s KDoc
-       claimed every state carries a `BLC-NNNNN` — untrue since 10g for everything downstream of
-       an `/authorise`, and corrected, because that sentence is how this defect keeps recurring.
-     - 495 tests / 48 classes green; the two defect assertions were confirmed to fail against the
-       pre-fix file, and the two pinning assertions pass either way by design.
-   - [x] ~~**#R5 — `recordPriceRaceIfAny` writes to Room before `Pending` is emitted**,
-     unguarded.~~ ✅ **FIXED 2026-09-20.** Wrapped inside the method rather than at the call site,
-     so the guarantee belongs to the method and any later caller gets it; the detail sentence goes
-     to `Log.e` on the way down because `synced.previousKoboPerLitre` is gone from the device the
-     moment the sync overwrote it, and that row is its only remaining copy.
-     - **Sibling found and fixed with it: `CustomerViewModel.recordAbandonedPayment`**, both
-       callers. Same shape, and the consequence is worse — the row is written *before* the
-       `setState` that ends the sale, so a Room failure stranded the pump on a dead QR screen
-       (countdown at zero, relay shut, no way back to Idle but a restart) as well as throwing out
-       of `viewModelScope`.
-     - **Siblings checked and deliberately left:** `TransactionUploader`'s
-       `DISPENSE_UPLOAD_FAILED` write is already contained — `TransactionUploadWorker` catches
-       everything and answers `Result.retry()`, and the row it follows is marked before it, so a
-       retry settles. `PumpConfigSync`'s two writes are **#R6**, below, which is the same class of
-       defect on the boot path; fixed there rather than twice.
-     - The rule both fixes now state in the code: **an audit line is worth less than the
-       transition it precedes.** 498 tests / 48 classes green; all three new assertions confirmed
-       to fail against the pre-fix files.
-   - [x] ~~**#R6 — `PumpConfigSync.writeThrough` can throw, against `refresh()`'s stated
-     contract**~~ ✅ **FIXED 2026-09-20.** `client.config()` was always safe; `writeThrough`
-     touches Room five times and none of it was guarded. Both callers are bare — the boot sync is
-     a `viewModelScope.launch { }` at construction, so **a pump whose database had gone bad could
-     not open the app at all**, and a forecourt tablet that cannot open the app cannot take cash
-     either. The processor's call is the same throw inside a `flow { }`, which is #R5 one layer up,
-     on the path every sale takes.
-     - **A failure to store is not a failure to fetch.** The response is returned either way, so
-       the sale is still quoted and authorised at the server's price; what is lost is the cached
-       copy the screen reads — where the app stood before 10c-bis.
-     - **An unreadable database is not an empty one.** `saveConfig` replaces the row, so treating
-       a read that threw as "nothing stored" would build a fresh `DeviceConfig` and wipe the
-       operator's own fields. Nothing is written after a failed read. Same rule as the adapter's
-       pulse count on resume: unknown is not zero.
-     - **`PRICE_SYNCED` is written only if the row actually moved** — a "price updated" line
-       beside a price that was never stored is a lie in the one log an operator reads. And
-       `lastRejectedPrice` is marked only on a write that succeeded, so one full-disk moment
-       cannot permanently silence the no-price warning.
-     - **Sibling found by the test written for the fix: the `init` boot coroutine.** Same bare
-       launch, same constructor, unguarded `seedDefaultConfigIfMissing()` / `getConfig()` /
-       `bootResume()`. Contained; the relay-open assert is guarded separately and logged in its
-       own words, because a boot that cannot open the relay is a safety event and should not read
-       as a database problem. The test passed against the pre-fix file while leaking an uncaught
-       exception into the *next* test — rewritten until it fails in its own name.
-     - **A correction to the same day's #R5 work:** those two guards used `runCatching`, which
-       swallows `CancellationException`. `expiryJob` is cancelled the moment a payment succeeds,
-       and the coroutine may be suspended inside the write when it happens — the absorbed
-       cancellation would have let the following `setState(Idle)` wipe a sale just paid for. New
-       `runCatchingCancellable` (`domain/util/`) rethrows it, the shape `safeApiCall` has had
-       since the network layer was built. **#52** boards the rest of the app's `runCatching` uses.
-     - 505 tests / 48 classes green; all seven new assertions confirmed to fail against the
-       pre-fix files.
-   - [·] **#R3 — `KEEP` discards an upload request for a sale completing during an in-flight
-     drain.** Real, but the record is *delayed*, not lost: every new sale and every app launch
-     re-requests. The finding is right that the code comment's reasoning is wrong — it only holds
-     if the row was written before that run's `getPendingSync()`. Fix the comment at least.
-   - [·] **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** Only the two expiry
-     timers do. Given the backend does not expire transactions, the checkout URL stays payable
-     after a cancel — the exact scenario the event type's own doc describes. A design gap, not a
-     defect.
-5. **Then merge.** Two rounds of review have now each found defects in code written the same day,
-   and in four consecutive rounds a defect was fixed in one flow and left standing in a sibling.
-   Weigh a third pass against that before calling it done.
-5. **Tell Balancee about the orphan:** production holds
-   `740e2af7-3573-45b1-a92b-813f2730ac93` **PAID with no dispense recorded** (the ₦149 fill-up that
-   exposed finding #6 of the sitting). Local row `BLC-77819` is condemned.
-9. **#52 — `runCatching` on a coroutine path swallows cancellation.** Opened by #R6, which
-   introduced `runCatchingCancellable` and converted the three uses where an absorbed cancellation
-   changes control flow on a money path. **Twenty-odd others remain** across `CustomerViewModel`
-   (pulse persistence, the receipt read, the state-writer loop), `OnboardingViewModel`,
-   `ApiProbeViewModel` and `UsbSerialConnection`. Most are inert — a loop body, a read-then-return
-   — which is why they were not swept in with the fix. Worth one pass with the new helper, as a
-   change of its own, so the mix does not teach the next reader the wrong pattern.
-7. **#51 — a permanently-401 pump now retries forever with nothing in the log.** Opened by the
-   R1 fix, and stated rather than hidden: `DISPENSE_UPLOAD_FAILED` is written only on a TERMINAL
-   refusal, so a pump whose credentials are genuinely revoked keeps a full queue and says nothing
-   to anyone. `NotActivated` has had this shape since 10f, so the fix did not create it — but it
-   widened it. Wants a "this queue has been stuck for N runs" event, not a change to the taxonomy.
-8. **Two backend asks are drafted and unsent:** does a transaction ever leave `PENDING_PAYMENT`,
-   and is the checkout URL still payable after `expiresAt`? Plus the user's question — **round the
-   litres, not the money** (₦200 → ₦199.66); cash already behaves that way, so this is digital
-   diverging from cash.
+> **Read this first.** Nothing below is a defect. The branch is green and every blocking finding is
+> closed, so the remaining risk is not "what is broken" but **"what did the fixes break"**. Two
+> defects on this branch were introduced by earlier fixes (`202144e` widened #R6; #R5's own guard
+> swallowed cancellation and was corrected six hours later in `5b2731b`). Steps 1 and 2 exist
+> because of that, and they are the reason not to merge straight away.
 
-_(previous: 2026-09-19, latest (**10f is DONE** — the upload job, and #48's half of it. **Next is 10g, the tablet gate against production**, which is now the last thing between phase 10 and a merge.)_
+1. [ ] **Tablet smoke test — the one thing that has never been run against this code.**
+   The 10g gate passed against a build that no longer exists: **six defect fixes ago**, and one of
+   them (#R6) rewrote the `init` boot coroutine that runs on *every* app start. Nothing since has
+   been on a device. This is not a re-run of the 8-step runbook — no production money is needed.
+   - Install `debugProd` on the SM-T220. Confirm it **opens** (that is the #R6 path).
+   - One **cash** fill-up end to end. Cash needs no backend and is what a forecourt falls back to;
+     if the boot path is wrong, this is where it shows.
+   - One **digital** sale to the QR screen, then cancel. Confirms `/config` → `/authorise` still
+     reaches a scannable page after the `PumpConfigSync` rewrite.
+   - **Kill the app mid-dispense and reopen it.** `bootResume()` failures are now swallowed and
+     logged instead of crashing — Idle-and-safe beats a crash loop, but it means a partial resume
+     now fails *quietly*, and this is the only way to see that it does not.
+   - Remember: **logcat is unusable on this tablet.** Read evidence off the screen and off the
+     operator screen's event rows.
+2. [ ] **A review pass scoped to this round's fixes — not the whole branch again.**
+   The whole branch has now been reviewed twice and the yield was concentrated in recently written
+   code. A third whole-branch pass mostly re-reads code reviewed twice; what has **never** been
+   reviewed is the six fixes themselves, which is exactly where the introduced-defect risk lives.
+   Review the diff `e5a9823..5b2731b` plus the three review-#1 fixes (`202144e`, `c015bcf`,
+   `28d8c03`). Ask of each: *does this guard change control flow when it fires, and is that change
+   correct?*
+3. [ ] **Merge to `main` and push.** Only after 1 and 2. Squash nothing — the commit messages are
+   where the reasoning lives.
+4. [ ] **Then the improvements, as small branches off `main`** — see the next section. None of them
+   blocks the merge and none should ride along with it.
+
+### After the merge — improvements, roughly in value order
+
+5. [ ] **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** Only the two expiry timers do.
+   The backend does not expire transactions, so the checkout URL stays payable after a cancel — the
+   exact scenario the event type's own doc describes. Small and additive: the row already has a
+   writer (`recordAbandonedPayment`), it just needs calling from the cancel path with wording that
+   says *cancelled* rather than *timed out*. **Do #R8 before #51** — it closes a real gap in the
+   audit trail, where #51 only improves an existing one.
+6. [ ] **#51 — a permanently-401 pump retries forever with nothing in the log.**
+   `DISPENSE_UPLOAD_FAILED` is written only on a TERMINAL refusal, so a pump whose credentials are
+   genuinely revoked keeps a full queue and says nothing to anyone. `NotActivated` has had this
+   shape since 10f; the R1 fix widened it rather than creating it. **Wants a "this queue has been
+   stuck for N runs" event, not a change to the taxonomy** — the taxonomy is right and changing it
+   is how R1 happened.
+7. [ ] **#R3 — `KEEP` discards an upload request for a sale completing during an in-flight drain.**
+   Real, but the record is **delayed, not lost**: every new sale and every app launch re-requests.
+   **At minimum fix the comment**, whose reasoning is wrong — it only holds if the row was written
+   before that run's `getPendingSync()`. Decide then whether `KEEP` should become `APPEND`.
+8. [ ] **#52 — `runCatching` on a coroutine path swallows cancellation.** Opened by #R6, which added
+   `domain/util/runCatchingCancellable` and converted the three sites where an absorbed cancellation
+   changes control flow on a money path. **~20 remain** across `CustomerViewModel` (pulse
+   persistence, the receipt read, the state-writer loop), `OnboardingViewModel`, `ApiProbeViewModel`
+   and `UsbSerialConnection`. **Not a blind sweep** — most are inert (a loop body, a
+   read-then-return), and converting an inert one is a no-op while converting a live one changes
+   behaviour. Go site by site and ask what runs *after* the guard.
+9. [ ] **#50 — three screens read `uiState.priceKoboPerLitre` while holding a struck figure.**
+   `FillupDigitalAwaitingPayment`, `FillupAwaitingCashConfirm` and `CashFixedAmountEntry` display a
+   ₦/L that lives outside the state whose amount they are showing. `priceMayMoveFreely` is what
+   keeps them honest — a guard doing a type's job. **Deliberately last:** it touches
+   `CustomerStateHost` *and* the serialized state classes, so it carries persisted-state
+   compatibility risk (new fields need defaults, as every other state class does), and **#6 already
+   closed the one path that could actually move the figure**. Not a defect today.
+
+### Not code — unblocked, can go any time
+
+10. [ ] **Tell Balancee about the orphan:** production holds
+    `740e2af7-3573-45b1-a92b-813f2730ac93` **PAID with no dispense recorded** (the ₦149 fill-up that
+    exposed finding #6 of the sitting). Local row `BLC-77819` is condemned. This is someone's money
+    sitting unreconciled; it does not get better by waiting.
+11. [ ] **Two backend asks are drafted and unsent:** does a transaction ever leave
+    `PENDING_PAYMENT`, and is the checkout URL still payable after `expiresAt`? Plus the user's
+    question — **round the litres, not the money** (₦200 → ₦199.66); cash already behaves that way,
+    so this is digital diverging from cash. #R8's wording depends on the second answer, so sending
+    these early is worth more than it looks.
+
+### House rules that bit on this branch — read before starting
+
+- **Check the siblings.** In five consecutive rounds a defect was fixed in one flow and left
+  standing in another. On this branch that is not diligence, it is the single highest-yield step.
+- **Re-run each new test against the pre-fix file** and confirm it fails. This round it caught a
+  test that passed for the wrong reason (it leaked an uncaught exception into the *next* test).
+- **Ask what runs after a guard you add.** Both defects introduced by fixes on this branch were
+  guards that changed control flow when they fired.
+- `lintDebug` and `assembleDebugProd` must be **separate** gradle invocations — together they race
+  on generated Hilt sources and lint dies with an internal error that is not a code defect.
+- Wait for an explicit **"go"** before starting a new phase; commit per logical sub-deliverable.
+
+_(previous: 2026-09-20 — 10g's gate passed on real money, review #1 found 8, the re-review found 8
+more; R1/R2 fixed that evening, R4/R5/R6 the next day.)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not

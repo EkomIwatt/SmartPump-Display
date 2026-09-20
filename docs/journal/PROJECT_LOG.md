@@ -1,6 +1,31 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-20 (**the 10g gate passed on real money, and then a review found five more**)
+## Current status — 2026-09-20, end of day (**all six blocking review findings are closed; the branch is ready for its merge gate**)
+
+**Phase 10 is done, reviewed twice, and every blocking finding is fixed.** `feature/phase-10-payments`
+is **50 commits**, pushed (`5b2731b`), **505 JVM tests / 48 classes** green, `lintDebug`,
+`assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged.**
+
+**Round 3 closed #R4, #R5 and #R6** — one wrong id, and two unguarded Room writes that escaped into
+`viewModelScope`. The worst of them meant a pump whose database had gone bad **could not open the
+app at all**, which on a forecourt also stops it taking cash.
+
+**The honest note about this branch, which the next session should carry:** the defects these
+reviews keep finding are in code written for this branch, by this assistant, days or hours earlier.
+Two of them were introduced *by earlier fixes* — `202144e` widened the surface #R6 then flagged, and
+#R5's own guard used `runCatching`, which swallows the `CancellationException` that unwinds a
+cancelled job, so a payment succeeding mid-write could have let the following `setState(Idle)` wipe
+a sale just paid for. That second one existed for about six hours and never left the branch. **The
+rate that matters is not findings per review; it is defects introduced per fix, and it is not
+zero.**
+
+**What is left is not a defect.** #R3 and #R8 are boarded judgment calls; #50, #51 and #52 are
+improvements. The next thing is the **merge gate** — see `TODO.md`, which now carries the plan
+rather than a list.
+
+---
+
+## Previous status — 2026-09-20 (**the 10g gate passed on real money, and then a review found five more**)
 
 **Phase 10 is built, gated and reviewed, and it has not merged.** The tablet sitting is done: three
 real paid sales against `SN-TEST-001` on production, **₦548.32** of the user's own money, seven of
@@ -2390,3 +2415,85 @@ unguarded Room writes that escape into `viewModelScope` (one of them introduced 
 same morning). **#R3** and **#R8** are boarded as judgment calls. Then weigh a third review pass
 against the fact that both rounds so far found defects in code written that same day — and only
 then merge.
+
+---
+
+### Phase 10h (round 3) — the last three review findings, and a defect a fix created
+**Date:** 2026-09-20
+**Status:** done
+**Commit(s):** `f5bf58c` (#R4), `99b3c9d` (#R5), `5b2731b` (#R6 + the cancellation correction)
+
+**Summary (plain language):**
+Three more problems found by the second review are now fixed, which closes every one that was
+holding up the merge. The first meant that when a customer walked away from a fill-up QR without
+paying, the pump wrote down a reference number the bank's system had never issued — so if that
+customer later paid anyway, nobody could match the payment to the sale. The other two were the same
+kind of problem in two places: the app wrote a line to its own log *before* doing something
+important, and if that write failed — a full tablet, a damaged database — the important thing never
+happened. In one case the customer never got a QR code for fuel they had already taken. In the
+other, **the app could not start at all**, which on a forecourt also stops the pump taking cash.
+
+There is one thing worth saying plainly. While fixing the second of these in the morning, we
+introduced a new fault of our own, and found it in the afternoon while fixing the third. It never
+left the working branch, and it is now covered by a test — but it is the second time this week that
+a fix has created a problem, and that is the reason the plan ends with a verification gate rather
+than with a merge.
+
+**Technical notes:**
+- **#R4 (`f5bf58c`)** — `startFillupDigitalExpiry` recorded `PAYMENT_ABANDONED` against the
+  `FillupTankFull` it was launched from, whose `txnId` is the local `BLC-…` minted at
+  attendant-authorise. The live `FillupDigitalAwaitingPayment` carries the server's id (put there by
+  `onFillupDigitalPending`), which is what the pre-pay twin has always read. The amount had the same
+  shape — the shutoff quote rather than what the still-live checkout page charges. **The cash
+  fall-back deliberately still reads `source`** (tank litres at the pump's own price = what Flow 2
+  collects for the same tank; the row it settles into is a cash sale nothing authorised), and a test
+  pins that asymmetry so it is not "fixed" later. `txnRefFor`'s KDoc claimed every state carries a
+  `BLC-NNNNN` — untrue since 10g downstream of an `/authorise` — and was corrected, because a
+  sentence like that is how this defect kept coming back. **Third appearance of one defect**:
+  `ed77e00` fixed it for `Complete.txnId` in this same flow.
+- **#R5 (`99b3c9d`)** — `recordPriceRaceIfAny` runs *after* `/authorise` returns, so the sale exists
+  on the server and its checkout page is payable; a Room throw there went through `flow { }` into
+  the collector's `viewModelScope`. Guarded inside the method so the guarantee belongs to the
+  method; the detail sentence goes to `Log.e` because `previousKoboPerLitre` is gone from the device
+  the moment the sync overwrote it. **Sibling fixed with it:** `recordAbandonedPayment`, whose row
+  is written *before* the `setState` that ends the sale — a failure stranded the pump on a dead QR
+  screen. Checked and left: `TransactionUploader`'s write is already contained by the worker's
+  catch-and-retry; `PumpConfigSync`'s two are #R6.
+- **#R6 (`5b2731b`)** — `DeviceConfigSync.refresh` has always documented "failure must never be an
+  exception"; `client.config()` honoured it, `writeThrough` touched Room five times unguarded, and
+  review #7's fix added the fifth. Three distinctions now in the code: a failure to *store* is not a
+  failure to *fetch* (the response still prices the sale); **an unreadable database is not an empty
+  one** (`saveConfig` replaces the row, so a read that threw must not be treated as "nothing
+  stored", or the operator's fields are wiped — the adapter's unknown-is-not-zero rule); and a row
+  that was not written did not happen (`PRICE_SYNCED` only if the config write succeeded,
+  `lastRejectedPrice` marked only on success so one full-disk moment cannot permanently silence the
+  no-price warning).
+- **The sibling #R6's own test exposed:** the `init` boot coroutine is the same bare launch in the
+  same constructor, with `seedDefaultConfigIfMissing()`, `getConfig()` and `bootResume()` all
+  unguarded. Contained. The relay-open assert is guarded **separately** and logged in its own words:
+  a boot that cannot open the relay is a safety event, not a database problem, crashing would not
+  open it either, and the firmware dead-man watchdog is the real backstop.
+- **`domain/util/runCatchingCancellable`** — `runCatching` catches the `CancellationException` the
+  coroutine machinery throws to unwind a cancelled job. `expiryJob` is cancelled the instant a
+  payment succeeds and the expiry coroutine may be suspended inside the Room write at that moment,
+  so the absorbed cancellation would have let the following `setState(Idle)` wipe a paid sale.
+  Rethrow-then-catch is `safeApiCall`'s shape. Converted the three sites where an absorbed
+  cancellation changes control flow on a money path; the ~20 inert ones are **#52**, deliberately
+  not swept in.
+- **Test discipline worth keeping:** every fix's assertions were re-run against the pre-fix file and
+  confirmed to fail. That caught a test that was passing for the wrong reason — the boot test
+  "passed" pre-fix while leaking an uncaught exception into the *next* test, which is a test proving
+  nothing. It was rewritten until it failed in its own name.
+- **Behaviour change to re-examine on a device:** a `bootResume()` that throws now leaves the pump
+  at Idle with the relay open and a line in the log, where it previously crashed. Idle-and-safe
+  beats a crash loop, but it means a partially-restored sale now fails *quietly*. Listed as step 1
+  of the merge gate for that reason.
+- Verified: JVM **505 tests / 48 classes** green (491 at the start of the round); `lintDebug`,
+  `assembleDebugProd` and `compileDebugRealHwKotlin` clean, run in separate invocations. Branch
+  pushed — `origin/feature/phase-10-payments` = `5b2731b`, 50 commits.
+
+**Next:**
+The **merge gate**, which is four steps and is written out in `TODO.md`: a tablet smoke test (the
+`init` boot path changed, and the 10g gate ran against a build that no longer exists), a review pass
+**scoped to this round's six fixes** rather than to the whole branch again, then merge, then the
+improvements (#R3, #R8, #50, #51, #52) as small branches off `main`.
