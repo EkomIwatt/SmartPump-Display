@@ -39,16 +39,17 @@ fixes.
 but the tile was live, and tapping it called the real processor, created a genuine Paystack
 transaction, and waited for an SMS on a SIM that is not provisioned. Handled exactly as NFC was.
 
-**Branch state:** `feature/phase-10-payments`, **44 commits**, working tree clean, JVM
-**480 tests / 48 classes** green, `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin`
+**Branch state:** `feature/phase-10-payments`, **47 commits**, working tree clean, JVM
+**491 tests / 48 classes** green, `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin`
 clean. (Run `lintDebug` and `assembleDebugProd` in **separate** invocations — together they race on
-generated Hilt sources.) **Not merged, and the re-review is what stands between it and `main`.**
-**All eight review findings are now closed** — #7 (`202144e`), #5 (`c015bcf`) and #6 (`28d8c03`)
-were fixed 2026-09-20. Two of the three were fixed in **two** places rather than the one the
-review named: the `/config` zero price was being written through as well as crashing the quote,
-and the double-tap was in pre-pay as well as the fill-up. #6's test half was the real finding —
-`a synced price does not move under a dispense in progress` passed because every fake resolved on
-the same tick, asserting a guarantee the code did not make.
+generated Hilt sources.) **Not merged.** Review #1's eight findings are all closed (#7 `202144e`,
+#5 `c015bcf`, #6 `28d8c03`). **A re-review of the whole branch then found eight more**, and its
+first was the worst defect this branch has produced: a code-less 401 — the observed clock-skew
+failure — was classified TERMINAL, so a tablet whose clock drifted overnight wrote `uploadError`
+on every queued dispense, which `getPendingSync` filters and nothing clears. **Fuel sold, money
+taken, and the station's record of it destroyed permanently by putting the clock right too late.**
+Fixed in the shared taxonomy (`e26246e`), which fixed the poll's half of it for free. **Five of
+the re-review's findings remain open** — see TODO #R4/#R5/#R6 and the two boarded judgment calls.
 
 ---
 

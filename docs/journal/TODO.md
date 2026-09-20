@@ -5,11 +5,12 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-20**, end of day — 10g's gate PASSED over three sittings (₦548.32, three
-real sales), then a high-effort review found 8 more. **All 8 are now fixed.** The branch is **NOT
-merged**, and the re-review is the next thing._
+_Last updated: **2026-09-20**, end of day — 10g's gate passed, review #1 found 8 (all fixed), then
+the **re-review found 8 more**. Its finding 1 was the worst defect this branch has produced: a
+drifted clock condemned every queued dispense permanently. **Fixed. 5 of the re-review's 8 remain
+— #R4/#R5/#R6 below, plus #R3/#R8 boarded as judgment calls.** Still **NOT merged**._
 
-### ⛳ Start here next session — `feature/phase-10-payments`, 42 commits, green
+### ⛳ Start here next session — `feature/phase-10-payments`, 45 commits, green
 
 1. ~~**Review finding #6 — `syncPriceOnBoot` races `bootResume`.**~~ ✅ **FIXED 2026-09-20**
    (`28d8c03`). The decision now waits on `bootResumed`; **the fetch does not** — it still overlaps
@@ -21,7 +22,7 @@ merged**, and the re-review is the next thing._
    - **The finding's framing was one notch too broad, and the correction narrows the blast
      radius:** the dispensing screens read `state.priceKoboPerLitre`, so a restored dispense never
      displayed a moved price. See **#50** for what actually was exposed.
-5. **#50 — three screens read `uiState.priceKoboPerLitre` while holding a struck figure.**
+6. **#50 — three screens read `uiState.priceKoboPerLitre` while holding a struck figure.**
    Found while fixing #6, boarded rather than folded in. `FillupDigitalAwaitingPayment`,
    `FillupAwaitingCashConfirm` and `CashFixedAmountEntry` display a ₦/L that lives outside the
    state whose amount they are showing, so the two can disagree without the state being wrong.
@@ -49,14 +50,40 @@ merged**, and the re-review is the next thing._
    `PrecisionLine` divided by the same zero and is guarded too. 469 tests / 47 classes green.
    - **Left open deliberately:** nothing tells the backend team a pump is being sent a 0. It is
      their field to set, and item 6 below is the channel for it.
-4. **NOW: re-review and merge.** All 8 review findings are closed. The last review found five
-   blocking defects in code written that same day, so a green suite is still not sufficient
-   evidence on this branch — re-review before merging, and note that #5 and #7 were each fixed in
-   **two** places because the sibling the review named was not the only one.
+4. **The re-review ran (`/code-review high main`, whole branch) and found 8.** Verified against
+   the code rather than taken on trust; 7 of 8 held up. **R1+R2 are FIXED** (`e26246e`); the rest:
+   - [ ] **#R4 — the fill-up abandon logs an id the backend never issued.**
+     `CustomerViewModel:1086` passes `source.txnId`, the local `BLC-NNNNN`; the pre-pay twin at
+     `:1562` correctly passes the server's. **This is the same defect as `ed77e00`**, which fixed
+     it for `Complete.txnId` in this very flow and left the expiry path alone. The amount logged is
+     the pre-quote device-priced figure too.
+   - [ ] **#R5 — `recordPriceRaceIfAny` writes to Room before `Pending` is emitted**, unguarded.
+     On a full database the sale is already payable on the server, no QR ever appears, and the
+     throw escapes `flow { }` into `viewModelScope`. Same mechanism as the `pricePerUnit: 0` crash
+     fixed this morning; every comparable write in `CustomerViewModel` is wrapped and these are not.
+   - [ ] **#R6 — `PumpConfigSync.writeThrough` can throw, against `refresh()`'s stated contract**
+     ("must never be an exception"), and `syncPriceOnBoot` calls it from a bare launch. **Partly
+     self-inflicted:** the `events.record` added in `202144e` this morning widened this surface.
+   - [·] **#R3 — `KEEP` discards an upload request for a sale completing during an in-flight
+     drain.** Real, but the record is *delayed*, not lost: every new sale and every app launch
+     re-requests. The finding is right that the code comment's reasoning is wrong — it only holds
+     if the row was written before that run's `getPendingSync()`. Fix the comment at least.
+   - [·] **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** Only the two expiry
+     timers do. Given the backend does not expire transactions, the checkout URL stays payable
+     after a cancel — the exact scenario the event type's own doc describes. A design gap, not a
+     defect.
+5. **Then merge.** Two rounds of review have now each found defects in code written the same day,
+   and in four consecutive rounds a defect was fixed in one flow and left standing in a sibling.
+   Weigh a third pass against that before calling it done.
 5. **Tell Balancee about the orphan:** production holds
    `740e2af7-3573-45b1-a92b-813f2730ac93` **PAID with no dispense recorded** (the ₦149 fill-up that
    exposed finding #6 of the sitting). Local row `BLC-77819` is condemned.
-6. **Two backend asks are drafted and unsent:** does a transaction ever leave `PENDING_PAYMENT`,
+7. **#51 — a permanently-401 pump now retries forever with nothing in the log.** Opened by the
+   R1 fix, and stated rather than hidden: `DISPENSE_UPLOAD_FAILED` is written only on a TERMINAL
+   refusal, so a pump whose credentials are genuinely revoked keeps a full queue and says nothing
+   to anyone. `NotActivated` has had this shape since 10f, so the fix did not create it — but it
+   widened it. Wants a "this queue has been stuck for N runs" event, not a change to the taxonomy.
+8. **Two backend asks are drafted and unsent:** does a transaction ever leave `PENDING_PAYMENT`,
    and is the checkout URL still payable after `expiresAt`? Plus the user's question — **round the
    litres, not the money** (₦200 → ₦199.66); cash already behaves that way, so this is digital
    diverging from cash.
