@@ -117,7 +117,17 @@ internal enum class AmountEntryMode { AMOUNT, LITRES }
 private val PRE_PAY_METHODS: List<PaymentMethod> = listOf(
     PaymentMethod.BALANCEE_APP,
     PaymentMethod.BANK_QR_TRANSFER,
-    PaymentMethod.USSD,
+    // USSD removed for V1 (2026-09-20), the same way NFC was: the enum, the state, the flow and
+    // docs/flows.md all stay, so Flow 5 is deferred rather than cut (OPEN_QUESTIONS #9–#12).
+    //
+    // It had to come off the screen because it was **live**. `startUssdSmsListener` calls
+    // `paymentProcessor.process`, which on debugProd and release is the real one — so tapping this
+    // tile created a genuine Paystack transaction, then waited for a confirmation SMS on a pump SIM
+    // that is not provisioned (#10), timed out, and left the sale behind. The 10g gate established
+    // that the backend does **not** expire a transaction on its own, so what it left behind was a
+    // PENDING_PAYMENT with a live checkout URL and nothing watching it.
+    //
+    // Re-add this line when Flow 5 is scheduled, with the pump SIM and the SMS parser in place.
     PaymentMethod.CASH_SEE_ATTENDANT,
 )
 

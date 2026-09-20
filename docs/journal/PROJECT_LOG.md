@@ -1,6 +1,53 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-19, latest (**10f is done** — a dispense finally reaches the backend, and the record survives a power cut)
+## Current status — 2026-09-20 (**the 10g gate passed on real money, and then a review found five more**)
+
+**Phase 10 is built, gated and reviewed, and it has not merged.** The tablet sitting is done: three
+real paid sales against `SN-TEST-001` on production, **₦548.32** of the user's own money, seven of
+eight runbook steps passed and the eighth answered in the negative. Then a high-effort review of the
+branch found **eight** further findings, all verified, five of them blocking — and three of those
+were in code written the same evening.
+
+**The gate earned its keep twice over.** Sitting 1 was stopped before payment: a customer typing
+**₦200** was about to be charged **₦2,007.03**, because the keypad committed every digit and a
+*deletion* did not, and the validity gate meant to catch that never fires when one valid number is
+backspaced into another. It had shipped since May. Alongside it, the app was quoting the ₦870 debug
+seed while the server charged ₦1,490 — the sync wrote the database and never reached the screen,
+because its guard asked for `Idle` and the tablet had restored to `ModeSelect`.
+
+**Sitting 2 passed. Sitting 3 failed, which is why Flow 3 was worth running at all.** The fill-up
+recorded the local `BLC-…` reference minted at attendant-authorise instead of the id `/authorise`
+issued, so `POST /transactions/upload` was refused as terminal: **fuel sold, money taken, and a paid
+transaction on production with no dispense against it** — the single outcome 10f exists to prevent.
+
+**The backend does not expire a transaction.** Three minutes and sixteen seconds past its own
+`expiresAt`, `GET /transactions/{id}` still answered 200 / `PENDING_PAYMENT` with a live Paystack
+URL. `expiresAt` is reported, not enforced. Since the app stops polling on its own clock, a customer
+can pay after the pump has stopped watching. `PAYMENT_ABANDONED` now records the id so that is at
+least answerable; the polling policy is deliberately unchanged until the backend answers.
+
+**The same wrong sentence was written three times.** Two copy rows told an attendant *"nothing was
+charged"* — one on expiry, one on `TRANSACTION_NOT_FOUND`, the latter firing on a sale the customer
+had just paid ₦149 for. Both now say what is actually known, which is that we do not know.
+
+**The review's lesson is narrower and sharper: a defect fixed in one flow was left standing in its
+siblings.** The local-id bug was right in Flow 1, wrong in Flow 3, wrong in USSD. The stale-price
+bug had four readers and the first fix closed one. Neither was caught by the tests written for those
+fixes.
+
+**USSD came off the customer's screen** (user's decision, 2026-09-20). Flow 5 is deferred, not cut —
+but the tile was live, and tapping it called the real processor, created a genuine Paystack
+transaction, and waited for an SMS on a SIM that is not provisioned. Handled exactly as NFC was.
+
+**Branch state:** `feature/phase-10-payments`, **35 commits, pushed**, working tree clean, JVM
+**459 tests / 47 classes** green, `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin`
+clean. (Run `lintDebug` and `assembleDebugProd` in **separate** invocations — together they race on
+generated Hilt sources.) **Not merged.** Review findings **5, 6 and 7 are open**, and #6 means one
+test in `CustomerViewModelStalePriceTest` passes for a reason that does not hold in production.
+
+---
+
+## Previous status — 2026-09-19, latest (**10f is done** — a dispense finally reaches the backend, and the record survives a power cut)
 
 **The upload job exists, and the record it uploads exists for the first time.** 10f opened by
 finding that `PaymentResult.Success` has carried the server's `paymentReference` since 10a and

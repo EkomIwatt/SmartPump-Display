@@ -5,7 +5,38 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: 2026-09-19, latest (**10f is DONE** — the upload job, and #48's half of it. **Next is 10g, the tablet gate against production**, which is now the last thing between phase 10 and a merge.)_
+_Last updated: **2026-09-20** — 10g's gate PASSED over three sittings (₦548.32, three real sales),
+then a high-effort review found 8 more. **5 fixed, 3 open (#5/#6/#7 below). The branch is NOT
+merged** and that is the next decision._
+
+### ⛳ Start here next session — `feature/phase-10-payments`, 35 commits, pushed, green
+
+1. **Review finding #6 — `syncPriceOnBoot` races `bootResume`.** The guard reads `_ui.value.state`,
+   which is `Idle` until `bootResume` dispatches, and `bootResume` first awaits
+   `reconcileGapOnResume` (up to `ADAPTER_COUNT_TIMEOUT_MS` = 3 s). A `/config` that returns in
+   ~300 ms therefore moves the price under a tablet about to restore a live dispense. **It also
+   means `a synced price does not move under a dispense in progress` passes only because the fake
+   resolves synchronously** — the test asserts something production does not guarantee, which is
+   worse than no test. Needs a sequencing decision, not a patch.
+2. **Review finding #5 — double-tap on fill-up pay → two `/authorise`.** State stays
+   `FillupTankFull` for the whole round trip and the only guard is a state check, so a second tap
+   cancels the first flow mid-request and starts another. Two `PENDING_PAYMENT` for one tank, the
+   first orphaned with a live checkout URL.
+3. **Review finding #7 — `pricePerUnit: 0` from `/config` kills the app.** `quoteFor` runs before
+   the `amountKobo <= 0` guard, `litreStepMicrosFor` does `require(koboPerLitre > 0)`, and the
+   throw escapes `flow { }` in `viewModelScope` — process death at the pump. A station whose price
+   is not set yet is enough.
+4. **Then re-review and merge.** The last review found five blocking defects in code written that
+   same day; a green suite has not been sufficient evidence on this branch.
+5. **Tell Balancee about the orphan:** production holds
+   `740e2af7-3573-45b1-a92b-813f2730ac93` **PAID with no dispense recorded** (the ₦149 fill-up that
+   exposed finding #6 of the sitting). Local row `BLC-77819` is condemned.
+6. **Two backend asks are drafted and unsent:** does a transaction ever leave `PENDING_PAYMENT`,
+   and is the checkout URL still payable after `expiresAt`? Plus the user's question — **round the
+   litres, not the money** (₦200 → ₦199.66); cash already behaves that way, so this is digital
+   diverging from cash.
+
+_(previous: 2026-09-19, latest (**10f is DONE** — the upload job, and #48's half of it. **Next is 10g, the tablet gate against production**, which is now the last thing between phase 10 and a merge.)_
 
 > **Sorted by who is holding it up:** [`V1_BLOCKERS.md`](V1_BLOCKERS.md) is the same work viewed by
 > blocker rather than by phase — useful for "what can move today". It points back here; it does not
