@@ -322,6 +322,18 @@ class BalanceePaymentProcessor @Inject constructor(
      *
      * Recorded after the authorise succeeds, so the log never carries a discrepancy for a sale that
      * never happened.
+     *
+     * **This never throws, and the ordering is why it must not.** By the time it is called the
+     * sale exists on the server and its checkout page is payable; the only thing still standing
+     * between the customer and a QR is this write. A database that is full or corrupt would
+     * otherwise put a Room exception through `flow { }` and out into the collector's
+     * `viewModelScope` — the app dies, no QR is ever drawn, and a live payable transaction is left
+     * with nobody watching it. A lost audit line is a smaller loss than that, so the sale wins and
+     * the loss is made noisy instead of fatal.
+     *
+     * The sentence is logged on the way down rather than merely counted, because it is the only
+     * remaining copy of a figure nobody can reconstruct later: `synced.previousKoboPerLitre` is
+     * gone from the device the moment the sync overwrote it.
      */
     private suspend fun recordPriceRaceIfAny(
         request: PaymentRequest,
@@ -330,13 +342,22 @@ class BalanceePaymentProcessor @Inject constructor(
         transactionRef: String,
     ) {
         if (request.basis != SaleBasis.Dispensed || !synced.priceChanged) return
-        events.record(
-            type = EventType.PRICE_CHANGED_MID_SALE,
-            transactionRef = transactionRef,
-            detail = "Price changed during this fill-up: " +
-                "${formatNaira(synced.previousKoboPerLitre!!)} → ${formatNaira(synced.koboPerLitre)} per litre. " +
-                "Displayed ${formatNaira(request.amountKobo)}, charged ${formatNaira(quote.amountKobo)}.",
-        )
+        val detail = "Price changed during this fill-up: " +
+            "${formatNaira(synced.previousKoboPerLitre!!)} → ${formatNaira(synced.koboPerLitre)} per litre. " +
+            "Displayed ${formatNaira(request.amountKobo)}, charged ${formatNaira(quote.amountKobo)}."
+        runCatching {
+            events.record(
+                type = EventType.PRICE_CHANGED_MID_SALE,
+                transactionRef = transactionRef,
+                detail = detail,
+            )
+        }.onFailure {
+            android.util.Log.e(
+                "PaymentProcessor",
+                "Could not record the mid-sale price change for $transactionRef: $detail",
+                it,
+            )
+        }
     }
 }
 

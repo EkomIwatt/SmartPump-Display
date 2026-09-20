@@ -350,12 +350,22 @@ class FakeEventRepository : EventRepository {
 
     val recorded = mutableListOf<Recorded>()
 
+    /**
+     * Types whose write blows up, standing in for a full or corrupt database (re-review #R5).
+     *
+     * Selective rather than a single "fail everything" flag because the same fake is shared with
+     * `PumpConfigSync` in the processor's tests: a blanket failure would break a collaborator the
+     * test is not asking about, and the assertion would stop meaning what it says.
+     */
+    val failOn = mutableSetOf<EventType>()
+
     override suspend fun record(
         type: EventType,
         pulses: Int?,
         transactionRef: String?,
         detail: String?,
     ) {
+        if (type in failOn) throw IllegalStateException("database is full")
         recorded += Recorded(type, pulses, transactionRef, detail)
     }
 

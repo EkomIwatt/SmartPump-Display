@@ -1561,14 +1561,25 @@ class CustomerViewModel @Inject constructor(
      * See [EventType.PAYMENT_ABANDONED]. The backend does not move the transaction off
      * `PENDING_PAYMENT` when its `expiresAt` passes, so this is not "the sale is over" — it is
      * "we are no longer looking", which is a different and more useful thing to have written down.
+     *
+     * **Never throws**, for the reason argued at
+     * `BalanceePaymentProcessor.recordPriceRaceIfAny`: both callers write this row and then move
+     * the state, so a Room failure here would take the `setState` with it and strand the pump on a
+     * dead QR screen — a countdown at zero, the relay shut, and no way back to Idle but a restart.
+     * Losing the row costs an answer to one customer; losing the transition costs the pump.
      */
     private suspend fun recordAbandonedPayment(txnId: String, amountKobo: Long) {
-        events.record(
-            type = EventType.PAYMENT_ABANDONED,
-            transactionRef = txnId,
-            detail = "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
-                "The pump stopped watching; the checkout link may still be payable.",
-        )
+        val detail = "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
+            "The pump stopped watching; the checkout link may still be payable."
+        runCatching {
+            events.record(
+                type = EventType.PAYMENT_ABANDONED,
+                transactionRef = txnId,
+                detail = detail,
+            )
+        }.onFailure {
+            android.util.Log.e("CustomerVM", "Could not record abandonment of $txnId: $detail", it)
+        }
     }
 
     private fun startExpiryCountdown(serverExpiry: Instant? = null) {

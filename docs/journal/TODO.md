@@ -7,8 +7,8 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 _Last updated: **2026-09-20**, end of day — 10g's gate passed, review #1 found 8 (all fixed), then
 the **re-review found 8 more**. Its finding 1 was the worst defect this branch has produced: a
-drifted clock condemned every queued dispense permanently. **Fixed, and #R4 with it. 4 of the
-re-review's 8 remain — #R5/#R6 below, plus #R3/#R8 boarded as judgment calls.** Still
+drifted clock condemned every queued dispense permanently. **Fixed, and #R4 and #R5 with it. 3 of
+the re-review's 8 remain — #R6 below, plus #R3/#R8 boarded as judgment calls.** Still
 **NOT merged**._
 
 ### ⛳ Start here next session — `feature/phase-10-payments`, 45 commits, green
@@ -69,10 +69,24 @@ re-review's 8 remain — #R5/#R6 below, plus #R3/#R8 boarded as judgment calls.*
        an `/authorise`, and corrected, because that sentence is how this defect keeps recurring.
      - 495 tests / 48 classes green; the two defect assertions were confirmed to fail against the
        pre-fix file, and the two pinning assertions pass either way by design.
-   - [ ] **#R5 — `recordPriceRaceIfAny` writes to Room before `Pending` is emitted**, unguarded.
-     On a full database the sale is already payable on the server, no QR ever appears, and the
-     throw escapes `flow { }` into `viewModelScope`. Same mechanism as the `pricePerUnit: 0` crash
-     fixed this morning; every comparable write in `CustomerViewModel` is wrapped and these are not.
+   - [x] ~~**#R5 — `recordPriceRaceIfAny` writes to Room before `Pending` is emitted**,
+     unguarded.~~ ✅ **FIXED 2026-09-20.** Wrapped inside the method rather than at the call site,
+     so the guarantee belongs to the method and any later caller gets it; the detail sentence goes
+     to `Log.e` on the way down because `synced.previousKoboPerLitre` is gone from the device the
+     moment the sync overwrote it, and that row is its only remaining copy.
+     - **Sibling found and fixed with it: `CustomerViewModel.recordAbandonedPayment`**, both
+       callers. Same shape, and the consequence is worse — the row is written *before* the
+       `setState` that ends the sale, so a Room failure stranded the pump on a dead QR screen
+       (countdown at zero, relay shut, no way back to Idle but a restart) as well as throwing out
+       of `viewModelScope`.
+     - **Siblings checked and deliberately left:** `TransactionUploader`'s
+       `DISPENSE_UPLOAD_FAILED` write is already contained — `TransactionUploadWorker` catches
+       everything and answers `Result.retry()`, and the row it follows is marked before it, so a
+       retry settles. `PumpConfigSync`'s two writes are **#R6**, below, which is the same class of
+       defect on the boot path; fixed there rather than twice.
+     - The rule both fixes now state in the code: **an audit line is worth less than the
+       transition it precedes.** 498 tests / 48 classes green; all three new assertions confirmed
+       to fail against the pre-fix files.
    - [ ] **#R6 — `PumpConfigSync.writeThrough` can throw, against `refresh()`'s stated contract**
      ("must never be an exception"), and `syncPriceOnBoot` calls it from a bare launch. **Partly
      self-inflicted:** the `events.record` added in `202144e` this morning widened this surface.

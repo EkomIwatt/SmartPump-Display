@@ -236,4 +236,52 @@ class CustomerViewModelLifecycleTest {
 
             assertTrue(harness.events.recorded.none { it.type == EventType.PAYMENT_ABANDONED })
         }
+
+    // ---- when the audit write itself fails (re-review finding #R5) ------------------------------
+
+    /**
+     * **Losing the row must not cost the pump.** `recordAbandonedPayment` is called from inside
+     * the expiry coroutine and the `setState` that ends the sale comes after it, so a Room failure
+     * took the transition with it: the countdown sits at zero, the relay is shut, and there is no
+     * way back to Idle but restarting the app — with the exception escaping `viewModelScope` on
+     * the way out.
+     *
+     * The same shape as the processor's `recordPriceRaceIfAny` (#R5 proper), and boarded together
+     * because the two share one rule: an audit line is worth less than the transition it precedes.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a prepay still returns to Idle when the abandonment row cannot be written`() =
+        runTest(mainRule.dispatcher) {
+            harness.events.failOn += EventType.PAYMENT_ABANDONED
+            val vm = harness.build()
+            vm.onStartTransaction()
+            vm.onModeTileTap(TransactionMode.PRE_PAY)
+            vm.onAmountTileTap(amountNaira = 5000)
+            vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+            vm.onModeConfirm()
+
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            assertTrue("the pump was left on a dead QR screen", state(vm) is TransactionState.Idle)
+        }
+
+    /** The fill-up twin: the attendant must still be asked for cash on a tank that is already full. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a fill-up still falls back to cash when the abandonment row cannot be written`() =
+        runTest(mainRule.dispatcher) {
+            harness.events.failOn += EventType.PAYMENT_ABANDONED
+            val vm = harness.build()
+            fillupToUnpaidQr(vm)
+
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            assertTrue(
+                "fuel was in the tank and the screen never asked for it",
+                state(vm) is TransactionState.FillupAwaitingCashConfirm,
+            )
+        }
 }

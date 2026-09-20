@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -327,6 +328,35 @@ class BalanceePaymentProcessorTest {
         processor.process(tender(500_000)).first()
 
         assertTrue(events.recorded.none { it.type == EventType.PRICE_CHANGED_MID_SALE })
+    }
+
+    /**
+     * **The sale outranks its own audit line** (re-review #R5).
+     *
+     * By the time this row is written the `/authorise` has returned, so the transaction exists on
+     * the server and its checkout page is payable. A full or corrupt database would have put a
+     * Room exception through `flow { }` and into the collector's `viewModelScope`: the app dies,
+     * no QR is ever drawn, and a live payable sale is left with nobody watching it — while the
+     * customer stands at a pump holding fuel they have already taken.
+     *
+     * Same mechanism as the `pricePerUnit: 0` crash fixed earlier the same day (review #7), one
+     * layer over. Asserted on what the customer gets, not on the absence of a throw, because the
+     * QR is the thing that was being lost.
+     */
+    @Test
+    fun `a price-race row that cannot be written does not cost the customer the QR`() = runTest {
+        deviceConfig.config = DeviceConfig(koboPerLitre = 87_000, fuelType = FuelType.PETROL)
+        events.failOn += EventType.PRICE_CHANGED_MID_SALE
+
+        val pending = processor.process(dispensed(litres = 10.0)).first() as PaymentResult.Pending
+
+        assertEquals("txn-fixed-0001", pending.transactionRef)
+        assertNotNull("the sale was authorised but nothing was scannable", pending.checkoutUrl)
+        assertEquals(1_490_000L, pending.amountKobo)
+        assertTrue(
+            "the row was dropped, so nothing should claim it was kept",
+            events.recorded.none { it.type == EventType.PRICE_CHANGED_MID_SALE },
+        )
     }
 
     /** No change, no row. The log is a record of price moves, not of every authorise. */
