@@ -163,6 +163,38 @@ class CustomerViewModel @Inject constructor(
     private var expiryJob: Job? = null
     private var dispenseJob: Job? = null
     private var fillupWatchdogJob: Job? = null
+
+    /**
+     * The payment start that has been asked for and has not yet produced a first result — the one
+     * window in which the screen still shows the button that started it (review #5).
+     *
+     * **Two flows deliberately do not move their state until `Pending` arrives**: pre-pay, which
+     * holds `ModeSelect`, and fill-up, which holds `FillupTankFull`. That decision is right and is
+     * argued at [onFillupPayDigital] — a QR-shaped hole with a customer standing at it is worse
+     * than a second of the total they are already reading. What it costs is that the `as?` state
+     * check those handlers open with, which is mutual exclusion everywhere else in this class,
+     * guards nothing here: the state a second tap is checked against is the same one the first tap
+     * left in place. So the tap cancelled a `process` mid-`/authorise` and started another, and
+     * the server does not un-create a transaction because we stopped listening — two
+     * `PENDING_PAYMENT` for one tank, the first orphaned with a live checkout URL for a customer
+     * who may well scan it.
+     *
+     * A [Job] rather than a boolean because cancellation then clears it for free: a cancelled or
+     * completed job is not `isActive`, so no exit path has to remember to reset anything, and
+     * there is no window in which a stale flag can wedge the pump shut.
+     *
+     * **The check has to precede any `cancel`**, which is why it lives in the two handlers rather
+     * than in the two `start…` functions — see [authoriseInFlight].
+     */
+    private var authoriseJob: Job? = null
+
+    /**
+     * Whether an `/authorise` this pump has already sent is still outstanding. See [authoriseJob].
+     *
+     * Callers ignore the tap rather than reporting it: the customer is looking at the screen they
+     * tapped on and the QR is about to replace it, so there is nothing to say and nothing to fix.
+     */
+    private fun authoriseInFlight(): Boolean = authoriseJob?.isActive == true
     private var priceKoboPerLitre: Long = 0L
 
     /**
@@ -619,8 +651,14 @@ class CustomerViewModel @Inject constructor(
                 val method = current.method ?: return
                 when (method) {
                     PaymentMethod.CASH_SEE_ATTENDANT -> onCancel()
+                    // Moves the state before it launches, so its own `ModeSelect` check already
+                    // stops a second tap. Only the digital branch holds `ModeSelect` open.
                     PaymentMethod.USSD -> startUssdFlow(amountKobo = amountKobo)
-                    else -> startPrepayPayment(amountKobo = amountKobo, method = method)
+                    // Review #5's other half. `startPrepayPayment` cancels before it starts, so
+                    // the check belongs here rather than inside it. See [authoriseJob].
+                    else -> if (!authoriseInFlight()) {
+                        startPrepayPayment(amountKobo = amountKobo, method = method)
+                    }
                 }
             }
 
@@ -845,6 +883,9 @@ class CustomerViewModel @Inject constructor(
      */
     fun onFillupPayDigital() {
         val current = currentState() as? TransactionState.FillupTankFull ?: return
+        // Before the cancel, not after: cancelling is what would hide the first authorise from
+        // this check and let a second one out behind it. See [authoriseJob].
+        if (authoriseInFlight()) return
         cancelInFlightJobs()
         startFillupDigitalPayment(current)
     }
@@ -853,6 +894,9 @@ class CustomerViewModel @Inject constructor(
         paymentJob?.cancel()
         paymentJob = viewModelScope.launch {
             paymentProcessor.process(fillupDigitalRequest(source)).collect { result ->
+                // The first result is what closes the window: every one of the three either moves
+                // the state or ends the flow, so the plain state check guards from here on.
+                authoriseJob = null
                 when (result) {
                     is PaymentResult.Pending -> onFillupDigitalPending(source, result)
                     is PaymentResult.Success -> onFillupDigitalSuccess(source, result)
@@ -860,6 +904,7 @@ class CustomerViewModel @Inject constructor(
                 }
             }
         }
+        authoriseJob = paymentJob
     }
 
     /**
@@ -1292,6 +1337,9 @@ class CustomerViewModel @Inject constructor(
                 basis = SaleBasis.Tender,
             )
             paymentProcessor.process(request).collect { result ->
+                // See the same line in `startFillupDigitalPayment`: the first result moves the
+                // state or ends the flow, and the ordinary state check takes over from there.
+                authoriseJob = null
                 when (result) {
                     is PaymentResult.Pending -> onPaymentPending(amountKobo, method, result)
                     is PaymentResult.Success -> onPaymentSuccess(result)
@@ -1299,6 +1347,7 @@ class CustomerViewModel @Inject constructor(
                 }
             }
         }
+        authoriseJob = paymentJob
     }
 
     /**

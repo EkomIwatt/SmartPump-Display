@@ -32,6 +32,7 @@ import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.sync.TransactionUploadScheduler
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -142,9 +143,31 @@ class FakePaymentProcessor : PaymentProcessor {
     var pendingAmountKobo: Long? = null
     var pendingLitres: Double? = null
 
+    /**
+     * Holds `process` open **after** it has been entered and before it emits — the round trip the
+     * real processor spends inside `/config` and `/authorise` (review #5).
+     *
+     * It is the only window in which the pre-pay and fill-up screens still show the button that
+     * started the sale, and until this existed no test could sit in it: the fake emitted `Pending`
+     * on the same tick, so the state had always moved by the time a second tap could arrive and a
+     * double-tap test passed for a reason that does not hold against a server.
+     *
+     * [processCount] is incremented before the wait on purpose. A guard that fails must show up as
+     * a second entry, not as a second emission.
+     */
+    private var authoriseGate: CompletableDeferred<Unit>? = null
+
+    fun holdAuthorise() { authoriseGate = CompletableDeferred() }
+
+    fun releaseAuthorise() {
+        authoriseGate?.complete(Unit)
+        authoriseGate = null
+    }
+
     override fun process(request: PaymentRequest): Flow<PaymentResult> = flow {
         processCount++
         record(request)
+        authoriseGate?.await()
         emit(
             PaymentResult.Pending(
                 transactionRef = pendingRef,
