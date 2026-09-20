@@ -2309,3 +2309,84 @@ production and `SN-TEST-001`, QR scanned with a phone, sized like the #32 sittin
 to show the dispense arriving in the dashboard's Transactions view (**#49**), which is the only way
 the figure can be read back at all — the API cannot return it (**#46**). Nothing merges until it
 passes.
+
+---
+
+### Phase 10h — two rounds of review, and the defect that destroyed records
+**Date:** 2026-09-20
+**Status:** done (for this run — 5 of the re-review's 8 findings remain open and are boarded)
+**Commit(s):** `202144e`, `c015bcf`, `28d8c03`, `e26246e`, plus four board commits; branch pushed at `94cff8f`
+
+**Summary (plain language):**
+No new features today. The whole day went on finding and fixing faults in what was already built —
+first the three left over from yesterday's review, then a second review of the entire branch, which
+found eight more. The worst of those would have quietly destroyed the station's records: if the
+tablet's clock drifted overnight, every completed sale waiting to be reported to Balanceè was marked
+"never send this" permanently, and putting the clock right did not bring them back. Fuel sold, money
+taken, and no record of it — which is the exact outcome the reporting job exists to prevent. That is
+fixed, along with three others: a pump crashing when the station had no price set, a customer being
+charged twice by tapping "pay" twice, and the price on screen moving during start-up. The branch is
+pushed and still not merged; five smaller findings are written down and waiting.
+
+**Technical notes:**
+- **Review #1's last three, all fixed in more places than the review named.**
+  - **#7 (`202144e`)** — `/config` returning `pricePerUnit: 0` reached `litreStepMicrosFor`, whose
+    `require` throws out of a `flow { }` on `viewModelScope`: process death at the pump. Screened at
+    the boundary instead — `SyncedConfig.hasUsablePrice`. **The quieter half mattered more:** the 0
+    was also being written through, wiping the last known good price and stopping **cash** sales,
+    which consult no backend at all. New `PRICE_SYNC_REJECTED` event, logged once per rejected
+    figure per app run (`/config` is fetched before every authorise).
+  - **#5 (`c015bcf`)** — pre-pay and fill-up both hold their state for the whole authorise round
+    trip, deliberately, so the `as?` state check that is mutual exclusion everywhere else guards
+    nothing. A second tap cancelled a `process` mid-request and started another; the server does not
+    un-create a transaction because we stopped listening. `authoriseJob` is a `Job` rather than a
+    flag so cancellation reopens the gate for free — the failure mode of a guard like this is a pump
+    that will not sell, and two tests cover exactly that. The review named the fill-up; pre-pay had
+    it too.
+  - **#6 (`28d8c03`)** — `syncPriceOnBoot` asked "may I move the price?" before `bootResume` had
+    dispatched an answer. **The decision now waits on `bootResumed`; the fetch does not**, so the
+    boot coroutine holding the relay-open invariant still waits on nothing a network can delay.
+    A test asserts the overlap so a later tidy-up cannot serialise it.
+- **The re-review (`/code-review high main`, whole branch) found 8; verified before acting, 7 held.**
+- **R1 + R2 (`e26246e`) were one defect with two consumers.** The observed clock-skew 401 carries no
+  `code`, so `safeApiCall` made it `Business(code = null)`, which the taxonomy called TERMINAL.
+  `TransactionUploader` then wrote `uploadError`; `getPendingSync` filters `uploadError IS NULL` and
+  **no query anywhere clears it**. The poll gave up on the same error, so NTP correcting a clock
+  mid-payment showed a failure to a customer whose money was landing.
+  - The proof it was wrong rather than merely strict was internal: `unauthorisedCopy` has always
+    told an attendant this same 401 is `recoverable` and how to fix it.
+  - `NOT_A_VERDICT` = {401, 408, 429}, consulted **before** the no-code rule. 403 deliberately
+    excluded — a considered refusal to serve this caller. An envelope failure on a 2xx has no status
+    and stays terminal, so unclassifiable refusals do not become infinite retries.
+  - **The review proposed a second list of final codes for the poll; not needed.** `isPollTerminal`
+    already defers to `retryPolicy`, so the one change fixed both and #45's "one place" holds.
+- **Every fix was checked against the pre-fix file**, by restoring it from git and re-running: 5/8
+  double-tap assertions fail without #5, 2 fail without #6 — including the one that previously
+  *passed* — and all 8 new taxonomy assertions fail without R1, across three test classes.
+- **Two test fakes were themselves defective, and that is the recurring lesson.**
+  `FakePaymentProcessor` emitted `Pending` on the same tick, so no test could sit in the window the
+  double-tap lives in; `FakePulseSource.awaitAdapterCount` answered instantly, so every boot test ran
+  the resume *before* the sync — the opposite of production, and why #6's test asserted a guarantee
+  the code did not make. `holdAuthorise()` and `holdAdapterCount()` open those windows.
+- **Raised, not fixed:** **#50** (three screens read `uiState.priceKoboPerLitre` while holding a
+  struck figure — `priceMayMoveFreely` is a guard doing a type's job) and **#51** (the R1 fix means a
+  genuinely deauthorised pump retries forever with nothing in the log; `NotActivated` has had this
+  shape since 10f, so the fix widened it rather than creating it).
+- Verified: JVM **491 tests / 48 classes** green (was 459 at the start of the day);
+  `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. Branch **pushed** —
+  `origin/feature/phase-10-payments` = `94cff8f`.
+
+**The pattern worth carrying out of this run:**
+In **five consecutive rounds** a defect was fixed in one flow and left standing in a sibling. It has
+now cost: the local-id bug (Flow 1 right, Flow 3 wrong, USSD wrong), the stale-price bug (four
+readers, one fixed), #7 (crash fixed, write-through missed), #5 (fill-up named, pre-pay silent), and
+R4 below (`ed77e00` fixed `Complete.txnId` in Flow 3 and left the expiry path alone). **Checking the
+siblings is not diligence on this branch; it is the single highest-yield step there is.**
+
+**Next:**
+**#R4** — the fill-up abandon event logs the local `BLC-NNNNN` rather than the id `/authorise`
+issued, which is `ed77e00`'s defect in the same flow's other method. Then **#R5**/**#R6**, two
+unguarded Room writes that escape into `viewModelScope` (one of them introduced by `202144e` the
+same morning). **#R3** and **#R8** are boarded as judgment calls. Then weigh a third review pass
+against the fact that both rounds so far found defects in code written that same day — and only
+then merge.
