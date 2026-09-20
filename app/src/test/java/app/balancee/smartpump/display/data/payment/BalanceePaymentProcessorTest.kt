@@ -37,6 +37,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
+import retrofit2.HttpException
+import retrofit2.Response
 import java.io.IOException
 import java.math.BigDecimal
 import java.time.Clock
@@ -409,6 +413,34 @@ class BalanceePaymentProcessorTest {
 
         assertTrue(results.last() is PaymentResult.Success)
         assertEquals(3, service.statusCalls)
+    }
+
+    /**
+     * The 2026-09-20 review, finding 2. A code-less 401 read as an unrecognised business refusal,
+     * which the taxonomy called final, so the poll gave up on it.
+     *
+     * The scenario is not exotic: NTP corrects this tablet's clock while a customer is at the
+     * checkout page. One 401 later the pump has stopped watching a sale that is about to be paid,
+     * and the customer is shown a failure for money that arrives seconds afterwards. The taxonomy
+     * fix reaches this for free, because `isPollTerminal` defers to it rather than keeping a
+     * second list.
+     */
+    @Test
+    fun `a clock-skew 401 mid-poll does not abandon a customer who is paying`() = runTest {
+        service.statusFailures = listOf(
+            HttpException(
+                Response.error<Unit>(
+                    401,
+                    """{"status":false,"message":"Request timestamp is not fresh"}"""
+                        .toResponseBody("application/json".toMediaType()),
+                ),
+            ),
+        )
+        service.statuses = listOf("PENDING_PAYMENT", "PENDING_PAYMENT", "PAID")
+
+        val results = processor.process(tender(500_000)).untilTerminal()
+
+        assertTrue(results.last() is PaymentResult.Success)
     }
 
     /** Same rule for the transport: a blip is not an answer. */

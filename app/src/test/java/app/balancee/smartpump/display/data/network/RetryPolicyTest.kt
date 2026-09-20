@@ -85,6 +85,86 @@ class RetryPolicyTest {
         assertEquals(RetryPolicy.TERMINAL, error.retryPolicy)
     }
 
+    // ---- the statuses that are not a verdict (2026-09-20 review, finding 1) ---------
+
+    /** The exact bytes production returns when this tablet's clock has drifted (#32 gate). */
+    private val clockSkew401 = ApiError.Business(
+        message = "Request timestamp is not fresh",
+        code = null,
+        httpCode = 401,
+    )
+
+    /**
+     * The finding. A code-less 401 fell through to "unrecognised refusal, therefore final", and
+     * the upload queue acted on that by writing `uploadError` — which `getPendingSync` filters on
+     * and nothing clears. A clock drifting overnight condemned every queued dispense permanently,
+     * and correcting the time did not bring them back.
+     */
+    @Test
+    fun `a code-less 401 is retry-later, not terminal`() {
+        assertEquals(RetryPolicy.RETRY_LATER, clockSkew401.retryPolicy)
+    }
+
+    /**
+     * The contradiction that proves it was wrong rather than merely strict: the copy layer has
+     * always told an attendant this one is fixable, while the taxonomy was discarding the record.
+     */
+    @Test
+    fun `the taxonomy now agrees with the copy layer about the clock-skew 401`() {
+        assertTrue(clockSkew401.toFailureCopy("could not report this dispense").recoverable)
+        assertTrue(clockSkew401.retryPolicy != RetryPolicy.TERMINAL)
+    }
+
+    /** A 401 whose body did not parse as an envelope takes the same reading. */
+    @Test
+    fun `a bare 401 is retry-later too`() {
+        assertEquals(RetryPolicy.RETRY_LATER, ApiError.Http(401, "<html>401</html>").retryPolicy)
+    }
+
+    /** A timeout and a rate limit are statements about this attempt, not about the sale. */
+    @Test
+    fun `408 and 429 are retry-later`() {
+        assertEquals(RetryPolicy.RETRY_LATER, ApiError.Http(408, null).retryPolicy)
+        assertEquals(RetryPolicy.RETRY_LATER, ApiError.Http(429, null).retryPolicy)
+        assertEquals(
+            RetryPolicy.RETRY_LATER,
+            ApiError.Business(message = "slow down", code = null, httpCode = 429).retryPolicy,
+        )
+    }
+
+    /**
+     * 403 is deliberately NOT in the set. It is a considered refusal to serve this caller, and the
+     * set exists to avoid handing out "retry forever" on anything that merely looks like auth.
+     */
+    @Test
+    fun `403 stays terminal`() {
+        assertEquals(RetryPolicy.TERMINAL, ApiError.Http(403, null).retryPolicy)
+    }
+
+    /**
+     * The status is read before the no-code rule, not instead of it. An envelope-level failure on a
+     * 2xx has no `httpCode` at all and must still be terminal, or every unclassifiable refusal in
+     * the app quietly becomes an infinite retry.
+     */
+    @Test
+    fun `a code-less refusal with no status is still terminal`() {
+        assertEquals(
+            RetryPolicy.TERMINAL,
+            ApiError.Business(message = "refused", code = null, httpCode = null).retryPolicy,
+        )
+        assertEquals(
+            RetryPolicy.TERMINAL,
+            ApiError.Business(message = "refused", code = null, httpCode = 400).retryPolicy,
+        )
+    }
+
+    /** None of this reaches the in-flight loop: a clock is not corrected in 1.5 seconds. */
+    @Test
+    fun `a non-verdict status is not retried inside the call window`() {
+        assertFalse(clockSkew401.isRetryable)
+        assertFalse(ApiError.Http(429, null).isRetryable)
+    }
+
     // ---- nothing else moved --------------------------------------------------------
 
     /** The whole point of keeping `isRetryable`: existing backoff behaviour is untouched. */

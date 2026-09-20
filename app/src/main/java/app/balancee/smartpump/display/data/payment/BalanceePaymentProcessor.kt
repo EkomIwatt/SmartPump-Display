@@ -199,10 +199,16 @@ class BalanceePaymentProcessor @Inject constructor(
      * Poll `GET /transactions/{id}` until the sale resolves, the window closes, or the collector
      * goes away.
      *
-     * **What ends the poll early is deliberately a short list**: `PAID`, `DISPENSED`, a server that
-     * says the transaction does not exist, and a device with no credentials to ask with. Everything
-     * else — an unrecognised status string, a reply that would not parse, a 500, no signal — keeps
-     * polling until the deadline.
+     * **What ends the poll early is deliberately a short list**: `PAID`, `DISPENSED`, a coded
+     * refusal the shared taxonomy calls final, and a device with no credentials to ask with.
+     * Everything else — an unrecognised status string, a reply that would not parse, a 500, no
+     * signal, **and since the 2026-09-20 review a 401** — keeps polling until the deadline.
+     *
+     * That 401 is worth naming, because it used to end the poll and should never have. A tablet
+     * whose clock drifts past the signing window, or one NTP corrects mid-payment, returns a
+     * code-less 401 that the taxonomy read as an unrecognised refusal. The poll gave up and a
+     * customer who had paid was shown a failure. It is `RETRY_LATER` now, so this rides to the
+     * deadline like every other thing the app cannot classify.
      *
      * That asymmetry is the point. Giving up on a status nobody has observed would refuse fuel to
      * someone who has paid, on a guess about a word. Riding to the deadline costs at worst a wait

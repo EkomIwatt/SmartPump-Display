@@ -230,6 +230,64 @@ class TransactionUploaderTest {
         assertNull(transactions.byId("txn-1")!!.uploadError)
     }
 
+    /**
+     * The 2026-09-20 review, finding 1 — and the worst outcome this file has ever had.
+     *
+     * The observed clock-skew 401 carries a message and **no** `code`, so it parsed as an
+     * unrecognised business refusal, which the taxonomy called final. This method then wrote
+     * `uploadError`, `getPendingSync` filters on `uploadError IS NULL`, and no query anywhere
+     * clears it. A tablet whose clock drifted past the signing window overnight therefore
+     * condemned every queued dispense **permanently**, and putting the clock right did not bring
+     * them back. Fuel sold, money taken, and the station's record of it destroyed by a wrong
+     * reading of an authentication failure.
+     */
+    @Test
+    fun `a clock-skew 401 waits instead of condemning the dispense`() = runTest {
+        transactions.saveTransaction(sale())
+        service.failure = HttpException(
+            Response.error<Unit>(
+                401,
+                """{"status":false,"message":"Request timestamp is not fresh"}"""
+                    .toResponseBody("application/json".toMediaType()),
+            ),
+        )
+
+        assertEquals(UploadRun.RETRY, uploader.uploadPending())
+        val record = transactions.byId("txn-1")!!
+        assertNull("the record was condemned over a clock", record.uploadError)
+        assertNull(record.syncedAt)
+    }
+
+    /** And it really does go out once the clock is fixed — the record was kept, not just unmarked. */
+    @Test
+    fun `a dispense held by a 401 goes out once the credentials work again`() = runTest {
+        transactions.saveTransaction(sale())
+        service.failure = HttpException(
+            Response.error<Unit>(
+                401,
+                """{"status":false,"message":"Request timestamp is not fresh"}"""
+                    .toResponseBody("application/json".toMediaType()),
+            ),
+        )
+        uploader.uploadPending()
+
+        service.failure = null
+
+        assertEquals(UploadRun.SETTLED, uploader.uploadPending())
+        assertEquals(1, service.uploads.size)
+        assertNotNull(transactions.byId("txn-1")!!.syncedAt)
+    }
+
+    /** A rate limit is a statement about this attempt, not about the sale. */
+    @Test
+    fun `a 429 waits rather than condemning the dispense`() = runTest {
+        transactions.saveTransaction(sale())
+        service.failure = refusal("RATE_LIMITED", "Too many requests", 429)
+
+        assertEquals(UploadRun.RETRY, uploader.uploadPending())
+        assertNull(transactions.byId("txn-1")!!.uploadError)
+    }
+
     // ---- the failures that DO close a record, loudly ---------------------------------------------
 
     /**
