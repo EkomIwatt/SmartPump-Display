@@ -5,13 +5,13 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-20**, late. **Merge-gate step 2 (the scoped review) is done, and its one
-blocking finding — #R9 — is fixed (`802c1dc`).** Round 3's #R4/#R5/#R6 fixes all hold; #R9 was older
-than them, introduced by the 10g fix `8e0a15c`, and was invisible because the event fake never
-suspended. Branch `feature/phase-10-payments`, **52 commits**, **505 tests / 48 classes** green,
-`lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged — step 1,
-the tablet smoke test, is the only thing left before the merge.** What follows is a plan, not a
-list: do it in order._
+_Last updated: **2026-09-21**. **Merge-gate step 2 is done; it found #R9 (`802c1dc`), and the tablet
+then found #R10 (`aa395e4`) — the abandonment row had never once been written.** Branch
+`feature/phase-10-payments`, **53 commits**, **510 tests / 48 classes** green, `lintDebug`,
+`assembleDebugProd` and `compileDebugRealHwKotlin` clean. `debugProd` is installed on the SM-T220.
+**Still NOT merged — the rest of step 1 is what is left.** What follows is a plan, not a list: do it
+in order._
+
 
 ### ⛳ Start here — the merge gate, in order
 
@@ -27,15 +27,19 @@ list: do it in order._
    them (#R6) rewrote the `init` boot coroutine that runs on *every* app start. Another (#R9)
    changed what happens when a pre-pay window closes unpaid. Nothing since has been on a device.
    This is not a re-run of the 8-step runbook — no production money is needed.
-   - Install `debugProd` on the SM-T220. Confirm it **opens** (that is the #R6 path).
+   - [x] Install `debugProd` on the SM-T220 and confirm it **opens** (the #R6 path). **Done
+     2026-09-20 — opens on the Idle screen.** Reinstall after #R10; the rest of this list has not
+     been run.
    - One **cash** fill-up end to end. Cash needs no backend and is what a forecourt falls back to;
      if the boot path is wrong, this is where it shows.
    - One **digital** sale to the QR screen, then cancel. Confirms `/config` → `/authorise` still
      reaches a scannable page after the `PumpConfigSync` rewrite.
-   - **Let one pre-pay QR expire without paying** (#R9's path): the screen must return to Idle on
-     its own and the operator screen must show a `PAYMENT_ABANDONED` row carrying the id. Costs
-     nothing but waiting — the countdown runs on the server's `expiresAt`, so it is **twenty
-     minutes** on production. Start it, do the rest of the list, come back to it.
+   - **Let one pre-pay QR expire without paying.** **Run once already (2026-09-20) and it found
+     #R10**, so run it again on the fixed build. What must be true: the **"This pump stopped
+     waiting for the payment"** screen — *not* Idle, see #R11 — **and** a `PAYMENT_ABANDONED` row on
+     the operator screen carrying the server's id. The row is the assertion; the first run produced
+     the screen and no row. Costs nothing but waiting: the window is the server's `expiresAt`,
+     **twenty minutes** on production. Start it, do the rest of the list, come back to it.
    - **Kill the app mid-dispense and reopen it.** `bootResume()` failures are now swallowed and
      logged instead of crashing — Idle-and-safe beats a crash loop, but it means a partial resume
      now fails *quietly*, and this is the only way to see that it does not.
@@ -79,7 +83,32 @@ list: do it in order._
 4. [ ] **Then the improvements, as small branches off `main`** — see the next section. None of them
    blocks the merge and none should ride along with it.
 
+2b. [x] **#R10 — two clocks reached the same `expiresAt` and only the slower one wrote the row.
+   FIXED 2026-09-21 (`aa395e4`).** Found on the tablet, not in a review: a pre-pay QR left to expire
+   gave the "stopped waiting" screen and the database held **zero** `PAYMENT_ABANDONED` rows — none
+   ever, on either digital flow, including the 10g gate that introduced the row.
+   - The ViewModel countdown records the abandonment; the processor's poll loop emits `Failed`, and
+     `onPaymentFailed` cancels the countdown. The countdown counts one-second `delay`s while the
+     poller compares against the wall clock, so **any doze hands the ending to the poller** — which
+     wrote nothing. Every fix from #R4 through #R9 was maintaining a row that was never written.
+   - `PaymentResult.Failed.windowElapsed` now says which ending it is, because the copy cannot: an
+     elapsed window and a declined card are both a recoverable `Failed`. Both failure handlers
+     record on that marker and nothing else; the countdowns keep their writes for the case the
+     poller cannot end (no `expiresAt`, so no deadline to pass).
+   - **#R9's shape was in `onPaymentFailed` too** — `cancelInFlightJobs()` from inside `paymentJob`.
+     It got away with it only because `setState` does not suspend. Named cancels now.
+
 ### After the merge — improvements, roughly in value order
+
+4a. [ ] **#R11 — a timed-out pre-pay sits on an error card until a person taps it.** `ErrorScreen`
+   has no auto-dismiss and its button is the only way out (`CustomerStateHost.kt:194`), so an
+   unattended pump whose customer walked away stays on "This pump stopped waiting for the payment"
+   indefinitely and the next customer cannot start a sale. The countdown's own path used to return
+   to Idle, which is where the expectation in step 1 came from; the poller's path does not, and the
+   poller is the one that runs. **Not a defect — a product decision**: the copy is doing real work
+   (it tells a customer who may have paid to see the attendant) and dropping it to Idle silently
+   loses that. Options are a timed auto-dismiss back to Idle, or leaving it and accepting a tap.
+   Ask the boss; it is a forecourt-behaviour question, not a code one.
 
 5. [ ] **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** Only the two expiry timers do.
    The backend does not expire transactions, so the checkout URL stays payable after a cancel — the
@@ -135,6 +164,10 @@ list: do it in order._
 - **A coroutine that cancels itself stops at its next suspension point.** #R9 was a self-cancel with
   a suspending Room write behind it, so everything after that line — including the transition that
   ended the sale — silently did not happen. Before cancelling a job, ask whether it is *this* job.
+- **Two timers on one deadline is one timer too many.** #R10: both digital flows armed a countdown
+  and a poll deadline off the same `expiresAt`, each assuming it would be the one to end the sale.
+  Whenever two things can end the same sale, ask which one actually does — on a device, not in a
+  test, because `delay` and the wall clock diverge exactly where it matters.
 - **A fake that never suspends cannot see a cancellation.** Three tests were incapable of failing
   until `FakeEventRepository` got one `yield()`. When the thing under test is coroutine-shaped, the
   fake has to be too.

@@ -1,6 +1,41 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-20, late (**the scoped review is done; its one finding is fixed, and the tablet is the last thing between this branch and `main`**)
+## Current status — 2026-09-21 (**the tablet found what no review could: the abandonment row had never once been written**)
+
+**One evening, two findings, and the second one only a device could produce.** The scoped review
+(merge-gate step 2) found the six round-3 fixes sound and one blocking defect in their sibling:
+**#R9**, the pre-pay expiry cancelling its own coroutine (`802c1dc`). Then `debugProd` went on the
+SM-T220, a pre-pay QR was left to expire, and the screen said *"This pump stopped waiting for the
+payment"* — which is not what the fixed code does. The app's database held **zero**
+`PAYMENT_ABANDONED` rows. None, ever, on either digital flow, including the 10g gate that introduced
+the row. **#R10**, fixed in `aa395e4`.
+
+**Two clocks, one deadline.** Both digital flows arm a ViewModel countdown *and* the processor's poll
+deadline off the same `expiresAt`. The countdown records the abandonment; the poller emits `Failed`,
+and the handler cancels the countdown. The countdown counts one-second `delay`s while the poller
+compares against the wall clock — so any doze hands the ending to the poller, which wrote nothing.
+**Every fix from #R4 through #R9 was maintaining a row that production never wrote.** The marker
+`PaymentResult.Failed.windowElapsed` now names that ending, because the copy cannot tell it from a
+declined card, and both failure handlers record on it.
+
+**#R9's shape was in `onPaymentFailed` as well** — `cancelInFlightJobs()` called from inside
+`paymentJob` — and it had got away with it only because `setState` does not suspend. Adding a
+suspending write there would have re-created #R9 exactly; found by asking the sibling question before
+writing the line rather than after.
+
+**One product question is now boarded, not decided: #R11.** A timed-out pre-pay lands on an error
+card with no auto-dismiss, so an unattended pump stays there until someone taps "Start over". The
+copy is doing real work — it tells a customer who may have paid to see the attendant — so this is a
+forecourt decision, not a code one.
+
+**Branch state:** `feature/phase-10-payments`, **53 commits**, **510 tests / 48 classes** green,
+`lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged.** The rest
+of merge-gate step 1 — cash fill-up, digital-to-QR-and-cancel, kill-mid-dispense, and the pre-pay
+expiry re-run — has not been done.
+
+---
+
+## Previous status — 2026-09-20, late (**the scoped review is done; its one finding is fixed, and the tablet is the last thing between this branch and `main`**)
 
 **Merge-gate step 2 is complete.** The review scoped to this round's six fixes found the six sound —
 each guard was checked for what runs after it fires — and found one blocking defect in their
@@ -2587,3 +2622,62 @@ Merge-gate **step 1, the tablet smoke test** — now with one more thing to watc
 expire unpaid and confirm the screen returns to Idle on its own and the operator log shows the
 abandonment row. Then merge, then the improvements (#R3, #R8, #50, #51, #52) as small branches off
 `main`.
+
+
+---
+
+### Phase 10h (round 5) — the row that was never written
+**Date:** 2026-09-21
+**Status:** done
+**Commit(s):** `aa395e4` (fix + tests); this board/log update. Follows `802c1dc` (#R9) the same night.
+
+**Summary (plain language):**
+When a customer takes a QR code and never pays, the pump is supposed to give up and write a line in
+its own log saying so — so that if the customer comes back saying they paid, someone can check.
+We put the app on the tablet, left a QR to expire, and then read the tablet's database: **that line
+had never been written. Not once, in the whole life of the app.** Two separate timers were racing to
+end the sale, and the one that wins on a real tablet was the one that wrote nothing — so every fix
+we have made to that line over the past week was maintaining a record that never existed. The line
+is now written by whichever timer actually ends the sale.
+
+**Technical notes:**
+- **#R10 (`aa395e4`).** Both digital flows arm two clocks off the same `expiresAt`: the ViewModel's
+  `expiryJob` countdown (which calls `recordAbandonedPayment`) and `BalanceePaymentProcessor`'s poll
+  deadline (which emits `Failed`, whose handler cancels the countdown). The countdown accumulates
+  one-second `delay`s; the poller compares `clock.instant()` against the deadline. Both are deferred
+  while the tablet sleeps, but on waking the poller fires immediately and the countdown still owes
+  its remaining ticks — so the poller ends the sale, and it wrote no row.
+- **The marker, not the copy.** `PaymentResult.Failed.windowElapsed` is new, because the caller has
+  to write `PAYMENT_ABANDONED` for that ending and no other, and an elapsed window and a declined
+  card both arrive as a recoverable `Failed` with a "see the attendant" line. Only the processor
+  knows which it produced. The countdowns keep their own writes for the one case the poller cannot
+  end: a server that issued no `expiresAt` leaves it polling with no deadline at all.
+- **Double-write considered and accepted.** Each ending cancels the other, and the handlers cancel
+  the countdown before the suspending write, so the overlap is an instant wide. Two truthful rows
+  are a better failure than the none we had.
+- **#R4's rule held to.** The id and the amount come off the **live** awaiting-payment state, not
+  the `FillupTankFull` the flow started from: `source` carries the local `BLC-…` and the quote
+  struck at the nozzle, neither of which is what the still-payable checkout page charges.
+- **#R9's sibling, caught before it bit.** `onPaymentFailed` also called `cancelInFlightJobs()` from
+  inside `paymentJob`. It survived only because `setState` does not suspend — adding the abandonment
+  write in front of it would have reproduced #R9 exactly. Named cancels now, `paymentJob` left to
+  end on its own.
+- **Evidence.** `adb run-as` on the debuggable `debugProd` build reads the app's own database, which
+  is a better witness than a screen on a tablet whose logcat is unusable: `events` held two rows,
+  both from 09-19, and `pulse_state` held the persisted `error` state with the poll-deadline copy,
+  timestamped 23:24:40. Worth remembering as a technique for the parallel run — though **#40 still
+  stands**, because a release build is not debuggable and `run-as` will not work on it.
+- **Deliberately unchanged:** the screens. Pre-pay keeps the 10g "stopped waiting" error, the
+  fill-up keeps its cash fall-back. Both were argued when that copy was written and neither was what
+  was broken. **USSD still records nothing** — Flow 5 is deferred and off the customer's screen.
+- **Boarded, not decided: #R11** — that error card has no auto-dismiss, so an unattended pump waits
+  for a tap. A product question for the boss.
+- Verified against the pre-fix files first: all three new behavioural tests fail without the change,
+  and the two that assert unchanged behaviour (a refusal is not an abandonment) pass either way. JVM
+  **510 tests / 48 classes** green; `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin`
+  clean, in separate invocations.
+
+**Next:**
+The rest of merge-gate step 1 on the tablet: a cash fill-up end to end, a digital sale to the QR then
+cancel, kill-mid-dispense-and-reopen, and the pre-pay expiry again — this time the row is the
+assertion, not the screen. Then merge.
