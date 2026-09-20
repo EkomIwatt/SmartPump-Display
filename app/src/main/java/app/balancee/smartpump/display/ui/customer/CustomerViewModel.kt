@@ -964,7 +964,7 @@ class CustomerViewModel @Inject constructor(
                 when (result) {
                     is PaymentResult.Pending -> onFillupDigitalPending(source, result)
                     is PaymentResult.Success -> onFillupDigitalSuccess(source, result)
-                    is PaymentResult.Failed -> onFillupDigitalFailed(source, result.failure)
+                    is PaymentResult.Failed -> onFillupDigitalFailed(source, result)
                 }
             }
         }
@@ -992,7 +992,7 @@ class CustomerViewModel @Inject constructor(
                     when (result) {
                         is PaymentResult.Pending -> Unit
                         is PaymentResult.Success -> onFillupDigitalSuccess(source, result)
-                        is PaymentResult.Failed -> onFillupDigitalFailed(source, result.failure)
+                        is PaymentResult.Failed -> onFillupDigitalFailed(source, result)
                     }
                 }
         }
@@ -1067,18 +1067,31 @@ class CustomerViewModel @Inject constructor(
         )
     }
 
-    private fun onFillupDigitalFailed(
+    private suspend fun onFillupDigitalFailed(
         source: TransactionState.FillupTankFull,
-        failure: FailureCopy,
+        failed: PaymentResult.Failed,
     ) {
-        if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
+        val awaiting = currentState() as? TransactionState.FillupDigitalAwaitingPayment ?: return
+        // First, and before anything that suspends: the countdown is the other writer of the row
+        // below, and cancelling it here is what keeps one abandonment from being logged twice.
         expiryJob?.cancel()
+        // **The poller's ending is the one that normally happens** (#R10). Both clocks run off the
+        // same `expiresAt`, and the processor's compares against the wall clock while
+        // [startFillupDigitalExpiry]'s counts one-second `delay`s — so a tablet that dozes hands
+        // the ending to the poller, which until now wrote nothing. The id and the amount come off
+        // the **live** state for #R4's reason: `source` carries the local `BLC-…` minted at
+        // attendant-authorise and the quote struck at shutoff, neither of which is what the still
+        // payable checkout page charges.
+        if (failed.windowElapsed) {
+            recordAbandonedPayment(failed.transactionRef ?: awaiting.txnId, awaiting.amountDueKobo)
+        }
         // No Error state here: the fuel is already in the tank, so the flow falls back to cash
         // rather than to a card the customer can only dismiss. The diagnostic half still has to go
         // somewhere, and this is the one failure path with no attendant banner to put it on.
         android.util.Log.w(
             "CustomerVM",
-            "Fill-up digital payment failed: " + (failure.attendantDetail ?: failure.customerMessage),
+            "Fill-up digital payment failed: " +
+                (failed.failure.attendantDetail ?: failed.failure.customerMessage),
         )
         setState(
             TransactionState.FillupAwaitingCashConfirm(
@@ -1552,8 +1565,22 @@ class CustomerViewModel @Inject constructor(
      * simply has not seen the money land yet, and until 10e all three read "Payment was not
      * completed." to the customer and "Payment failed — …" to the attendant.
      */
-    private fun onPaymentFailed(failed: PaymentResult.Failed) {
-        cancelInFlightJobs()
+    private suspend fun onPaymentFailed(failed: PaymentResult.Failed) {
+        val awaiting = currentState() as? TransactionState.PrepayAwaitingPayment
+        // **Not [cancelInFlightJobs]**: this runs inside `paymentJob`'s collect, and cancelling the
+        // job you are standing in is #R9 — the write below would throw at its first suspension and
+        // the `setState` after it would never run. `paymentJob` is ending on its own. The others
+        // are cancelled first because `expiryJob` is the row's other writer (see #R10).
+        expiryJob?.cancel()
+        dispenseJob?.cancel()
+        fillupWatchdogJob?.cancel()
+        // The window elapsing is an abandonment; a decline is not. Until #R10 only
+        // [startExpiryCountdown] wrote this row, and it is not normally the clock that gets there
+        // first — so on a real tablet the row was never written at all. The amount is the live
+        // state's, which is the tender the server authorised and what the checkout page will take.
+        if (failed.windowElapsed && awaiting != null) {
+            recordAbandonedPayment(failed.transactionRef ?: awaiting.txnId, awaiting.amountKobo)
+        }
         setState(failed.failure.toErrorState())
     }
 
@@ -1591,10 +1618,17 @@ class CustomerViewModel @Inject constructor(
      * "we are no longer looking", which is a different and more useful thing to have written down.
      *
      * **Never throws**, for the reason argued at
-     * `BalanceePaymentProcessor.recordPriceRaceIfAny`: both callers write this row and then move
+     * `BalanceePaymentProcessor.recordPriceRaceIfAny`: every caller writes this row and then moves
      * the state, so a Room failure here would take the `setState` with it and strand the pump on a
      * dead QR screen — a countdown at zero, the relay shut, and no way back to Idle but a restart.
      * Losing the row costs an answer to one customer; losing the transition costs the pump.
+     *
+     * **Four callers, two clocks** (#R10). The two expiry countdowns own the ending when the server
+     * issued no `expiresAt`; the two payment-failure handlers own it when it did, because the
+     * processor's poll deadline compares against the wall clock and a countdown of one-second
+     * `delay`s does not. Whichever fires cancels the other, so the row is written once — and if the
+     * two ever overlap by an instant, two truthful rows are a better failure than none, which is
+     * what the tablet showed on 2026-09-20.
      */
     private suspend fun recordAbandonedPayment(txnId: String, amountKobo: Long) {
         val detail = "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +

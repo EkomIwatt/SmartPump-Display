@@ -254,6 +254,12 @@ class FakePaymentProcessor : PaymentProcessor {
         ref: String? = pendingRef,
         customerMessage: String = FailureCopy.PAYMENT_NOT_COMPLETED,
         recoverable: Boolean = true,
+        /**
+         * Defaults to false because most failures are refusals. Passing true is the processor's own
+         * poll deadline elapsing - the ending that writes `PAYMENT_ABANDONED` (#R10), and the one
+         * that actually happens on a tablet.
+         */
+        windowElapsed: Boolean = false,
     ) {
         terminals.tryEmit(
             PaymentResult.Failed(
@@ -263,6 +269,7 @@ class FakePaymentProcessor : PaymentProcessor {
                     recoverable = recoverable,
                 ),
                 ref,
+                windowElapsed = windowElapsed,
             ),
         )
     }

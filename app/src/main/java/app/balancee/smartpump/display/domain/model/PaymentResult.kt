@@ -53,6 +53,22 @@ sealed class PaymentResult {
     data class Failed(
         val failure: FailureCopy,
         val transactionRef: String? = null,
+        /**
+         * This failure is the **payment window elapsing**, not a refusal — the pump stopped
+         * watching a sale the server never closed, and the checkout page may still be payable.
+         *
+         * It exists because the caller has to write `PAYMENT_ABANDONED` for exactly this ending and
+         * for no other, and it cannot tell them apart from the copy: a declined card and an elapsed
+         * window are both `Failed` with a recoverable line. Two clocks reach the same `expiresAt` —
+         * the caller's countdown and this processor's poll deadline — and **the poller normally
+         * gets there first**, because it compares against the wall clock while a countdown of
+         * one-second `delay`s falls behind every time the tablet sleeps. Observed on the SM-T220,
+         * 2026-09-20: the abandonment row had never once been written, on either digital flow.
+         *
+         * False for every other failure, including `PAYMENT_NOT_CONFIRMED` — a payment the server
+         * has not seen yet is not an abandoned one.
+         */
+        val windowElapsed: Boolean = false,
     ) : PaymentResult()
 
     /**

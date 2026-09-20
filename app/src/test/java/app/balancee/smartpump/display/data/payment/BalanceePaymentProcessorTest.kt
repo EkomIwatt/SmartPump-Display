@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -598,6 +599,36 @@ class BalanceePaymentProcessorTest {
 
         assertTrue(results.last() is PaymentResult.Failed)
         assertEquals(0, service.statusCalls)
+    }
+
+    /**
+     * The elapsed window has to be **marked**, not inferred from the copy (#R10). Its caller writes
+     * `PAYMENT_ABANDONED` for this ending and for no other, and a declined card reaches it as the
+     * same recoverable `Failed`. Only this class knows which one it produced.
+     */
+    @Test
+    fun `an elapsed window is marked so its caller can record the abandonment`() = runTest {
+        service.statuses = listOf("PENDING_PAYMENT")
+
+        val results = processor
+            .resume(
+                "txn-already-live",
+                tender(500_000),
+                deadline = Instant.parse("2026-09-19T11:00:00Z"),   // an hour before the clock
+            )
+            .untilTerminal()
+
+        val failed = results.last() as PaymentResult.Failed
+        assertTrue("the caller cannot tell this from a refusal", failed.windowElapsed)
+        assertEquals("txn-already-live", failed.transactionRef)
+    }
+
+    /** And a refusal is not marked, or every failure would be logged as an abandoned sale. */
+    @Test
+    fun `a refusal is not an elapsed window`() = runTest {
+        val result = processor.process(tender(1)).first() as PaymentResult.Failed
+
+        assertFalse(result.windowElapsed)
     }
 
     /** A tender too small to buy a single step of fuel is refused here, not by the server. */

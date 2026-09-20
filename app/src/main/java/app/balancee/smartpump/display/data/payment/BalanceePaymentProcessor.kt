@@ -251,6 +251,10 @@ class BalanceePaymentProcessor @Inject constructor(
                                 "this transaction before treating it as unpaid.",
                         ),
                         transactionRef = transactionId,
+                        // **The one ending that is an abandonment**, and the caller writes the row
+                        // for it. Said here rather than inferred there: this is the only place that
+                        // knows the window ran out rather than the payment being refused.
+                        windowElapsed = true,
                     ),
                 )
                 return

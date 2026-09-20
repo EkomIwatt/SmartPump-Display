@@ -237,6 +237,89 @@ class CustomerViewModelLifecycleTest {
             assertTrue(harness.events.recorded.none { it.type == EventType.PAYMENT_ABANDONED })
         }
 
+    // ---- the other clock (#R10) -----------------------------------------------------------------
+
+    /**
+     * **The countdown is not normally the clock that ends a sale.** Two of them run off the same
+     * `expiresAt`: `expiryJob`, which counts one-second `delay`s, and the processor's poll loop,
+     * which compares against the wall clock every ten seconds. A tablet that dozes defers both, and
+     * on waking the poller fires at once while the countdown still owes its remaining ticks — so
+     * `onPaymentFailed` ends the sale, cancels the countdown, and until #R10 wrote nothing.
+     *
+     * Found on the SM-T220 on 2026-09-20, not in a test: a pre-pay QR left to expire produced the
+     * "stopped waiting" screen and **zero** `PAYMENT_ABANDONED` rows in the database — across the
+     * whole life of the app, both digital flows, including the 10g gate.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a prepay whose window elapses in the poller is still recorded as abandoned`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            vm.onStartTransaction()
+            vm.onModeTileTap(TransactionMode.PRE_PAY)
+            vm.onAmountTileTap(amountNaira = 5000)
+            vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+            vm.onModeConfirm()
+            val txnId = (state(vm) as TransactionState.PrepayAwaitingPayment).txnId
+
+            harness.payment.fail(reason = "the payment window elapsed", windowElapsed = true)
+            runCurrent()
+
+            val abandoned = harness.events.recorded.filter { it.type == EventType.PAYMENT_ABANDONED }
+            assertEquals("expected exactly one abandonment row", 1, abandoned.size)
+            assertEquals(txnId, abandoned.single().transactionRef)
+            assertTrue(
+                "the tendered amount never reached the row",
+                abandoned.single().detail.orEmpty().contains("5,000.00"),
+            )
+            // The screen the 10g copy was written for. Deliberately not Idle: it tells a customer
+            // who may have paid to see the attendant, which a blank idle screen does not.
+            assertTrue(state(vm) is TransactionState.Error)
+        }
+
+    /**
+     * The fill-up twin, with #R4's rule intact: the row carries the server's id and the cash
+     * fall-back keeps the pump's own.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a fill-up whose window elapses in the poller is recorded with the server's id`() =
+        runTest(mainRule.dispatcher) {
+            harness.payment.pendingRef = SERVER_TXN_ID
+            val vm = harness.build()
+            val localRef = fillupToUnpaidQr(vm)
+
+            harness.payment.fail(reason = "the payment window elapsed", windowElapsed = true)
+            runCurrent()
+
+            val abandoned = harness.events.recorded.single { it.type == EventType.PAYMENT_ABANDONED }
+            assertEquals(SERVER_TXN_ID, abandoned.transactionRef)
+            val cash = state(vm) as TransactionState.FillupAwaitingCashConfirm
+            assertEquals(localRef, cash.txnId)
+        }
+
+    /**
+     * A refusal is not an abandonment, and the copy cannot tell them apart — both arrive as a
+     * recoverable `Failed`. A declined card leaves nothing a customer could have paid into.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a declined payment is not recorded as abandoned`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            vm.onStartTransaction()
+            vm.onModeTileTap(TransactionMode.PRE_PAY)
+            vm.onAmountTileTap(amountNaira = 5000)
+            vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+            vm.onModeConfirm()
+
+            harness.payment.fail(reason = "the card was declined")
+            runCurrent()
+
+            assertTrue(harness.events.recorded.none { it.type == EventType.PAYMENT_ABANDONED })
+            assertTrue(state(vm) is TransactionState.Error)
+        }
+
     // ---- when the audit write itself fails (re-review finding #R5) ------------------------------
 
     /**
