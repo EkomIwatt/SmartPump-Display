@@ -329,7 +329,8 @@ class CustomerViewModel @Inject constructor(
                     amountDueKobo = restored.amountDueKobo,
                     startedAtEpochMs = restored.startedAtEpochMs,
                 )
-                startFillupDigitalExpiry(source)
+                // Restored, not re-granted — the same rule pre-pay follows two branches above.
+                startFillupDigitalExpiry(source, restored.expiresAtEpochMs?.let(Instant::ofEpochMilli))
                 resumeFillupDigitalPayment(source, restored)
             }
 
@@ -349,6 +350,7 @@ class CustomerViewModel @Inject constructor(
                             // restored state rather than being re-derived (10f).
                             paymentReference = restored.paymentReference,
                             startedAtEpochMs = restored.startedAtEpochMs,
+                            priceKoboPerLitre = restored.priceKoboPerLitre,
                         )
                     )
                 } else {
@@ -367,6 +369,7 @@ class CustomerViewModel @Inject constructor(
                             litres = litresFromBaseline(),
                             amountKobo = restored.cashAmountKobo,
                             method = null,
+                            priceKoboPerLitre = restored.priceKoboPerLitre,
                         )
                     )
                 } else {
@@ -797,6 +800,7 @@ class CustomerViewModel @Inject constructor(
                     // one, so an OQ #22 early end is reported honestly rather than not at all.
                     paymentReference = current.paymentReference,
                     startedAtEpochMs = current.startedAtEpochMs,
+                    priceKoboPerLitre = current.priceKoboPerLitre,
                 )
                 is TransactionState.CashFixedDispensing -> TransactionState.Complete(
                     flow = TransactionFlow.CASH_FIXED,
@@ -805,6 +809,7 @@ class CustomerViewModel @Inject constructor(
                     amountKobo = current.cashAmountKobo,
                     method = null,
                     litresTarget = current.litresCutoff,
+                    priceKoboPerLitre = current.priceKoboPerLitre,
                 )
                 else -> return@launch
             }
@@ -909,7 +914,7 @@ class CustomerViewModel @Inject constructor(
                 startedAtEpochMs = source.startedAtEpochMs,
             )
         )
-        startFillupDigitalExpiry(source)
+        startFillupDigitalExpiry(source, pending.expiresAt)
     }
 
     /**
@@ -937,10 +942,18 @@ class CustomerViewModel @Inject constructor(
                 // has always taken the id from the payment result; this path had its own.
                 txnId = success.transactionRef,
                 litres = source.verifiedLitres,
-                amountKobo = source.amountDueKobo,
+                // **What was charged, not what was quoted at the nozzle.** `source.amountDueKobo`
+                // is computed at shutoff from the *device's* price; the processor then re-fetches
+                // `/config` and quotes against the server's. The two diverge on a mid-sale
+                // re-price — the case this code already logs as PRICE_CHANGED_MID_SALE, saying
+                // "Displayed X, charged Y" and then storing X — and at any price whose payable
+                // litre step is coarser than the measured figure. The record and the receipt must
+                // say what Paystack collected.
+                amountKobo = success.amountKobo,
                 method = PaymentMethod.BANK_QR_TRANSFER,
                 paymentReference = success.paymentReference,
                 startedAtEpochMs = source.startedAtEpochMs,
+                priceKoboPerLitre = strikePrice(success.amountKobo, source.verifiedLitres),
             )
         )
     }
@@ -967,10 +980,24 @@ class CustomerViewModel @Inject constructor(
         )
     }
 
-    private fun startFillupDigitalExpiry(source: TransactionState.FillupTankFull) {
+    /**
+     * @param serverExpiry the deadline `/authorise` returned. **Null is a fallback, not a
+     *   default.** Until the 10g review this method ignored the server entirely and always gave
+     *   five minutes, while the processor polled to the real twenty — so a customer who scanned at
+     *   5:30 had the sale cancelled under them and the attendant asked for cash on a tank that was
+     *   about to be paid for by card. That is TODO #43, fixed for pre-pay in `startExpiryCountdown`
+     *   and left standing here.
+     */
+    private fun startFillupDigitalExpiry(
+        source: TransactionState.FillupTankFull,
+        serverExpiry: Instant? = null,
+    ) {
         expiryJob?.cancel()
         expiryJob = viewModelScope.launch {
-            var remaining = FILLUP_DIGITAL_EXPIRY_SECONDS
+            var remaining = serverExpiry
+                ?.let { Duration.between(Instant.now(), it).seconds.toInt() }
+                ?.coerceAtLeast(1)
+                ?: FILLUP_DIGITAL_EXPIRY_SECONDS
             _ui.update { it.copy(fillupDigitalExpiresInSeconds = remaining) }
             while (remaining > 0 && currentState() is TransactionState.FillupDigitalAwaitingPayment) {
                 delay(1_000L)
@@ -1004,6 +1031,9 @@ class CustomerViewModel @Inject constructor(
                     litres = current.verifiedLitres,
                     amountKobo = current.amountDueKobo,
                     method = null,
+                    // FillupAwaitingCashConfirm carries no price of its own, so it is recovered
+                    // from the two figures locked together at tank-full.
+                    priceKoboPerLitre = strikePrice(current.amountDueKobo, current.verifiedLitres),
                 )
             )
         }
@@ -1112,6 +1142,7 @@ class CustomerViewModel @Inject constructor(
                                         litres = litresCutoff,
                                         amountKobo = cashAmountKobo,
                                         method = null,
+                                        priceKoboPerLitre = current.priceKoboPerLitre,
                                     )
                                 )
                                 return@collect
@@ -1199,7 +1230,12 @@ class CustomerViewModel @Inject constructor(
         setState(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.USSD_OFFLINE,
-                txnId = txnId,
+                // The server's id, not `generateUssdRef`/`generateCashTxnId`'s local one. This is
+                // the same defect `ed77e00` fixed for Flow 3 and it was left standing here: the
+                // row carries a real `paymentReference`, so it *is* uploadable, and the upload
+                // quotes `record.id` — an id `/authorise` never issued. TRANSACTION_NOT_FOUND is
+                // terminal, so the dispense would be dropped permanently.
+                txnId = success.transactionRef,
                 priceKoboPerLitre = priceKoboPerLitre,
                 amountKobo = amountKobo,
                 litresAuthorised = litresAuthorised,
@@ -1355,7 +1391,12 @@ class CustomerViewModel @Inject constructor(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
                 txnId = success.transactionRef,
-                priceKoboPerLitre = priceKoboPerLitre,
+                // Derived from what the server settled, not from this class's display field.
+                // Carrying the price onto Complete (review finding 1) only helps if the state it
+                // is carried from holds the struck price — and this is where Flow 1's comes from,
+                // so reading the field here would leave the receipt exactly as wrong as before.
+                priceKoboPerLitre = strikePrice(success.amountKobo, litresAuthorised)
+                    ?: priceKoboPerLitre,
                 // What was collected, not what was asked for — this is the figure the audit row and
                 // the receipt carry.
                 amountKobo = success.amountKobo,
@@ -1397,6 +1438,13 @@ class CustomerViewModel @Inject constructor(
      * server will check the sale against — which is the only price a receipt should ever show.
      * Mirrors what [bootResume] already does for a restored fill-up.
      */
+    /**
+     * The price a settled sale was struck at: the amount actually charged over the litres it
+     * bought. Null when there are no litres to divide by.
+     */
+    private fun strikePrice(amountKobo: Long, litres: Double): Long? =
+        if (litres > 0) Math.round(amountKobo / litres) else null
+
     private fun PaymentResult.Pending.strikePriceKoboPerLitre(): Long? =
         if (litres > 0) Math.round(amountKobo / litres) else null
 
@@ -1463,6 +1511,7 @@ class CustomerViewModel @Inject constructor(
                                         method = method,
                                         paymentReference = current.paymentReference,
                                         startedAtEpochMs = current.startedAtEpochMs,
+                                        priceKoboPerLitre = current.priceKoboPerLitre,
                                     )
                                 )
                                 return@collect
@@ -1541,7 +1590,9 @@ class CustomerViewModel @Inject constructor(
         paymentMethod = method,
         litresDispensed = litres,
         amountKobo = amountKobo,
-        priceKoboPerLitre = priceKoboPerLitre,
+        // The struck price, same rule as toAuditRecord. This is the receipt a customer is handed
+        // when the saved row cannot be read back, so it is the last place that should be guessing.
+        priceKoboPerLitre = priceKoboPerLitre ?: this@CustomerViewModel.priceKoboPerLitre,
         transactionRef = txnId,
         attendantId = attendantId,
     )
@@ -1583,7 +1634,9 @@ class CustomerViewModel @Inject constructor(
             paymentMethod = method,
             litresDispensed = litres,
             amountKobo = amountKobo,
-            priceKoboPerLitre = priceKoboPerLitre,
+            // The sale's own struck price wins; the parameter is only the fallback for rows
+            // persisted before Complete carried one. See Complete.priceKoboPerLitre.
+            priceKoboPerLitre = this.priceKoboPerLitre ?: priceKoboPerLitre,
             transactionRef = txnId,
             attendantId = attendantId,
             attendantNote = litresTarget?.let { target ->

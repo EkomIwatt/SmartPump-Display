@@ -100,6 +100,56 @@ class CustomerViewModelUploadTest {
         assertEquals(SERVER_TXN_ID, harness.transactions.last!!.id)
     }
 
+    // ---- what the receipt says (review findings 1 and 2) ----------------------------------------
+
+    /**
+     * **The audit row's price must be the one the sale was struck at**, not the view model's
+     * display copy of `DeviceConfig`.
+     *
+     * 10g fixed the *state's* price and left `completeAndRecord` passing the field, so a receipt
+     * could still print a price the customer was never charged — price × litres ≠ amount, on a
+     * document the customer keeps. Here the device believes ₦1,000/L while the server settles
+     * 5 L for ₦7,450, i.e. ₦1,490/L.
+     */
+    @Test
+    fun `the record carries the struck price, not the device's stale one`() = runTest {
+        val vm = harness.build() // device price is TEST_KOBO_PER_LITRE (₦1,000/L)
+        vm.onStartTransaction()
+        vm.onModeTileTap(TransactionMode.PRE_PAY)
+        vm.onAmountTileTap(amountNaira = 7_450)
+        vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+        vm.onModeConfirm()
+        harness.payment.succeed(amountKobo = 745_000, litresAuthorised = 5.0)
+        harness.pulseSource.emitPulse(count = 500)
+
+        val record = harness.transactions.last!!
+        assertEquals("the receipt would not reconcile with its own amount", 149_000L, record.priceKoboPerLitre)
+        assertEquals(745_000L, record.amountKobo)
+    }
+
+    /**
+     * **Flow 3 must record what was charged, not what the nozzle quoted.**
+     *
+     * `amountDueKobo` is computed at shutoff from the device's price; the processor then quotes
+     * against the server's. They diverge on a mid-sale re-price — the case the code already logs
+     * as "Displayed X, charged Y" — and the row used to store X while Paystack collected Y.
+     */
+    @Test
+    fun `a fill-up records the amount the server charged, not the nozzle's quote`() = runTest {
+        val vm = harness.build()
+        vm.onAttendantFillUpAuthorise()
+        harness.pulseSource.emitPulse(count = 500) // 5.00 L → ₦5,000 at the device price
+        vm.onSimulateNozzleShutoff()
+        val quotedAtNozzle = (state(vm) as TransactionState.FillupTankFull).amountDueKobo
+        vm.onFillupPayDigital()
+        harness.payment.succeed(ref = SERVER_TXN_ID, amountKobo = 745_000) // re-priced by the server
+
+        val record = harness.transactions.last!!
+        assertEquals("the row said what the nozzle guessed, not what Paystack took", 745_000L, record.amountKobo)
+        assertNotEquals(quotedAtNozzle, record.amountKobo)
+        assertEquals(149_000L, record.priceKoboPerLitre)
+    }
+
     /** `createdAt` is when the sale finished. The upload needs the other end of the window too. */
     @Test
     fun `a digital sale records when fuel started flowing`() = runTest {

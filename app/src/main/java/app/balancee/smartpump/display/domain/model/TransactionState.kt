@@ -246,6 +246,20 @@ sealed class TransactionState {
         val paymentReference: String? = null,
         /** See [FixedDispensing.startedAtEpochMs]. */
         val startedAtEpochMs: Long? = null,
+        /**
+         * The price this sale was struck at, in kobo per litre — **the price that goes on the
+         * receipt**.
+         *
+         * Carried rather than looked up. `completeAndRecord` used to pass `CustomerViewModel`'s
+         * own `priceKoboPerLitre` field into the audit row, and that field is a *display* copy of
+         * whatever `DeviceConfig` held when the sale started. 10g fixed the state's price and left
+         * the record reading the field, so a receipt could still print a price the customer was
+         * never charged — the same defect through the one door that was not closed.
+         *
+         * Nullable and defaulted so rows persisted before it existed still decode; the view
+         * model's field stays the fallback for those.
+         */
+        val priceKoboPerLitre: Long? = null,
     ) : TransactionState()
 
     /**
