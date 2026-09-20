@@ -277,8 +277,29 @@ class FakeDeviceConfigRepository(
     ),
 ) : DeviceConfigRepository {
     var saveCount = 0; private set
-    override suspend fun getConfig(): DeviceConfig? = config
-    override suspend fun saveConfig(config: DeviceConfig) { saveCount++; this.config = config }
+
+    /**
+     * A database that cannot be read or written, as opposed to one holding nothing (#R6).
+     *
+     * The two are different answers and the code has to tell them apart: `null` means this pump
+     * has never been configured, and writing a fresh row over that is correct. A read that
+     * *threw* says nothing about what is stored, so writing over it would wipe whatever the
+     * operator had set.
+     */
+    var failReads = false
+    var failWrites = false
+
+    override suspend fun getConfig(): DeviceConfig? {
+        if (failReads) throw IllegalStateException("database is unreadable")
+        return config
+    }
+
+    override suspend fun saveConfig(config: DeviceConfig) {
+        if (failWrites) throw IllegalStateException("database is full")
+        saveCount++
+        this.config = config
+    }
+
     override fun observeConfig(): Flow<DeviceConfig?> = MutableStateFlow(config)
 }
 

@@ -388,6 +388,99 @@ class PumpConfigSyncTest {
 
         assertTrue(sync.fetch() is ApiResult.Failure)
     }
+
+    // ---- when the database itself fails (re-review #R6) --------------------------------
+
+    /**
+     * **`DeviceConfigSync.refresh` says failure "must never be an exception", and until #R6
+     * nothing upheld it.** `client.config()` was always safe — `safeApiCall` turns every failure
+     * into an `ApiResult` — but the write-through touches Room five times, and both callers are
+     * bare. The boot one is a `viewModelScope.launch { }` at construction, so this was an uncaught
+     * exception on *every* boot: a pump whose database had gone bad could not open the app, and a
+     * forecourt tablet that cannot open the app cannot take cash either.
+     */
+    @Test
+    fun `refresh does not throw when the store fails`() = runTest {
+        deviceConfig.failWrites = true
+
+        sync.refresh() // the assertion is that this line returns at all
+    }
+
+    /**
+     * A failure to *store* is not a failure to *fetch*. The response is what the sale is quoted
+     * and authorised against, so losing the cached copy costs the screen its fresh figure and
+     * costs the sale nothing — which is where the app stood before 10c-bis.
+     */
+    @Test
+    fun `a store that fails still hands the caller the server's price`() = runTest {
+        deviceConfig.config = DeviceConfig(koboPerLitre = 87_000, fuelType = FuelType.PETROL)
+        deviceConfig.failWrites = true
+
+        val synced = (sync.fetch() as ApiResult.Success).data
+
+        assertEquals(149_000L, synced.koboPerLitre)
+        assertTrue(synced.hasUsablePrice)
+    }
+
+    /**
+     * **An unreadable database is not an empty one.** `saveConfig` replaces the row, so treating a
+     * read that threw as "nothing stored" would build a fresh `DeviceConfig` and wipe the fields
+     * the sync does not own — the operator's station name and cutoff — on a transient Room error.
+     * Same rule as the adapter's pulse count on resume: unknown is not zero.
+     */
+    @Test
+    fun `a config read that fails writes nothing`() = runTest {
+        deviceConfig.failReads = true
+
+        sync.refresh()
+
+        assertEquals("the operator's row was overwritten from a failed read", 0, deviceConfig.saveCount)
+    }
+
+    /** With nothing read, there is no displaced price to claim — and so no mid-sale race either. */
+    @Test
+    fun `a config read that fails reports no previous price`() = runTest {
+        deviceConfig.failReads = true
+
+        val synced = (sync.fetch() as ApiResult.Success).data
+
+        assertNull(synced.previousKoboPerLitre)
+        assertFalse(synced.priceChanged)
+    }
+
+    /**
+     * A "price updated" line beside a price that was never stored is a lie in the one log an
+     * operator reads, and it would send someone looking for a change the pump never made.
+     */
+    @Test
+    fun `a price change that was not stored is not logged as one`() = runTest {
+        deviceConfig.config = DeviceConfig(koboPerLitre = 87_000, fuelType = FuelType.PETROL)
+        deviceConfig.failWrites = true
+
+        sync.refresh()
+
+        assertTrue(events.recorded.none { it.type == EventType.PRICE_SYNCED })
+    }
+
+    /**
+     * The refused-price dedupe exists to stop a row per attempted sale, not to stop the row ever
+     * appearing. A write that failed logged nothing, so the next sync is entitled to try again —
+     * otherwise one full-disk moment silences the only warning an operator gets that their pump
+     * has no price.
+     */
+    @Test
+    fun `a refused price whose row could not be written is logged on the next sync`() = runTest {
+        service.config = serverConfig.copy(pricePerUnit = 0)
+        events.failOn += EventType.PRICE_SYNC_REJECTED
+
+        sync.refresh()
+        assertTrue(events.recorded.none { it.type == EventType.PRICE_SYNC_REJECTED })
+
+        events.failOn.clear()
+        sync.refresh()
+
+        assertEquals(1, events.recorded.count { it.type == EventType.PRICE_SYNC_REJECTED })
+    }
 }
 
 private object FixedDeviceId : DeviceIdProvider {

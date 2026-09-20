@@ -7,9 +7,9 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 _Last updated: **2026-09-20**, end of day — 10g's gate passed, review #1 found 8 (all fixed), then
 the **re-review found 8 more**. Its finding 1 was the worst defect this branch has produced: a
-drifted clock condemned every queued dispense permanently. **Fixed, and #R4 and #R5 with it. 3 of
-the re-review's 8 remain — #R6 below, plus #R3/#R8 boarded as judgment calls.** Still
-**NOT merged**._
+drifted clock condemned every queued dispense permanently. **Fixed, and #R4, #R5 and #R6 with it.
+All six blocking findings are closed; only #R3/#R8 remain, boarded as judgment calls.** The merge
+decision (item 5) is now the next thing. Still **NOT merged**._
 
 ### ⛳ Start here next session — `feature/phase-10-payments`, 45 commits, green
 
@@ -87,9 +87,38 @@ the re-review's 8 remain — #R6 below, plus #R3/#R8 boarded as judgment calls.*
      - The rule both fixes now state in the code: **an audit line is worth less than the
        transition it precedes.** 498 tests / 48 classes green; all three new assertions confirmed
        to fail against the pre-fix files.
-   - [ ] **#R6 — `PumpConfigSync.writeThrough` can throw, against `refresh()`'s stated contract**
-     ("must never be an exception"), and `syncPriceOnBoot` calls it from a bare launch. **Partly
-     self-inflicted:** the `events.record` added in `202144e` this morning widened this surface.
+   - [x] ~~**#R6 — `PumpConfigSync.writeThrough` can throw, against `refresh()`'s stated
+     contract**~~ ✅ **FIXED 2026-09-20.** `client.config()` was always safe; `writeThrough`
+     touches Room five times and none of it was guarded. Both callers are bare — the boot sync is
+     a `viewModelScope.launch { }` at construction, so **a pump whose database had gone bad could
+     not open the app at all**, and a forecourt tablet that cannot open the app cannot take cash
+     either. The processor's call is the same throw inside a `flow { }`, which is #R5 one layer up,
+     on the path every sale takes.
+     - **A failure to store is not a failure to fetch.** The response is returned either way, so
+       the sale is still quoted and authorised at the server's price; what is lost is the cached
+       copy the screen reads — where the app stood before 10c-bis.
+     - **An unreadable database is not an empty one.** `saveConfig` replaces the row, so treating
+       a read that threw as "nothing stored" would build a fresh `DeviceConfig` and wipe the
+       operator's own fields. Nothing is written after a failed read. Same rule as the adapter's
+       pulse count on resume: unknown is not zero.
+     - **`PRICE_SYNCED` is written only if the row actually moved** — a "price updated" line
+       beside a price that was never stored is a lie in the one log an operator reads. And
+       `lastRejectedPrice` is marked only on a write that succeeded, so one full-disk moment
+       cannot permanently silence the no-price warning.
+     - **Sibling found by the test written for the fix: the `init` boot coroutine.** Same bare
+       launch, same constructor, unguarded `seedDefaultConfigIfMissing()` / `getConfig()` /
+       `bootResume()`. Contained; the relay-open assert is guarded separately and logged in its
+       own words, because a boot that cannot open the relay is a safety event and should not read
+       as a database problem. The test passed against the pre-fix file while leaking an uncaught
+       exception into the *next* test — rewritten until it fails in its own name.
+     - **A correction to the same day's #R5 work:** those two guards used `runCatching`, which
+       swallows `CancellationException`. `expiryJob` is cancelled the moment a payment succeeds,
+       and the coroutine may be suspended inside the write when it happens — the absorbed
+       cancellation would have let the following `setState(Idle)` wipe a sale just paid for. New
+       `runCatchingCancellable` (`domain/util/`) rethrows it, the shape `safeApiCall` has had
+       since the network layer was built. **#52** boards the rest of the app's `runCatching` uses.
+     - 505 tests / 48 classes green; all seven new assertions confirmed to fail against the
+       pre-fix files.
    - [·] **#R3 — `KEEP` discards an upload request for a sale completing during an in-flight
      drain.** Real, but the record is *delayed*, not lost: every new sale and every app launch
      re-requests. The finding is right that the code comment's reasoning is wrong — it only holds
@@ -104,6 +133,13 @@ the re-review's 8 remain — #R6 below, plus #R3/#R8 boarded as judgment calls.*
 5. **Tell Balancee about the orphan:** production holds
    `740e2af7-3573-45b1-a92b-813f2730ac93` **PAID with no dispense recorded** (the ₦149 fill-up that
    exposed finding #6 of the sitting). Local row `BLC-77819` is condemned.
+9. **#52 — `runCatching` on a coroutine path swallows cancellation.** Opened by #R6, which
+   introduced `runCatchingCancellable` and converted the three uses where an absorbed cancellation
+   changes control flow on a money path. **Twenty-odd others remain** across `CustomerViewModel`
+   (pulse persistence, the receipt read, the state-writer loop), `OnboardingViewModel`,
+   `ApiProbeViewModel` and `UsbSerialConnection`. Most are inert — a loop body, a read-then-return
+   — which is why they were not swept in with the fix. Worth one pass with the new helper, as a
+   change of its own, so the mix does not teach the next reader the wrong pattern.
 7. **#51 — a permanently-401 pump now retries forever with nothing in the log.** Opened by the
    R1 fix, and stated rather than hidden: `DISPENSE_UPLOAD_FAILED` is written only on a TERMINAL
    refusal, so a pump whose credentials are genuinely revoked keeps a full queue and says nothing

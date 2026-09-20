@@ -39,6 +39,7 @@ import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.EventRepository
+import app.balancee.smartpump.display.domain.util.runCatchingCancellable
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -103,6 +104,18 @@ class PumpConfigSync @Inject constructor(
      *
      * The store happens before this returns, so a caller that goes on to authorise is quoting
      * against a figure the screen is already showing.
+     *
+     * **Never throws**, which is [DeviceConfigSync.refresh]'s stated contract and, until the
+     * re-review (#R6), a claim nothing upheld. `client.config()` was always safe — `safeApiCall`
+     * turns every failure into an [ApiResult.Failure] — but [writeThrough] touches Room four
+     * times, and review #7's fix added a fifth. Both callers are bare: the boot sync is a
+     * `viewModelScope.launch { }` with no catch, so a pump with a full database could not open
+     * the app at all, and the processor's call sits inside a `flow { }` whose collector is
+     * another `viewModelScope` — the #R5 crash, one layer up, on the path every sale takes.
+     *
+     * A failure to *store* is not a failure to *fetch*. The response is returned either way, so a
+     * sale is still quoted and authorised at the server's price; what is lost is the cached copy
+     * the screen reads, which is where the app stood before 10c-bis.
      */
     suspend fun fetch(): ApiResult<SyncedConfig> =
         when (val result = client.config()) {
@@ -111,7 +124,17 @@ class PumpConfigSync @Inject constructor(
         }
 
     private suspend fun writeThrough(config: PumpConfigResponse): SyncedConfig {
-        val existing = deviceConfig.getConfig()
+        // **A read that failed is not a device with no config**, and the difference decides
+        // whether anything may be written at all. `saveConfig` replaces the row, so treating an
+        // unreadable database as "nothing stored" would build a fresh [DeviceConfig] and wipe the
+        // operator's own fields on a transient Room error. Same rule as the adapter's pulse count
+        // on resume: unknown is not zero.
+        val existing = runCatchingCancellable { deviceConfig.getConfig() }
+            .onFailure {
+                android.util.Log.e(TAG, "Could not read the stored config; nothing was written", it)
+            }
+            .getOrElse { return SyncedConfig(config = config, previousKoboPerLitre = null) }
+
         val synced = SyncedConfig(config = config, previousKoboPerLitre = existing?.koboPerLitre)
 
         // The name the backend holds wins, falling back to whatever this device had. See the
@@ -136,37 +159,49 @@ class PumpConfigSync @Inject constructor(
             return synced
         }
 
-        deviceConfig.saveConfig(
-            existing?.copy(
-                koboPerLitre = price,
-                fuelType = config.fuelType,
-                stationName = stationName ?: existing.stationName,
-                updatedAt = System.currentTimeMillis(),
-            ) ?: DeviceConfig(
-                // An activated pump that has never been configured by hand becomes sellable here,
-                // which is the point: a price change is meant to stop being a visit to every pump.
-                // Unless the backend had no price either, in which case this stores the 0 it
-                // already had by omission and `CanStartTransactionUseCase` keeps the pump shut.
-                koboPerLitre = price,
-                fuelType = config.fuelType,
-            ).let { fresh ->
-                // Only when the backend actually has a name — otherwise DeviceConfig's own
-                // default stands, and a blank is never written.
-                stationName?.let { fresh.copy(stationName = it) } ?: fresh
-            },
-        )
-
-        if (synced.priceChanged) {
-            events.record(
-                type = EventType.PRICE_SYNCED,
-                // "from the backend", not "from the operator". This is the /config path, and
-                // the operator's own edit records no event at all — so this is the only price
-                // event there is, and until 10g (2026-09-19) it credited the one party that
-                // cannot have made the change. It exists to tell an operator the price moved
-                // with nobody at the pump.
-                detail = "Price updated from the backend: " +
-                    "${formatNaira(synced.previousKoboPerLitre!!)} → ${formatNaira(synced.koboPerLitre)} per litre.",
+        val stored = runCatchingCancellable {
+            deviceConfig.saveConfig(
+                existing?.copy(
+                    koboPerLitre = price,
+                    fuelType = config.fuelType,
+                    stationName = stationName ?: existing.stationName,
+                    updatedAt = System.currentTimeMillis(),
+                ) ?: DeviceConfig(
+                    // An activated pump that has never been configured by hand becomes sellable
+                    // here, which is the point: a price change is meant to stop being a visit to
+                    // every pump. Unless the backend had no price either, in which case this
+                    // stores the 0 it already had by omission and `CanStartTransactionUseCase`
+                    // keeps the pump shut.
+                    koboPerLitre = price,
+                    fuelType = config.fuelType,
+                ).let { fresh ->
+                    // Only when the backend actually has a name — otherwise DeviceConfig's own
+                    // default stands, and a blank is never written.
+                    stationName?.let { fresh.copy(stationName = it) } ?: fresh
+                },
             )
+        }.onFailure {
+            android.util.Log.e(TAG, "Could not store the config fetched from the backend", it)
+        }.isSuccess
+
+        // **Only when the row actually moved.** A "price updated" line beside a price that was
+        // not stored is a lie in the one log an operator reads, and it would send someone looking
+        // for a change the pump never made.
+        if (stored && synced.priceChanged) {
+            runCatchingCancellable {
+                events.record(
+                    type = EventType.PRICE_SYNCED,
+                    // "from the backend", not "from the operator". This is the /config path, and
+                    // the operator's own edit records no event at all — so this is the only price
+                    // event there is, and until 10g (2026-09-19) it credited the one party that
+                    // cannot have made the change. It exists to tell an operator the price moved
+                    // with nobody at the pump.
+                    detail = "Price updated from the backend: " +
+                        "${formatNaira(synced.previousKoboPerLitre!!)} → ${formatNaira(synced.koboPerLitre)} per litre.",
+                )
+            }.onFailure {
+                android.util.Log.e(TAG, "The price moved but the row saying so was lost", it)
+            }
         }
         return synced
     }
@@ -186,23 +221,36 @@ class PumpConfigSync @Inject constructor(
             return
         }
         if (lastRejectedPrice == synced.koboPerLitre) return
-        lastRejectedPrice = synced.koboPerLitre
 
-        events.record(
-            type = EventType.PRICE_SYNC_REJECTED,
-            detail = "Balanceè reported no price for this pump (${synced.koboPerLitre} kobo/L), " +
-                "so it was ignored. " +
-                if (keptInstead != null && keptInstead > 0) {
-                    "The pump is still selling at ${formatNaira(keptInstead)} per litre; " +
-                        "card sales are refused until the station's price is set."
-                } else {
-                    "This pump has no price at all and cannot sell until one is set."
-                },
-        )
+        val recorded = runCatchingCancellable {
+            events.record(
+                type = EventType.PRICE_SYNC_REJECTED,
+                detail = "Balanceè reported no price for this pump (${synced.koboPerLitre} kobo/L), " +
+                    "so it was ignored. " +
+                    if (keptInstead != null && keptInstead > 0) {
+                        "The pump is still selling at ${formatNaira(keptInstead)} per litre; " +
+                            "card sales are refused until the station's price is set."
+                    } else {
+                        "This pump has no price at all and cannot sell until one is set."
+                    },
+            )
+        }.onFailure {
+            android.util.Log.e(TAG, "Could not record the refused price ${synced.koboPerLitre}", it)
+        }.isSuccess
+
+        // **Marked only once it has actually been written.** The dedupe exists to stop a row per
+        // attempted sale, not to stop the row ever appearing: a write that failed logged nothing,
+        // so the next sync is entitled to try again. Otherwise one full-disk moment silences the
+        // only warning an operator gets that their pump has no price.
+        if (recorded) lastRejectedPrice = synced.koboPerLitre
     }
 
     /** See [recordRejectedPriceIfNew]. Null means the last sync carried a usable price. */
     private var lastRejectedPrice: Long? = null
+
+    private companion object {
+        const val TAG = "PumpConfigSync"
+    }
 }
 
 /**

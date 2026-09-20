@@ -26,6 +26,7 @@ import app.balancee.smartpump.display.domain.model.quoteForDispensed
 import app.balancee.smartpump.display.domain.model.quoteForTender
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.EventRepository
+import app.balancee.smartpump.display.domain.util.runCatchingCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
@@ -345,7 +346,10 @@ class BalanceePaymentProcessor @Inject constructor(
         val detail = "Price changed during this fill-up: " +
             "${formatNaira(synced.previousKoboPerLitre!!)} → ${formatNaira(synced.koboPerLitre)} per litre. " +
             "Displayed ${formatNaira(request.amountKobo)}, charged ${formatNaira(quote.amountKobo)}."
-        runCatching {
+        // Cancellation is rethrown rather than swallowed: `paymentJob` is cancelled by a
+        // double-tap guard, a customer cancel and a boot resume, and a flow that absorbed it here
+        // would go on to emit a Pending into a collector that has gone away.
+        runCatchingCancellable {
             events.record(
                 type = EventType.PRICE_CHANGED_MID_SALE,
                 transactionRef = transactionRef,

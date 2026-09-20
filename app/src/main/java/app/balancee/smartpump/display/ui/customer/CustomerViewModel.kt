@@ -68,6 +68,7 @@ import app.balancee.smartpump.display.domain.repository.TransactionRepository
 import app.balancee.smartpump.display.domain.sync.TransactionUploadScheduler
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
+import app.balancee.smartpump.display.domain.util.runCatchingCancellable
 import app.balancee.smartpump.display.ui.util.buildReceiptText
 import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -250,16 +251,34 @@ class CustomerViewModel @Inject constructor(
             }
         }
         // Boot sequence: relay-open invariant, config seed, then state resume.
+        //
+        // **Nothing in here may escape**, and the reason is #R6's rather than this coroutine's own
+        // history: a bare `viewModelScope.launch` in a constructor turns any throw into an
+        // uncaught one on *every* boot, so a pump whose database has gone bad cannot open the app
+        // — and a forecourt tablet that cannot open the app cannot take cash either. The failure
+        // this guards is a Room read, which is exactly what `syncPriceOnBoot` beneath it guards;
+        // they are one defect in two coroutines and were found by one test.
         viewModelScope.launch {
-            // Spec invariant: relay must default OPEN on boot — assert it before re-deriving.
-            relay.stopFuelFlow()
-            seedDefaultConfigIfMissing()
-            deviceConfigRepository.getConfig()?.let { config ->
-                priceKoboPerLitre = config.koboPerLitre
-                _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
-            }
             try {
-                bootResume()
+                // Spec invariant: relay must default OPEN on boot — assert it before re-deriving.
+                // Guarded separately and logged in its own words: a boot that cannot put the relay
+                // open is a safety event and should not read as a database problem. Crashing would
+                // not open it either, and the firmware's dead-man watchdog is the real backstop.
+                runCatchingCancellable { relay.stopFuelFlow() }.onFailure {
+                    android.util.Log.e("CustomerVM", "Could not assert the relay-open invariant on boot", it)
+                }
+                runCatchingCancellable {
+                    seedDefaultConfigIfMissing()
+                    deviceConfigRepository.getConfig()?.let { config ->
+                        priceKoboPerLitre = config.koboPerLitre
+                        _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
+                    }
+                    bootResume()
+                }.onFailure {
+                    // Idle with the relay open is the safe resting place, and it is where the
+                    // state already is: nothing below `setState` has run.
+                    android.util.Log.e("CustomerVM", "Boot resume failed; the pump stays Idle", it)
+                }
             } finally {
                 // In a finally because a resume that threw must not strand the sync waiting on it:
                 // the idle screen would then hold a stale price with nothing on it to say why.
@@ -305,12 +324,21 @@ class CustomerViewModel @Inject constructor(
     private suspend fun syncPriceOnBoot() {
         // Issued first and awaited second, so the round trip overlaps the resume instead of
         // following it. Only the decision below waits. See [bootResumed].
+        //
+        // **Nothing here may throw** (re-review #R6). This runs on a bare `viewModelScope.launch`
+        // at construction, so an exception is an uncaught one on every single boot — a pump whose
+        // database has gone bad would not open the app at all, and a forecourt tablet that cannot
+        // open the app cannot take cash either. `refresh()` now honours its own never-throws
+        // contract; the read below is this function's own, and gets the same treatment.
         deviceConfigSync.refresh()
         bootResumed.await()
         if (!priceMayMoveFreely(_ui.value.state)) return
-        deviceConfigRepository.getConfig()?.let { config ->
-            priceKoboPerLitre = config.koboPerLitre
-            _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
+        val config = runCatchingCancellable { deviceConfigRepository.getConfig() }
+            .onFailure { android.util.Log.e("CustomerVM", "Could not re-read the synced price", it) }
+            .getOrNull()
+        config?.let {
+            priceKoboPerLitre = it.koboPerLitre
+            _ui.update { ui -> ui.copy(priceKoboPerLitre = priceKoboPerLitre) }
         }
     }
 
@@ -1571,7 +1599,11 @@ class CustomerViewModel @Inject constructor(
     private suspend fun recordAbandonedPayment(txnId: String, amountKobo: Long) {
         val detail = "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
             "The pump stopped watching; the checkout link may still be payable."
-        runCatching {
+        // [runCatchingCancellable], not `runCatching`, and the difference is load-bearing here:
+        // `expiryJob` is cancelled the instant a payment succeeds, and this coroutine may be
+        // suspended inside the write when that happens. A swallowed cancellation would let the
+        // `setState` after this call run anyway — wiping a sale that had just been paid for.
+        runCatchingCancellable {
             events.record(
                 type = EventType.PAYMENT_ABANDONED,
                 transactionRef = txnId,

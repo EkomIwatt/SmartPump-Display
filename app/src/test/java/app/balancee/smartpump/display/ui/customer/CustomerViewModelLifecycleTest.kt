@@ -284,4 +284,26 @@ class CustomerViewModelLifecycleTest {
                 state(vm) is TransactionState.FillupAwaitingCashConfirm,
             )
         }
+
+    /**
+     * **The boot sync runs on a bare `viewModelScope.launch`, so anything it throws is uncaught
+     * on every boot** (re-review #R6). A pump whose database had gone bad could not open the app
+     * — and a forecourt tablet that cannot open the app cannot take cash either, over a field
+     * only digital sales consult.
+     *
+     * The relay-open invariant is asserted here too, because it is what makes soldiering on the
+     * right answer rather than a hopeful one: the pump is safe before anything that can fail runs.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a database that cannot be read does not stop the app booting`() =
+        runTest(mainRule.dispatcher) {
+            harness.deviceConfig.failReads = true
+
+            val vm = harness.build()
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.Idle)
+            assertFalse("fuel could flow with no state restored", harness.relay.isDispensing.value)
+        }
 }
