@@ -71,6 +71,7 @@ import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
 import app.balancee.smartpump.display.ui.util.buildReceiptText
 import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -219,6 +220,24 @@ class CustomerViewModel @Inject constructor(
      */
     private val stateWriteChannel = Channel<TransactionState>(capacity = Channel.CONFLATED)
 
+    /**
+     * Completes once [bootResume] has dispatched whatever this tablet restored to (review #6).
+     *
+     * [syncPriceOnBoot] decides whether it may move the displayed price by asking what state the
+     * app is in. That question has no answer until the resume has dispatched one: `_ui.value.state`
+     * is `Idle` from construction, and `bootResume` reaches its first `setState` only after
+     * `reconcileGapOnResume`, which waits on the adapter for up to
+     * [ADAPTER_COUNT_TIMEOUT_MS]. A `/config` answering in a few hundred milliseconds therefore
+     * asked the guard its question before the guard could be right, got `Idle`, and moved the price
+     * under a pump that was about to restore a struck sale.
+     *
+     * **What is sequenced is applying the answer, not asking the server.** The fetch still goes out
+     * concurrently and overlaps the adapter wait, so the boot sequence — which holds the relay-open
+     * invariant and a possibly-live sale — still waits on nothing that a network can delay. That
+     * was the reason these were separate coroutines in the first place, and it is preserved.
+     */
+    private val bootResumed = CompletableDeferred<Unit>()
+
     init {
         // Serial writer coroutine — every setState() funnels its state in here.
         viewModelScope.launch {
@@ -239,11 +258,18 @@ class CustomerViewModel @Inject constructor(
                 priceKoboPerLitre = config.koboPerLitre
                 _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
             }
-            bootResume()
+            try {
+                bootResume()
+            } finally {
+                // In a finally because a resume that threw must not strand the sync waiting on it:
+                // the idle screen would then hold a stale price with nothing on it to say why.
+                bootResumed.complete(Unit)
+            }
         }
         // Price sync (10c-bis), on its own coroutine on purpose: it is a network call, and the boot
         // sequence above holds the relay-open invariant and a possibly-resumed live sale. Nothing
-        // that safety-critical waits on a server that may be unreachable.
+        // that safety-critical waits on a server that may be unreachable. The dependency runs the
+        // other way — see [bootResumed].
         viewModelScope.launch { syncPriceOnBoot() }
         // The queue's catch-up (10f). A sale that completed while the forecourt had no internet,
         // or while the tablet was off, is reported the next time the app opens — without this the
@@ -277,7 +303,10 @@ class CustomerViewModel @Inject constructor(
      * it has, which is the original guard's intent stated precisely rather than by proxy.
      */
     private suspend fun syncPriceOnBoot() {
+        // Issued first and awaited second, so the round trip overlaps the resume instead of
+        // following it. Only the decision below waits. See [bootResumed].
         deviceConfigSync.refresh()
+        bootResumed.await()
         if (!priceMayMoveFreely(_ui.value.state)) return
         deviceConfigRepository.getConfig()?.let { config ->
             priceKoboPerLitre = config.koboPerLitre

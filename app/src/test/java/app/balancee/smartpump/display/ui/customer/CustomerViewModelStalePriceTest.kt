@@ -28,6 +28,18 @@ class CustomerViewModelStalePriceTest {
     /** What production was really running on the day. */
     private val serverPrice = 149_000L
 
+    /** A live pre-pay dispense, struck at [TEST_KOBO_PER_LITRE] before the power cut. */
+    private val dispensing = TransactionState.FixedDispensing(
+        flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
+        txnId = "TXN-1",
+        amountKobo = 500_000,
+        litresAuthorised = 5.0,
+        litresSoFar = 1.0,
+        priceKoboPerLitre = TEST_KOBO_PER_LITRE,
+        method = PaymentMethod.BALANCEE_APP,
+        startedAtEpochMs = 1_700_000_000_000,
+    )
+
     // ---- the boot guard ------------------------------------------------------------
 
     /**
@@ -64,29 +76,98 @@ class CustomerViewModelStalePriceTest {
 
     /**
      * The half of the guard that must NOT be lost. A sale already quoted has struck its price and
-     * its litre target; moving the figure under a customer mid-dispense makes the screen disagree
-     * with the sale they are watching. Widening the guard to cover pre-sale states must not widen
-     * it to this one.
+     * its litre target; moving the figure under a customer mid-sale makes the screen disagree with
+     * the sale they are watching. Widening the guard to cover pre-sale states must not widen it to
+     * this one.
+     *
+     * **`holdAdapterCount` is what makes this test mean anything** (review #6). Without it the
+     * fakes resolve on the same tick, the resume finishes before the sync starts, and the guard is
+     * asked its question after the answer exists — which is not the order production runs in. See
+     * the test below for the order that matters.
      */
     @Test
     fun `a synced price does not move under a dispense in progress`() {
-        harness.pulseRepo.stateToRestore = TransactionState.FixedDispensing(
-            flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
-            txnId = "TXN-1",
-            amountKobo = 500_000,
-            litresAuthorised = 5.0,
-            litresSoFar = 1.0,
-            priceKoboPerLitre = TEST_KOBO_PER_LITRE,
-            method = PaymentMethod.BALANCEE_APP,
-            startedAtEpochMs = 1_700_000_000_000,
-        )
+        harness.pulseRepo.stateToRestore = dispensing
         harness.deviceConfigSync.priceToSync = serverPrice
+        harness.pulseSource.holdAdapterCount()
 
         val vm = harness.build()
+        harness.pulseSource.releaseAdapterCount()
 
         assertEquals(
             "the price moved under a customer already watching a dispense",
             TEST_KOBO_PER_LITRE,
+            vm.ui.value.priceKoboPerLitre,
+        )
+    }
+
+    /**
+     * Review #6, stated as the sequence rather than as the symptom.
+     *
+     * `bootResume` waits on the adapter for up to 3 s before it dispatches anything, so for that
+     * whole window `_ui.value.state` is the `Idle` the view model was constructed with. A `/config`
+     * answering in a few hundred milliseconds asked the guard its question before the guard could
+     * be right, was told the pump was idle, and moved the price under a struck sale.
+     *
+     * This asserts the price at the moment the sync would have applied it — while the resume is
+     * still held — so it fails on the race itself rather than on whatever survives afterwards.
+     */
+    @Test
+    fun `a sync that lands mid-resume does not move the price before the resume has answered`() {
+        harness.pulseRepo.stateToRestore = dispensing
+        harness.deviceConfigSync.priceToSync = serverPrice
+        harness.pulseSource.holdAdapterCount()
+
+        val vm = harness.build()
+
+        assertEquals(
+            "the price moved while the app still believed it was idle",
+            TEST_KOBO_PER_LITRE,
+            vm.ui.value.priceKoboPerLitre,
+        )
+
+        harness.pulseSource.releaseAdapterCount()
+        assertEquals(TEST_KOBO_PER_LITRE, vm.ui.value.priceKoboPerLitre)
+    }
+
+    /**
+     * The fix must not be "wait for the resume before asking", which would put a network round trip
+     * behind a 3 s adapter wait on every single boot. The fetch goes out concurrently and only the
+     * decision waits — so by the time the resume is released, the server has already been asked.
+     */
+    @Test
+    fun `the config fetch still overlaps the resume rather than queueing behind it`() {
+        harness.pulseRepo.stateToRestore = dispensing
+        harness.deviceConfigSync.priceToSync = serverPrice
+        harness.pulseSource.holdAdapterCount()
+
+        harness.build()
+
+        assertEquals(
+            "the fetch waited for the resume instead of overlapping it",
+            1,
+            harness.deviceConfigSync.refreshCount,
+        )
+    }
+
+    /**
+     * The other direction, and the one a fix like this is most likely to break: a pump that
+     * restores to a state with nothing struck must still take the price, even though the sync now
+     * waits for the resume before applying it.
+     */
+    @Test
+    fun `a sync held behind a slow resume still reaches an idle screen`() {
+        harness.pulseRepo.stateToRestore = TransactionState.ModeSelect()
+        harness.pulseRepo.anchorToRestore = 4_000L    // forces the adapter wait on a non-dispensing restore
+        harness.deviceConfigSync.priceToSync = serverPrice
+        harness.pulseSource.holdAdapterCount()
+
+        val vm = harness.build()
+        harness.pulseSource.releaseAdapterCount()
+
+        assertEquals(
+            "the sync was dropped rather than deferred",
+            serverPrice,
             vm.ui.value.priceKoboPerLitre,
         )
     }

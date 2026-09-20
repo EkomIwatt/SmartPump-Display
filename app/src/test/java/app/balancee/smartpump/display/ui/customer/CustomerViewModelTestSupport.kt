@@ -82,8 +82,27 @@ class FakePulseSource : PulseSource {
     /** How many times awaitAdapterCount() was called, and with what timeout. */
     val awaitCalls = mutableListOf<Long>()
 
+    /**
+     * Holds the boot resume inside its adapter wait — the window review #6 lives in.
+     *
+     * In production this wait is worth up to `ADAPTER_COUNT_TIMEOUT_MS` (3 s) and runs before
+     * `bootResume` has dispatched anything, so `_ui.value.state` is still `Idle`. The fake answered
+     * instantly, which meant every boot test saw the resume finish before the price sync started —
+     * the opposite order from the one that matters, and the reason a test could assert that a
+     * synced price does not move under a struck sale while proving nothing of the kind.
+     */
+    private var adapterGate: CompletableDeferred<Unit>? = null
+
+    fun holdAdapterCount() { adapterGate = CompletableDeferred() }
+
+    fun releaseAdapterCount() {
+        adapterGate?.complete(Unit)
+        adapterGate = null
+    }
+
     override suspend fun awaitAdapterCount(timeoutMs: Long): Long? {
         awaitCalls += timeoutMs
+        adapterGate?.await()
         return _adapterCount.value
     }
 
