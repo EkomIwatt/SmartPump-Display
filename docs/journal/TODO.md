@@ -5,40 +5,75 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-20**, end of day. **Round 3 closed #R4, #R5 and #R6 — every blocking
-review finding is fixed.** Branch `feature/phase-10-payments`, **50 commits**, pushed (`5b2731b`),
-**505 tests / 48 classes** green. **Still NOT merged.** What follows is a plan, not a list: do it in
-order. The completed findings are written up in `PROJECT_LOG.md` under **Phase 10h (round 3)**._
+_Last updated: **2026-09-20**, late. **Merge-gate step 2 (the scoped review) is done, and its one
+blocking finding — #R9 — is fixed (`802c1dc`).** Round 3's #R4/#R5/#R6 fixes all hold; #R9 was older
+than them, introduced by the 10g fix `8e0a15c`, and was invisible because the event fake never
+suspended. Branch `feature/phase-10-payments`, **52 commits**, **505 tests / 48 classes** green,
+`lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged — step 1,
+the tablet smoke test, is the only thing left before the merge.** What follows is a plan, not a
+list: do it in order._
 
 ### ⛳ Start here — the merge gate, in order
 
 > **Read this first.** Nothing below is a defect. The branch is green and every blocking finding is
-> closed, so the remaining risk is not "what is broken" but **"what did the fixes break"**. Two
+> closed, so the remaining risk is not "what is broken" but **"what did the fixes break"**. **Three**
 > defects on this branch were introduced by earlier fixes (`202144e` widened #R6; #R5's own guard
-> swallowed cancellation and was corrected six hours later in `5b2731b`). Steps 1 and 2 exist
-> because of that, and they are the reason not to merge straight away.
+> swallowed cancellation and was corrected six hours later in `5b2731b`; `8e0a15c` put a suspending
+> write behind a self-cancel, which is #R9). Steps 1 and 2 existed because of that — step 2 is done
+> and it found the third. Step 1 is what is left, and it is the reason not to merge straight away.
 
 1. [ ] **Tablet smoke test — the one thing that has never been run against this code.**
-   The 10g gate passed against a build that no longer exists: **six defect fixes ago**, and one of
-   them (#R6) rewrote the `init` boot coroutine that runs on *every* app start. Nothing since has
-   been on a device. This is not a re-run of the 8-step runbook — no production money is needed.
+   The 10g gate passed against a build that no longer exists: **seven defect fixes ago**, and one of
+   them (#R6) rewrote the `init` boot coroutine that runs on *every* app start. Another (#R9)
+   changed what happens when a pre-pay window closes unpaid. Nothing since has been on a device.
+   This is not a re-run of the 8-step runbook — no production money is needed.
    - Install `debugProd` on the SM-T220. Confirm it **opens** (that is the #R6 path).
    - One **cash** fill-up end to end. Cash needs no backend and is what a forecourt falls back to;
      if the boot path is wrong, this is where it shows.
    - One **digital** sale to the QR screen, then cancel. Confirms `/config` → `/authorise` still
      reaches a scannable page after the `PumpConfigSync` rewrite.
+   - **Let one pre-pay QR expire without paying** (#R9's path): the screen must return to Idle on
+     its own and the operator screen must show a `PAYMENT_ABANDONED` row carrying the id. Costs
+     nothing but waiting — the countdown runs on the server's `expiresAt`, so it is **twenty
+     minutes** on production. Start it, do the rest of the list, come back to it.
    - **Kill the app mid-dispense and reopen it.** `bootResume()` failures are now swallowed and
      logged instead of crashing — Idle-and-safe beats a crash loop, but it means a partial resume
      now fails *quietly*, and this is the only way to see that it does not.
    - Remember: **logcat is unusable on this tablet.** Read evidence off the screen and off the
      operator screen's event rows.
-2. [ ] **A review pass scoped to this round's fixes — not the whole branch again.**
+2. [x] **A review pass scoped to this round's fixes — DONE 2026-09-20. One blocking finding (#R9).**
    The whole branch has now been reviewed twice and the yield was concentrated in recently written
    code. A third whole-branch pass mostly re-reads code reviewed twice; what has **never** been
    reviewed is the six fixes themselves, which is exactly where the introduced-defect risk lives.
    Review the diff `e5a9823..5b2731b` plus the three review-#1 fixes (`202144e`, `c015bcf`,
    `28d8c03`). Ask of each: *does this guard change control flow when it fires, and is that change
    correct?*
+   **Result:** the six fixes themselves are sound — each guard was checked for what runs after it
+   fires. What the question found instead was the *sibling* of #R4 and #R5: the pre-pay expiry,
+   where the same two fixes were applied to the fill-up twin and the pre-pay half was left with a
+   defect neither fix could reach. See #R9.
+
+2a. [x] **#R9 — the pre-pay expiry cancelled its own coroutine, so it neither logged the
+   abandonment nor returned to Idle. FIXED 2026-09-20 (`802c1dc`).**
+   `startExpiryCountdown` runs inside `expiryJob`. On expiry it calls `cancelInFlightJobs()`, which
+   cancels `expiryJob` — itself — and only then calls the suspending `recordAbandonedPayment`,
+   followed by `setState(Idle)`. In a cancelled coroutine the next suspension point throws, and
+   `EventDao.insert` is a suspend Room DAO, so on a real device **neither the `PAYMENT_ABANDONED`
+   row nor the transition to Idle happens**: the pump sits on a dead QR screen at 0 s with a
+   checkout URL the backend still honours, and nothing written down to answer the customer who
+   pays it. Every abandoned pre-pay, since `8e0a15c` inserted the audit write between the
+   self-cancel and the transition — a defect *introduced by the 10g fix*, which is the same shape
+   as the two this branch already produced.
+   - **The fill-up twin is correct**: `startFillupDigitalExpiry` cancels `paymentJob` only, never
+     its own job, which is why its three tests pass and the pre-pay ones cannot fail.
+   - **The fix is the twin's shape**: the three other jobs are cancelled by name and `expiryJob`
+     is left alone — it is ending anyway.
+   - **The test harness was half the finding**, and is fixed with it. `FakeEventRepository.record`
+     now `yield()`s before doing anything, because `EventDao.insert` is a suspend Room DAO and a
+     fake that never suspends cannot observe a cancellation arriving at an audit write — the exact
+     class of defect #R5 was about. Done harness-first: with the `yield()` and without the fix,
+     three pre-pay tests fail, including #R5's own `a prepay still returns to Idle when the
+     abandonment row cannot be written`.
 3. [ ] **Merge to `main` and push.** Only after 1 and 2. Squash nothing — the commit messages are
    where the reasoning lives.
 4. [ ] **Then the improvements, as small branches off `main`** — see the next section. None of them
@@ -97,6 +132,12 @@ order. The completed findings are written up in `PROJECT_LOG.md` under **Phase 1
   test that passed for the wrong reason (it leaked an uncaught exception into the *next* test).
 - **Ask what runs after a guard you add.** Both defects introduced by fixes on this branch were
   guards that changed control flow when they fired.
+- **A coroutine that cancels itself stops at its next suspension point.** #R9 was a self-cancel with
+  a suspending Room write behind it, so everything after that line — including the transition that
+  ended the sale — silently did not happen. Before cancelling a job, ask whether it is *this* job.
+- **A fake that never suspends cannot see a cancellation.** Three tests were incapable of failing
+  until `FakeEventRepository` got one `yield()`. When the thing under test is coroutine-shaped, the
+  fake has to be too.
 - `lintDebug` and `assembleDebugProd` must be **separate** gradle invocations — together they race
   on generated Hilt sources and lint dies with an internal error that is not a code defect.
 - Wait for an explicit **"go"** before starting a new phase; commit per logical sub-deliverable.

@@ -1,6 +1,37 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-20, end of day (**all six blocking review findings are closed; the branch is ready for its merge gate**)
+## Current status — 2026-09-20, late (**the scoped review is done; its one finding is fixed, and the tablet is the last thing between this branch and `main`**)
+
+**Merge-gate step 2 is complete.** The review scoped to this round's six fixes found the six sound —
+each guard was checked for what runs after it fires — and found one blocking defect in their
+**sibling**: #R9, fixed in `802c1dc`. Branch `feature/phase-10-payments` is **52 commits**, **505
+tests / 48 classes** green, `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean.
+**Still NOT merged.**
+
+**#R9: the pre-pay expiry cancelled its own coroutine.** `startExpiryCountdown` runs inside
+`expiryJob` and called `cancelInFlightJobs()`, which cancels `expiryJob`. The next line is a
+suspending Room write, so the coroutine died there — **neither the `PAYMENT_ABANDONED` row nor the
+return to Idle ever happened on a real device**. Every abandoned pre-pay left the pump on a dead QR
+at zero seconds, polling stopped, with a checkout URL the backend still honours and nothing written
+down to answer the customer who pays it. That row exists for exactly one scenario and this was it.
+
+**It was introduced by a fix — the third on this branch.** `8e0a15c`, the 10g fix that added the
+audit write, inserted a suspension point between a self-cancel and a transition. The fill-up twin
+never had it, because it cancels the payment job and leaves its own alone. Same lesson as #R4 and
+#R5 one more time: **a defect fixed in one flow, left standing in its sibling.**
+
+**The harness was the other half, and is the more useful half.** `FakeEventRepository` returned
+without ever suspending, so nothing in 505 tests could observe a cancellation arriving at an audit
+write — the exact class of defect #R5 was about. One `yield()` makes three pre-pay tests fail
+against the pre-fix file, **including #R5's own**. A fake that cannot suspend cannot test a
+coroutine.
+
+**What is left is step 1: the tablet.** Nothing below it is a defect — #R3 and #R8 are boarded
+judgment calls, #50/#51/#52 improvements. See `TODO.md`.
+
+---
+
+## Previous status — 2026-09-20, end of day (**all six blocking review findings are closed; the branch is ready for its merge gate**)
 
 **Phase 10 is done, reviewed twice, and every blocking finding is fixed.** `feature/phase-10-payments`
 is **50 commits**, pushed (`5b2731b`), **505 JVM tests / 48 classes** green, `lintDebug`,
@@ -2497,3 +2528,62 @@ The **merge gate**, which is four steps and is written out in `TODO.md`: a table
 `init` boot path changed, and the 10g gate ran against a build that no longer exists), a review pass
 **scoped to this round's six fixes** rather than to the whole branch again, then merge, then the
 improvements (#R3, #R8, #50, #51, #52) as small branches off `main`.
+
+
+---
+
+### Phase 10h (round 4) — the scoped review, and the expiry that cancelled itself
+**Date:** 2026-09-20
+**Status:** done
+**Commit(s):** `802c1dc` (fix + harness); this board/log update
+
+**Summary (plain language):**
+Before merging, we re-read only the six fixes made in the last round — the newest code, which is
+where this branch's defects have kept coming from. The six were sound. What the pass found instead
+was in the half of the code those fixes did not touch: when a customer takes a pre-pay QR code and
+never pays, the pump was supposed to give up, write a line in the log saying so, and go back to its
+idle screen. On a real tablet it did neither. It sat on a dead QR code with the clock at zero, while
+the payment link stayed live — so a customer could still pay it, and nothing at the pump would know
+or have a record to check against. That is fixed, and the test harness that hid it is fixed with it.
+
+**Technical notes:**
+- **#R9 (`802c1dc`)** — `startExpiryCountdown` runs *inside* `expiryJob`, and on expiry called
+  `cancelInFlightJobs()`, which cancels `expiryJob`. In a cancelled coroutine the next suspension
+  point throws; the next call was `recordAbandonedPayment`, and `EventDao.insert` is a suspend Room
+  DAO. So the write threw, `setState(TransactionState.Idle)` after it never ran, and the
+  `CancellationException` unwound silently because the job was already cancelling. The three other
+  jobs are now cancelled by name and `expiryJob` is left alone — it is ending anyway.
+- **Introduced by `8e0a15c`**, the 10g fix that added the abandonment row: it inserted a suspension
+  point between a self-cancel and a transition. Third defect on this branch created by a fix, and
+  the question that catches all three is one question — *what runs after this, and is the coroutine
+  still alive to run it?*
+- **The pre-pay half of a pair, again.** #R4 and #R5 both landed on `startFillupDigitalExpiry`; the
+  twin's `cancelInFlightJobs()` was never questioned because its tests passed. Every other
+  `cancelInFlightJobs()` / `expiryJob.cancel()` call site was checked for the same shape: this was
+  the only self-cancel. `onPaymentFailed` cancels its own `paymentJob` too, but `setState` does not
+  suspend, so it survives — noted, not changed.
+- **`FakeEventRepository.record` now `yield()`s first.** It returned without ever suspending, so no
+  test in the suite could see a cancellation arrive at an audit write. Sequenced deliberately:
+  harness first, then confirm three pre-pay tests fail — `an abandoned prepay is recorded with the
+  transaction id it abandoned`, `prepay expiry auto-cancels an unpaid transaction back to Idle`, and
+  #R5's own `a prepay still returns to Idle when the abandonment row cannot be written` — then the
+  fix, then green. The fill-up twin's three passed throughout, which is what located the defect.
+- **Checked and left alone:** `PumpConfigSync`'s never-throws contract holds (all five Room touches
+  guarded, the read-failure early return correctly declines to write rather than wiping the
+  operator's fields, and its new tests were confirmed to fail against the pre-fix file);
+  `runCatchingCancellable`'s non-local return through `getOrElse` is sound; review #5's
+  `authoriseJob = paymentJob` assigned after `launch` cannot wedge the pump shut, because a
+  completed job is not `isActive`.
+- **One wording defect, not fixed:** the boot guard logs *"Boot resume failed; the pump stays
+  Idle"*, but `FixedDispensing`, `Complete` and `FillupDigitalAwaitingPayment` all `setState` before
+  later steps that can fail, and the guard does not cover throws inside the jobs `bootResume`
+  spawns. The sentence is narrower than the code. Left for whoever does step 1, since the tablet is
+  where that path gets exercised.
+- Verified: JVM **505 tests / 48 classes** green; `lintDebug`, `assembleDebugProd` and
+  `compileDebugRealHwKotlin` clean, in separate invocations.
+
+**Next:**
+Merge-gate **step 1, the tablet smoke test** — now with one more thing to watch: let a pre-pay QR
+expire unpaid and confirm the screen returns to Idle on its own and the operator log shows the
+abandonment row. Then merge, then the improvements (#R3, #R8, #50, #51, #52) as small branches off
+`main`.
