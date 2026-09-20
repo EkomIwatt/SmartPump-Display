@@ -5,11 +5,11 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-20**, later — 10g's gate PASSED over three sittings (₦548.32, three real
-sales), then a high-effort review found 8 more. **6 fixed, 2 open (#5/#6 below). The branch is NOT
-merged** and that is the next decision._
+_Last updated: **2026-09-20**, later still — 10g's gate PASSED over three sittings (₦548.32, three
+real sales), then a high-effort review found 8 more. **7 fixed, 1 open (#6 below). The branch is
+NOT merged** and that is the next decision._
 
-### ⛳ Start here next session — `feature/phase-10-payments`, 39 commits, green
+### ⛳ Start here next session — `feature/phase-10-payments`, 40 commits, green
 
 1. **Review finding #6 — `syncPriceOnBoot` races `bootResume`.** The guard reads `_ui.value.state`,
    which is `Idle` until `bootResume` dispatches, and `bootResume` first awaits
@@ -18,10 +18,16 @@ merged** and that is the next decision._
    means `a synced price does not move under a dispense in progress` passes only because the fake
    resolves synchronously** — the test asserts something production does not guarantee, which is
    worse than no test. Needs a sequencing decision, not a patch.
-2. **Review finding #5 — double-tap on fill-up pay → two `/authorise`.** State stays
-   `FillupTankFull` for the whole round trip and the only guard is a state check, so a second tap
-   cancels the first flow mid-request and starts another. Two `PENDING_PAYMENT` for one tank, the
-   first orphaned with a live checkout URL.
+2. ~~**Review finding #5 — double-tap on fill-up pay → two `/authorise`.**~~ ✅ **FIXED
+   2026-09-20** (`c015bcf`). `authoriseJob` holds the one window where the state has not moved yet;
+   a Job rather than a flag, so cancellation reopens the gate for free and no exit path can wedge
+   the pump shut. **Flow 1 had the same defect** — `onFillupPayDigital`'s own comment says it
+   mirrors pre-pay, and pre-pay holds `ModeSelect` open for the same reason — so both are fixed.
+   USSD is unaffected (it moves its state before launching). 477 tests / 48 classes green; the 5
+   new double-tap assertions were confirmed to fail against the pre-fix file.
+   - **Test-fake defect fixed with it:** `FakePaymentProcessor` emitted `Pending` on the same tick,
+     so no test could sit in the window the defect lives in. `holdAuthorise()` opens it, and counts
+     entries rather than emissions.
 3. ~~**Review finding #7 — `pricePerUnit: 0` from `/config` kills the app.**~~ ✅ **FIXED
    2026-09-20** (`202144e`). Screened at the boundary rather than at the caller that crashed:
    `SyncedConfig.hasUsablePrice`, read by the sync (which no longer writes a 0 through — that
