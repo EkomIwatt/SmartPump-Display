@@ -7,8 +7,9 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 _Last updated: **2026-09-20**, end of day — 10g's gate passed, review #1 found 8 (all fixed), then
 the **re-review found 8 more**. Its finding 1 was the worst defect this branch has produced: a
-drifted clock condemned every queued dispense permanently. **Fixed. 5 of the re-review's 8 remain
-— #R4/#R5/#R6 below, plus #R3/#R8 boarded as judgment calls.** Still **NOT merged**._
+drifted clock condemned every queued dispense permanently. **Fixed, and #R4 with it. 4 of the
+re-review's 8 remain — #R5/#R6 below, plus #R3/#R8 boarded as judgment calls.** Still
+**NOT merged**._
 
 ### ⛳ Start here next session — `feature/phase-10-payments`, 45 commits, green
 
@@ -52,11 +53,22 @@ drifted clock condemned every queued dispense permanently. **Fixed. 5 of the re-
      their field to set, and item 6 below is the channel for it.
 4. **The re-review ran (`/code-review high main`, whole branch) and found 8.** Verified against
    the code rather than taken on trust; 7 of 8 held up. **R1+R2 are FIXED** (`e26246e`); the rest:
-   - [ ] **#R4 — the fill-up abandon logs an id the backend never issued.**
-     `CustomerViewModel:1086` passes `source.txnId`, the local `BLC-NNNNN`; the pre-pay twin at
-     `:1562` correctly passes the server's. **This is the same defect as `ed77e00`**, which fixed
-     it for `Complete.txnId` in this very flow and left the expiry path alone. The amount logged is
-     the pre-quote device-priced figure too.
+   - [x] ~~**#R4 — the fill-up abandon logs an id the backend never issued.**~~ ✅ **FIXED
+     2026-09-20.** `startFillupDigitalExpiry` now reads the live
+     `FillupDigitalAwaitingPayment` — which carries the server's id and the processor's amount —
+     instead of the `FillupTankFull` it was launched from, exactly as the pre-pay twin does. The
+     third appearance of one defect: `ed77e00` fixed it for `Complete.txnId` in this same flow
+     and left the expiry path standing.
+     - **The cash fall-back deliberately still reads `source`**, and the asymmetry is now stated
+       in the code and pinned by a test: what is owed in cash is the tank's litres at the pump's
+       own price — the same figure Flow 2 collects for the same tank — and the row it settles
+       into is a cash sale, which nothing authorised and nothing uploads.
+     - **Siblings checked:** `recordAbandonedPayment` has exactly two callers and the pre-pay one
+       was already right. USSD has no expiry path (its cancel gap is #R8). `txnRefFor`'s KDoc
+       claimed every state carries a `BLC-NNNNN` — untrue since 10g for everything downstream of
+       an `/authorise`, and corrected, because that sentence is how this defect keeps recurring.
+     - 495 tests / 48 classes green; the two defect assertions were confirmed to fail against the
+       pre-fix file, and the two pinning assertions pass either way by design.
    - [ ] **#R5 — `recordPriceRaceIfAny` writes to Room before `Pending` is emitted**, unguarded.
      On a full database the sale is already payable on the server, no QR ever appears, and the
      throw escapes `flow { }` into `viewModelScope`. Same mechanism as the `pricePerUnit: 0` crash

@@ -593,7 +593,14 @@ class CustomerViewModel @Inject constructor(
         TransactionFlow.FILLUP_DIGITAL -> PaymentMethod.BANK_QR_TRANSFER
     }
 
-    /** Returns the txn ref (BLC-NNNNN) embedded in the state, or null for stateless variants. */
+    /**
+     * Returns the transaction ref embedded in the state, or null for stateless variants.
+     *
+     * **Not always a `BLC-NNNNN`.** Cash and pre-authorise states carry the one
+     * [generateCashTxnId] minted; every state downstream of an `/authorise` carries the id the
+     * server issued instead. Callers use it to tie pulses to whatever sale is in flight, which
+     * holds either way — but do not read it as "the local reference".
+     */
     private fun txnRefFor(state: TransactionState): String? = when (state) {
         is TransactionState.PrepayAwaitingPayment -> state.txnId
         is TransactionState.UssdAwaitingSms -> state.txnId
@@ -1078,13 +1085,35 @@ class CustomerViewModel @Inject constructor(
                 remaining -= 1
                 _ui.update { it.copy(fillupDigitalExpiresInSeconds = remaining) }
             }
-            if (remaining <= 0 && currentState() is TransactionState.FillupDigitalAwaitingPayment) {
+            // **Read the live state, not [source].** `source` is the FillupTankFull this sale
+            // started from, and its `txnId` is the local `BLC-…` reference minted at
+            // attendant-authorise — an id no `/authorise` ever issued. The abandonment row exists
+            // so that a customer who pays after the pump stops watching can be answered, and an
+            // id the backend has never heard of answers nothing. The state the countdown is
+            // watching carries the server's id, put there by [onFillupDigitalPending], which is
+            // exactly what the pre-pay twin in [startExpiryCountdown] reads.
+            //
+            // This is the third appearance of one defect: `ed77e00` fixed it for `Complete.txnId`
+            // in this same flow after the 10g gate caught it on a real sale, and left the expiry
+            // path standing.
+            val abandoned = currentState() as? TransactionState.FillupDigitalAwaitingPayment
+            if (remaining <= 0 && abandoned != null) {
                 paymentJob?.cancel()
                 // The fall-back to cash is visible to an attendant, unlike the pre-pay one — but
                 // the checkout page is just as live, so a customer who pays digitally a moment
                 // later can be asked for cash as well. The log is what makes that answerable.
-                recordAbandonedPayment(source.txnId, source.amountDueKobo)
+                //
+                // `abandoned.amountDueKobo` for the same reason: it is the processor's figure,
+                // which is what the still-live checkout page will charge. `source.amountDueKobo`
+                // is the device-priced quote struck at shutoff, and the two diverge on a mid-sale
+                // re-price and at any payable litre step coarser than the metered figure.
+                recordAbandonedPayment(abandoned.txnId, abandoned.amountDueKobo)
                 setState(
+                    // The cash fall-back keeps **`source`** on purpose, and the asymmetry is the
+                    // point. What is owed in cash is the tank's litres at the pump's own price —
+                    // the same figure Flow 2 collects for the same tank — and the record it
+                    // settles into is a cash sale, which nothing authorised and nothing uploads.
+                    // The server's id belongs to a transaction that was never paid.
                     TransactionState.FillupAwaitingCashConfirm(
                         txnId = source.txnId,
                         verifiedLitres = source.verifiedLitres,

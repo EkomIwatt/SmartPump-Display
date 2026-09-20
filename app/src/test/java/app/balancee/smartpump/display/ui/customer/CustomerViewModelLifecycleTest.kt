@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -116,6 +117,117 @@ class CustomerViewModelLifecycleTest {
             vm.onAmountTileTap(amountNaira = 5000)
             vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
             vm.onModeConfirm()
+            harness.payment.succeed()
+            runCurrent()
+
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            assertTrue(harness.events.recorded.none { it.type == EventType.PAYMENT_ABANDONED })
+        }
+
+    // ---- the fill-up twin (re-review finding #R4) -----------------------------------------------
+
+    /** Deliberately unlike the `BLC-…` shape this pump mints for itself. */
+    private val SERVER_TXN_ID = "740e2af7-3573-45b1-a92b-813f2730ac93"
+
+    /** Fill up 0.10 L, take the QR, and stop short of paying. Returns the local `BLC-…` ref. */
+    private fun fillupToUnpaidQr(vm: CustomerViewModel): String {
+        vm.onAttendantFillUpAuthorise()
+        harness.pulseSource.emitPulse(count = 10) // 0.10 L, as the 10g gate ran it
+        vm.onSimulateNozzleShutoff()
+        val localRef = (state(vm) as TransactionState.FillupTankFull).txnId
+        vm.onFillupPayDigital()
+        assertTrue(state(vm) is TransactionState.FillupDigitalAwaitingPayment)
+        return localRef
+    }
+
+    /**
+     * **The same defect as `ed77e00`, one path over.** That commit fixed `Complete.txnId` for this
+     * flow after the 10g gate caught it on a real ₦149 sale; the expiry path kept passing the
+     * `FillupTankFull` it started from, whose `txnId` is the local `BLC-…` minted at
+     * attendant-authorise — an id no `/authorise` ever issued.
+     *
+     * It matters here for the reason the pre-pay assertion above gives: the backend does not close
+     * the transaction when `expiresAt` passes (observed on production, 3m16s past it), so the
+     * checkout page stays payable after the pump has stopped watching. The row exists to answer a
+     * customer who paid into that window, and an invented id answers nothing.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `an abandoned fill-up is recorded with the server's id, not the one this pump minted`() =
+        runTest(mainRule.dispatcher) {
+            harness.payment.pendingRef = SERVER_TXN_ID
+            val vm = harness.build()
+            val localRef = fillupToUnpaidQr(vm)
+
+            advanceTimeBy(301_000) // FILLUP_DIGITAL_EXPIRY_SECONDS (300s) + 1s
+            runCurrent()
+
+            val abandoned = harness.events.recorded.filter { it.type == EventType.PAYMENT_ABANDONED }
+            assertEquals("expected exactly one abandonment row", 1, abandoned.size)
+            assertEquals(SERVER_TXN_ID, abandoned.single().transactionRef)
+            assertNotEquals(
+                "the pump's own reference reached the abandonment row",
+                localRef,
+                abandoned.single().transactionRef,
+            )
+        }
+
+    /**
+     * The figure logged has to be the one the still-live checkout page will charge, not the quote
+     * struck at the nozzle from the device's own price. They diverge on a mid-sale re-price and at
+     * any payable litre step coarser than the metered figure — and it is the server's number a
+     * customer would be holding a receipt for.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `an abandoned fill-up logs what the checkout page charges, not the shutoff quote`() =
+        runTest(mainRule.dispatcher) {
+            harness.payment.pendingAmountKobo = 12_345L // ≠ 0.10 L × ₦1,000/L = ₦100.00
+            val vm = harness.build()
+            fillupToUnpaidQr(vm)
+
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            val detail = harness.events.recorded.single {
+                it.type == EventType.PAYMENT_ABANDONED
+            }.detail.orEmpty()
+            assertTrue("logged the shutoff quote instead: $detail", detail.contains("123.45"))
+        }
+
+    /**
+     * The other half of the same edit, pinned because it is an asymmetry and not an oversight: the
+     * cash fall-back keeps the **local** id and the **device's** figure. What is owed in cash is
+     * the tank's litres at the pump's own price — the same figure Flow 2 collects for the same
+     * tank — and the row it settles into is a cash sale, which nothing authorised and nothing
+     * uploads. The server's id belongs to a transaction that was never paid.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `the cash fall-back after expiry keeps the local ref and the pump's own amount`() =
+        runTest(mainRule.dispatcher) {
+            harness.payment.pendingRef = SERVER_TXN_ID
+            harness.payment.pendingAmountKobo = 12_345L
+            val vm = harness.build()
+            val localRef = fillupToUnpaidQr(vm)
+
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            val cash = state(vm) as TransactionState.FillupAwaitingCashConfirm
+            assertEquals(localRef, cash.txnId)
+            assertEquals(10_000L, cash.amountDueKobo) // 0.10 L × ₦1,000/L
+        }
+
+    /** A fill-up that is paid must not also be logged as abandoned. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a paid fill-up is never recorded as abandoned`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            fillupToUnpaidQr(vm)
             harness.payment.succeed()
             runCurrent()
 
