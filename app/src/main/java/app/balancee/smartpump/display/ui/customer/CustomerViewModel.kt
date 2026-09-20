@@ -1630,7 +1630,19 @@ class CustomerViewModel @Inject constructor(
             }
             val abandoned = currentState() as? TransactionState.PrepayAwaitingPayment
             if (remaining <= 0 && abandoned != null) {
-                cancelInFlightJobs()
+                // **Not [cancelInFlightJobs], which cancels `expiryJob` — this coroutine** (#R9).
+                // Once this job is cancelled the next suspension point throws, and the very next
+                // call is a suspending Room write: neither the abandonment row nor the
+                // `setState` below survived it. The pump was left on a dead QR at zero with a
+                // checkout URL the backend still honours and nothing written down to answer the
+                // customer who paid it — the one thing `PAYMENT_ABANDONED` exists to prevent.
+                //
+                // The fill-up twin in [startFillupDigitalExpiry] never had this: it cancels the
+                // payment job and leaves its own alone. The jobs are named individually here for
+                // the same reason — `expiryJob` is ending on its own and must not be told to.
+                paymentJob?.cancel()
+                dispenseJob?.cancel()
+                fillupWatchdogJob?.cancel()
                 recordAbandonedPayment(abandoned.txnId, abandoned.amountKobo)
                 setState(TransactionState.Idle)
             }

@@ -48,6 +48,7 @@ import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.yield
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 
@@ -380,12 +381,23 @@ class FakeEventRepository : EventRepository {
      */
     val failOn = mutableSetOf<EventType>()
 
+    /**
+     * **Suspends before it does anything**, which is the whole point of the `yield` (#R9).
+     *
+     * `EventDao.insert` is a suspend Room DAO, so in production this call reaches a suspension
+     * point and a coroutine that has been cancelled throws there rather than writing. A fake that
+     * returns without ever suspending cannot observe that, so a caller which cancelled its own job
+     * a line earlier passed every test and lost both the row and the transition on a real device.
+     * Three pre-pay tests — including #R5's own — only became capable of failing once this line
+     * existed.
+     */
     override suspend fun record(
         type: EventType,
         pulses: Int?,
         transactionRef: String?,
         detail: String?,
     ) {
+        yield()
         if (type in failOn) throw IllegalStateException("database is full")
         recorded += Recorded(type, pulses, transactionRef, detail)
     }
