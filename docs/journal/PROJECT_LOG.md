@@ -39,15 +39,16 @@ fixes.
 but the tile was live, and tapping it called the real processor, created a genuine Paystack
 transaction, and waited for an SMS on a SIM that is not provisioned. Handled exactly as NFC was.
 
-**Branch state:** `feature/phase-10-payments`, **41 commits**, working tree clean, JVM
-**477 tests / 48 classes** green, `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin`
+**Branch state:** `feature/phase-10-payments`, **44 commits**, working tree clean, JVM
+**480 tests / 48 classes** green, `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin`
 clean. (Run `lintDebug` and `assembleDebugProd` in **separate** invocations — together they race on
-generated Hilt sources.) **Not merged.** Review finding **6 is the last one open**. **#7 was fixed
-2026-09-20** (`202144e`), at the boundary rather than at the caller that crashed, because a
-`/config` price of 0 was also being written through and would have stopped *cash* sales; **#5 was
-fixed the same day** (`c015bcf`), in **both** digital flows rather than only the fill-up the review
-named. #6 still means one test in `CustomerViewModelStalePriceTest` passes for a reason that does
-not hold in production.
+generated Hilt sources.) **Not merged, and the re-review is what stands between it and `main`.**
+**All eight review findings are now closed** — #7 (`202144e`), #5 (`c015bcf`) and #6 (`28d8c03`)
+were fixed 2026-09-20. Two of the three were fixed in **two** places rather than the one the
+review named: the `/config` zero price was being written through as well as crashing the quote,
+and the double-tap was in pre-pay as well as the fill-up. #6's test half was the real finding —
+`a synced price does not move under a dispense in progress` passed because every fake resolved on
+the same tick, asserting a guarantee the code did not make.
 
 ---
 
