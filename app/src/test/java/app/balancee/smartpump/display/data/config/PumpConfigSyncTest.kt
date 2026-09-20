@@ -228,6 +228,119 @@ class PumpConfigSyncTest {
         assertTrue(events.recorded.isEmpty())
     }
 
+    // ---- a backend with no price (review #7) ---------------------------------------
+
+    /**
+     * The defect this section exists for. `pricePerUnit` is a non-null `Long`, so a station whose
+     * price has never been set does not fail to parse — it arrives as **0** and every layer above
+     * treated it as a price. Storing it wiped the last figure the pump knew, which stops *cash*
+     * sales: a flow that consults no backend at all, broken by a field only card sales read.
+     */
+    @Test
+    fun `a zero price from the backend does not overwrite the price the pump knows`() = runTest {
+        service.config = serverConfig.copy(pricePerUnit = 0)
+        deviceConfig.config = DeviceConfig(koboPerLitre = 149_000, fuelType = FuelType.PETROL)
+
+        sync.refresh()
+
+        assertEquals(149_000L, deviceConfig.config?.koboPerLitre)
+    }
+
+    /** Discarding the figure is not discarding the response — the rest of it is still true. */
+    @Test
+    fun `a zero price still lets the rest of the config through`() = runTest {
+        service.config = serverConfig.copy(pricePerUnit = 0)
+        deviceConfig.config = DeviceConfig(
+            stationName = "Total Lekki Ph2",
+            koboPerLitre = 149_000,
+            fuelType = FuelType.DIESEL,
+        )
+
+        sync.refresh()
+
+        assertEquals("Kachi", deviceConfig.config?.stationName)
+        assertEquals(FuelType.PETROL, deviceConfig.config?.fuelType)
+        assertEquals(149_000L, deviceConfig.config?.koboPerLitre)
+    }
+
+    /** ₦1,490 → ₦0 is not a price change. Logging it as one would be logging a change that was refused. */
+    @Test
+    fun `a zero price is not logged as a price change`() = runTest {
+        service.config = serverConfig.copy(pricePerUnit = 0)
+        deviceConfig.config = DeviceConfig(koboPerLitre = 149_000, fuelType = FuelType.PETROL)
+
+        sync.refresh()
+
+        assertTrue(events.recorded.none { it.type == EventType.PRICE_SYNCED })
+    }
+
+    /**
+     * It is logged as its own thing, though. An operator whose card sales have stopped needs the
+     * log to name the one call that explains it, and to say the pump is still selling for cash.
+     */
+    @Test
+    fun `a refused price is logged, naming the price the pump kept`() = runTest {
+        service.config = serverConfig.copy(pricePerUnit = 0)
+        deviceConfig.config = DeviceConfig(koboPerLitre = 149_000, fuelType = FuelType.PETROL)
+
+        sync.refresh()
+
+        val entry = events.recorded.single()
+        assertEquals(EventType.PRICE_SYNC_REJECTED, entry.type)
+        assertTrue(entry.detail!!.contains("₦1,490.00"))
+    }
+
+    /**
+     * `/config` is fetched before **every** authorise, so a row per fetch would bury everything
+     * else in the log by the end of a shift. Once per rejected figure per app run is the budget.
+     */
+    @Test
+    fun `a backend with no price is logged once, not once per sale`() = runTest {
+        service.config = serverConfig.copy(pricePerUnit = 0)
+        deviceConfig.config = DeviceConfig(koboPerLitre = 149_000, fuelType = FuelType.PETROL)
+
+        repeat(5) { sync.refresh() }
+
+        assertEquals(1, events.recorded.count { it.type == EventType.PRICE_SYNC_REJECTED })
+    }
+
+    /** A price that comes back is news again, so the next gap is logged rather than swallowed. */
+    @Test
+    fun `a price that returns and lapses again is logged twice`() = runTest {
+        deviceConfig.config = DeviceConfig(koboPerLitre = 149_000, fuelType = FuelType.PETROL)
+
+        service.config = serverConfig.copy(pricePerUnit = 0)
+        sync.refresh()
+        service.config = serverConfig
+        sync.refresh()
+        service.config = serverConfig.copy(pricePerUnit = 0)
+        sync.refresh()
+
+        assertEquals(2, events.recorded.count { it.type == EventType.PRICE_SYNC_REJECTED })
+    }
+
+    /** A pump with nothing to keep says so, and stays shut — the guard reads 0 as Missing.PRICE. */
+    @Test
+    fun `an unconfigured pump given no price is left unsellable`() = runTest {
+        service.config = serverConfig.copy(pricePerUnit = 0)
+
+        sync.refresh()
+
+        assertEquals(0L, deviceConfig.config?.koboPerLitre)
+        assertTrue(events.recorded.single().detail!!.contains("no price at all"))
+    }
+
+    /** The flag the payment path reads, so a caller never has to rediscover the arithmetic. */
+    @Test
+    fun `fetch reports a zero price as unusable`() = runTest {
+        service.config = serverConfig.copy(pricePerUnit = 0)
+
+        val synced = (sync.fetch() as ApiResult.Success).data
+
+        assertFalse(synced.hasUsablePrice)
+        assertFalse(synced.priceChanged)
+    }
+
     // ---- when the server cannot be reached -----------------------------------------
 
     /**

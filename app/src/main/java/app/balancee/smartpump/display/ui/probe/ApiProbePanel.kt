@@ -375,6 +375,9 @@ private fun PrecisionLine(state: ApiProbeUiState) {
     val config = state.config ?: return
     val litres = state.litresValue ?: return
     val koboPerLitre = config.pricePerUnit * 100
+    // The same zero the payment path screens (review #7) — here it would be an ArithmeticException
+    // out of a @Composable, taking the probe panel down with the one reading that explains it.
+    if (koboPerLitre <= 0) return
     val tendered = tenderedFor(litres, koboPerLitre)
     val coarse = precisionQuote(tendered, koboPerLitre, scale = 2)
     val fine = precisionQuote(tendered, koboPerLitre, scale = 4)

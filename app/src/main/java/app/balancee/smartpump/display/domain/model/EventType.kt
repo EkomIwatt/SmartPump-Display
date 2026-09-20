@@ -30,6 +30,20 @@ enum class EventType {
     PRICE_SYNCED,
 
     /**
+     * `/config` reported a price this pump cannot sell at, and the sync refused it (review #7).
+     *
+     * `pricePerUnit` is a non-null integer, so a station whose price has never been set does not
+     * fail to parse — it arrives as **0**. Zero is not a cheap price, it is the absence of one, and
+     * storing it would wipe the last figure this pump knew and stop cash sales too. So the figure
+     * is discarded and this is written instead, because an operator whose card sales have stopped
+     * needs the log to say why rather than to be silent about the one call that could explain it.
+     *
+     * Written at most once per rejected figure per app run: `/config` is fetched before every
+     * authorise, so a per-fetch row would bury everything else in the log by the end of a shift.
+     */
+    PRICE_SYNC_REJECTED,
+
+    /**
      * The price moved between a fill-up ending and its payment being authorised, so the customer is
      * charged an amount other than the one they watched climb on the display.
      *

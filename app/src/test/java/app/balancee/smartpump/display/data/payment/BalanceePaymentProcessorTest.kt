@@ -204,6 +204,37 @@ class BalanceePaymentProcessorTest {
         assertTrue(failure.attendantDetail!!.contains("no payment page"))
     }
 
+    /**
+     * Review #7. `/config` returning `pricePerUnit: 0` — a station whose price is not set yet —
+     * used to reach `litreStepMicrosFor`, whose `require` throws out of this `flow { }` on
+     * `viewModelScope`: process death at the pump, from a field the backend is entitled to leave
+     * empty. It is a refused sale now, and the refusal names the fix.
+     */
+    @Test
+    fun `a backend with no price refuses the sale instead of crashing the pump`() = runTest {
+        service.config = config.copy(pricePerUnit = 0)
+
+        val result = processor.process(tender(500_000)).first()
+
+        assertTrue(result is PaymentResult.Failed)
+        val failure = (result as PaymentResult.Failed).failure
+        assertEquals(FailureCopy.SEE_ATTENDANT, failure.customerMessage)
+        assertTrue(failure.attendantDetail!!.contains("no price set"))
+        assertTrue(failure.recoverable)
+        assertNull("nothing should have been authorised", service.lastAuthorise)
+    }
+
+    /** The fill-up half of the same defect — the fuel is already in the tank, and it still must not crash. */
+    @Test
+    fun `a backend with no price refuses a fill-up too`() = runTest {
+        service.config = config.copy(pricePerUnit = 0)
+
+        val result = processor.process(dispensed(12.5)).first()
+
+        assertTrue(result is PaymentResult.Failed)
+        assertNull("nothing should have been authorised", service.lastAuthorise)
+    }
+
     /** Fetch-before-authorise is the correctness guarantee, so a price we cannot read stops the sale. */
     @Test
     fun `an unreadable price stops the sale before anything is authorised`() = runTest {

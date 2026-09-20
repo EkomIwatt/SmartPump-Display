@@ -63,6 +63,29 @@ class BalanceePaymentProcessor @Inject constructor(
         }
         val config = synced.config
 
+        // **Before quoting, because quoting divides by it** (review #7). A station whose price is
+        // not set yet comes back as `pricePerUnit: 0`, which parses cleanly, and
+        // `litreStepMicrosFor` answers it with a `require` — thrown inside this `flow { }`, on
+        // `viewModelScope`, which is process death at the pump rather than a refused sale.
+        //
+        // There is no fallback to the device's own price here for the reason `quoteFor` states: the
+        // server checks the amount against *its* figure, so a sale priced at anything else is
+        // refused anyway. Cash is unaffected — the sync keeps the last known good price for it.
+        if (!synced.hasUsablePrice) {
+            emit(
+                PaymentResult.Failed(
+                    failure = FailureCopy(
+                        customerMessage = FailureCopy.SEE_ATTENDANT,
+                        attendantDetail = "Balanceè has no price set for this pump, so a card sale " +
+                            "cannot be started. Set this pump's price on Balanceè, then try again. " +
+                            "Cash sales still work.",
+                        recoverable = true,
+                    ),
+                ),
+            )
+            return@flow
+        }
+
         val quote = quoteFor(request, synced.koboPerLitre)
         if (quote.amountKobo <= 0) {
             emit(

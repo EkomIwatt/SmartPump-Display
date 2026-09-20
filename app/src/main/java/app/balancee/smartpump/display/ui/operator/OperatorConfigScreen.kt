@@ -310,6 +310,10 @@ private fun headlineFor(entry: OperationalEvent): Pair<String, androidx.compose.
 
         EventType.PRICE_SYNCED -> "Price updated" to TextPrimary
 
+        // Red: card sales have stopped, and nothing else on this screen says so. The row exists
+        // because the cause is a backend field, not anything an attendant did or can see.
+        EventType.PRICE_SYNC_REJECTED -> "No price from Balanceè" to WarningRed
+
         // Not red: most abandoned payments are someone changing their mind. It is here so that a
         // customer who says they paid and got nothing can be looked up rather than disbelieved.
         EventType.PAYMENT_ABANDONED -> "Payment not completed" to TextSecondary

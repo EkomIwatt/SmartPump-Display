@@ -52,6 +52,11 @@ data class SaleQuote(
  *
  * **There is no safe fixed answer**, which is the whole point: a constant would work until someone
  * changed the price, and the sales it then refused would look like a backend fault.
+ *
+ * The `require` is a programming invariant, not a validation seam: it throws, and every caller here
+ * is inside a `flow { }` on `viewModelScope` where a throw is process death rather than a refused
+ * sale. A non-positive price is screened where it enters the app — `SyncedConfig.hasUsablePrice` —
+ * so that a `/config` stating no price stops a sale instead of the pump (review #7).
  */
 internal fun litreStepMicrosFor(koboPerLitre: Long): Long {
     require(koboPerLitre > 0) { "price must be positive, was $koboPerLitre" }

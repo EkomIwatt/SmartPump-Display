@@ -57,6 +57,17 @@ data class SyncedConfig(
     val koboPerLitre: Long get() = config.pricePerUnit * KOBO_PER_NAIRA
 
     /**
+     * Whether [koboPerLitre] is a price at all, as opposed to the absence of one (review #7).
+     *
+     * `pricePerUnit` is a non-null `Long`, so it fails loudly on `null` and **silently** on `0` —
+     * and a station whose price has not been set yet is the ordinary way to get a 0. Nothing about
+     * zero is small: quoting against it divides by it, and storing it wipes the last figure this
+     * pump knew. Every reader of this class screens it here, once, rather than each discovering
+     * the arithmetic for itself.
+     */
+    val hasUsablePrice: Boolean get() = koboPerLitre > 0
+
+    /**
      * The station's name, as the backend holds it.
      *
      * Blank is treated as absent rather than as a name: a pump whose receipts print an empty line
@@ -72,7 +83,7 @@ data class SyncedConfig(
      * one would put a "price changed" row in the log of every freshly activated pump.
      */
     val priceChanged: Boolean
-        get() = previousKoboPerLitre != null && previousKoboPerLitre != koboPerLitre
+        get() = hasUsablePrice && previousKoboPerLitre != null && previousKoboPerLitre != koboPerLitre
 }
 
 @Singleton
@@ -107,10 +118,18 @@ class PumpConfigSync @Inject constructor(
         // header for why the receipt's name is the backend's to own.
         val stationName = synced.stationName ?: existing?.stationName
 
+        // **The price is the one field the backend is allowed not to have** (review #7). A 0 is
+        // the absence of a price, not a cheap one, and writing it through would take the pump's
+        // last known good figure with it — stopping *cash* sales, which need no backend at all,
+        // over a field only digital sales consult. The rest of the response is still true and is
+        // still stored; only the figure is discarded.
+        val price = if (synced.hasUsablePrice) synced.koboPerLitre else existing?.koboPerLitre ?: 0L
+        recordRejectedPriceIfNew(synced, keptInstead = existing?.koboPerLitre)
+
         // Nothing moved — skip the write rather than bump `updatedAt` on every authorise, which
         // would make the timestamp mean "last contacted" instead of "last changed".
         if (existing != null &&
-            existing.koboPerLitre == synced.koboPerLitre &&
+            existing.koboPerLitre == price &&
             existing.fuelType == config.fuelType &&
             existing.stationName == stationName
         ) {
@@ -119,14 +138,16 @@ class PumpConfigSync @Inject constructor(
 
         deviceConfig.saveConfig(
             existing?.copy(
-                koboPerLitre = synced.koboPerLitre,
+                koboPerLitre = price,
                 fuelType = config.fuelType,
                 stationName = stationName ?: existing.stationName,
                 updatedAt = System.currentTimeMillis(),
             ) ?: DeviceConfig(
                 // An activated pump that has never been configured by hand becomes sellable here,
                 // which is the point: a price change is meant to stop being a visit to every pump.
-                koboPerLitre = synced.koboPerLitre,
+                // Unless the backend had no price either, in which case this stores the 0 it
+                // already had by omission and `CanStartTransactionUseCase` keeps the pump shut.
+                koboPerLitre = price,
                 fuelType = config.fuelType,
             ).let { fresh ->
                 // Only when the backend actually has a name — otherwise DeviceConfig's own
@@ -149,6 +170,39 @@ class PumpConfigSync @Inject constructor(
         }
         return synced
     }
+
+    /**
+     * Log a refused price once, not once per sale.
+     *
+     * `/config` is fetched immediately before every authorise, so a backend that has no price for
+     * this pump would otherwise write a row per attempted sale and bury the events that need a
+     * person. [lastRejectedPrice] is deliberately in memory only: a restart logging one more line
+     * is the right amount of noise, and persisting it would mean a schema change to record
+     * something whose whole value is that it is recent.
+     */
+    private suspend fun recordRejectedPriceIfNew(synced: SyncedConfig, keptInstead: Long?) {
+        if (synced.hasUsablePrice) {
+            lastRejectedPrice = null
+            return
+        }
+        if (lastRejectedPrice == synced.koboPerLitre) return
+        lastRejectedPrice = synced.koboPerLitre
+
+        events.record(
+            type = EventType.PRICE_SYNC_REJECTED,
+            detail = "Balanceè reported no price for this pump (${synced.koboPerLitre} kobo/L), " +
+                "so it was ignored. " +
+                if (keptInstead != null && keptInstead > 0) {
+                    "The pump is still selling at ${formatNaira(keptInstead)} per litre; " +
+                        "card sales are refused until the station's price is set."
+                } else {
+                    "This pump has no price at all and cannot sell until one is set."
+                },
+        )
+    }
+
+    /** See [recordRejectedPriceIfNew]. Null means the last sync carried a usable price. */
+    private var lastRejectedPrice: Long? = null
 }
 
 /**
