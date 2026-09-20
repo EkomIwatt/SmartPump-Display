@@ -5,11 +5,11 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-20** — 10g's gate PASSED over three sittings (₦548.32, three real sales),
-then a high-effort review found 8 more. **5 fixed, 3 open (#5/#6/#7 below). The branch is NOT
+_Last updated: **2026-09-20**, later — 10g's gate PASSED over three sittings (₦548.32, three real
+sales), then a high-effort review found 8 more. **6 fixed, 2 open (#5/#6 below). The branch is NOT
 merged** and that is the next decision._
 
-### ⛳ Start here next session — `feature/phase-10-payments`, 35 commits, pushed, green
+### ⛳ Start here next session — `feature/phase-10-payments`, 39 commits, green
 
 1. **Review finding #6 — `syncPriceOnBoot` races `bootResume`.** The guard reads `_ui.value.state`,
    which is `Idle` until `bootResume` dispatches, and `bootResume` first awaits
@@ -22,10 +22,15 @@ merged** and that is the next decision._
    `FillupTankFull` for the whole round trip and the only guard is a state check, so a second tap
    cancels the first flow mid-request and starts another. Two `PENDING_PAYMENT` for one tank, the
    first orphaned with a live checkout URL.
-3. **Review finding #7 — `pricePerUnit: 0` from `/config` kills the app.** `quoteFor` runs before
-   the `amountKobo <= 0` guard, `litreStepMicrosFor` does `require(koboPerLitre > 0)`, and the
-   throw escapes `flow { }` in `viewModelScope` — process death at the pump. A station whose price
-   is not set yet is enough.
+3. ~~**Review finding #7 — `pricePerUnit: 0` from `/config` kills the app.**~~ ✅ **FIXED
+   2026-09-20** (`202144e`). Screened at the boundary rather than at the caller that crashed:
+   `SyncedConfig.hasUsablePrice`, read by the sync (which no longer writes a 0 through — that
+   would have wiped the pump's last known price and stopped **cash** sales too) and by the
+   processor (which refuses the sale before quoting). New `PRICE_SYNC_REJECTED` event, logged once
+   per rejected figure per app run, with a row on the operator screen. The probe panel's
+   `PrecisionLine` divided by the same zero and is guarded too. 469 tests / 47 classes green.
+   - **Left open deliberately:** nothing tells the backend team a pump is being sent a 0. It is
+     their field to set, and item 6 below is the channel for it.
 4. **Then re-review and merge.** The last review found five blocking defects in code written that
    same day; a green suite has not been sufficient evidence on this branch.
 5. **Tell Balancee about the orphan:** production holds
