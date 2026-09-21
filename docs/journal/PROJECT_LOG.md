@@ -1,6 +1,26 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-21, evening (**step 1 passed on the device; the check of it found #R12, now fixed; one re-check, then merge**)
+## Current status — 2026-09-21, late (**#R12 observed fixed on the tablet; a question asked there found #R13, now fixed too**)
+
+**#R12's fix is observed on the device:** a digital fill-up cancelled at its QR on the `c963e81` build
+left `pulse_state` reading Idle, stamped at the tap. Steps 1 and 2 of the merge gate closed.
+
+**Then the user asked the right question at the tablet** — *"if I cancel a fill-up digital payment,
+don't I need to confirm cash received?"* Yes: the fuel is already in the tank. **#R13:** the QR's
+"Cancel · collect cash instead" was wired to the generic cancel and dropped to Idle recording nothing,
+and the customer-facing cash-confirm screen had a Cancel that did the same. Neither exists in the
+design or in `state-machine.md`. Fixed in `2389d36`: the QR cancel goes to cash collection, the
+customer's Cancel is gone, and the view model refuses to drop a fill-up past shutoff whatever a
+screen shows. **#R14** — how an attendant closes out a genuine drive-off — needs a fourth attendant
+action the design does not have, so it is boarded for the boss beside #R11.
+
+**Branch state:** **57 commits**, **516 JVM tests / 48 classes** and **25 instrumented tests on the
+SM-T220** green, lint and both variants clean. **Still NOT merged.** Left: one device check of #R13,
+then the merge on an explicit go.
+
+---
+
+## Previous status — 2026-09-21, evening (**step 1 passed on the device; the check of it found #R12, now fixed; one re-check, then merge**)
 
 **Every smoke-test run passed on the SM-T220** — cash fill-ups, a digital fill-up to its QR and
 cancelled, kill-mid-dispense resumed, and a pre-pay expiry whose `PAYMENT_ABANDONED` row was written
@@ -2759,3 +2779,49 @@ writes only its own piece of the record, so the order they land in no longer mat
 **Next:**
 Install `c963e81` on the tablet, cancel one digital fill-up at its QR, and read `pulse_state` — it
 must say Idle. Then merge to `main` and push.
+
+
+---
+
+### Phase 10h (round 7) — a fill-up past shutoff can be paid another way, never cancelled
+**Date:** 2026-09-21
+**Status:** done (device check of the fix pending)
+**Commit(s):** `2389d36`; this board/log update. Preceded by the on-device re-check of #R12 (`2b91aa4`).
+
+**Summary (plain language):**
+In a fill-up the customer gets the fuel first and pays after. If they started paying by QR and then
+changed their mind, the screen had a button saying "Cancel · collect cash instead" — but it did not
+collect cash. It sent the pump back to its idle screen and kept no record at all, as if the fuel had
+never been pumped. The cash-collection screen also had a Cancel button the customer could press and
+simply drive off. Both are fixed: changing your mind now moves the sale to cash collection, which
+only the attendant can close. How an attendant should record a customer who genuinely drives off is
+a question for the boss, because the approved design has no button for it.
+
+**Technical notes:**
+- **#R13 (`2389d36`).** `FillupDigitalAwaitingPaymentScreen`'s button → new
+  `onFillupDigitalCancel()`, which stops the poller and countdown and sets
+  `FillupAwaitingCashConfirm` from the stashed `FillupTankFull` (local ref, pump price — the same
+  settlement the expiry fall-back makes; `fillupDigitalSource` is set in `startFillupDigitalExpiry`,
+  which the fresh and resumed paths both run). It then writes `PAYMENT_ABANDONED` on its own
+  coroutine, worded "cancelled at the pump", against the server's id and figure (#R4's rule). That is
+  the fill-up half of #R8.
+- **The customer-facing Cancel on cash-confirm is removed**, matching the design, and `onCancel`
+  refuses `FillupTankFull` / `FillupAwaitingCashConfirm` and routes `FillupDigitalAwaitingPayment` to
+  cash — so the invariant is the view model's, not a property of today's screens. The back button was
+  already a no-op, so there is no other route.
+- **Authorities checked first:** the Flow 3 design screen has no cancel on the QR; `state-machine.md`
+  gives Flow 3 no Idle exit and Flow 2's cash-confirm leaves only on CASH RECEIVED. The button and its
+  wiring date from Phase 3e (`61f65d9`).
+- **Evidence:** two fill-up cancels on the tablet that evening (18:50, 20:19) left no transaction and
+  no event.
+- **Not built, boarded as #R14:** an attendant "unpaid / drive-off" exit. A fourth attendant action
+  deviates from the three-action design, so it is the boss's call. Until then a drive-off leaves the
+  pump on cash-confirm; a 0 L fill-up closes as a zero cash sale.
+- Six new tests, all failing against the pre-fix code with the old wiring (`onCancel`) substituted in.
+  **516 JVM tests / 48 classes** green; `lintDebug`, `assembleDebugProd`,
+  `compileDebugRealHwKotlin` clean. Instrumented suite unaffected (no data-layer change).
+
+**Next:**
+Install `2389d36`; run a digital fill-up to the QR, tap "Cancel · collect cash instead", confirm the
+cash screen has no Cancel, tap CASH RECEIVED, and read back a `FILLUP_CASH` row and a "cancelled"
+`PAYMENT_ABANDONED` row. Then merge, on the user's go. Ask the boss #R11 and #R14 together.

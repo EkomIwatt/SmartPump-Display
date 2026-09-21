@@ -5,12 +5,13 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-21**, evening. **Step 2 found #R9; the tablet then found #R10 and #R12 —
-all three fixed (`802c1dc`, `aa395e4`, `c963e81`).** Step 1's runs all passed on the device, and the
-database read that checked them is what exposed #R12. Branch `feature/phase-10-payments`, **55
-commits**, **510 JVM tests / 48 classes** and **25 instrumented tests on the SM-T220** green,
-`lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged — steps 1
-and 2 are both done; the merge (step 3) is next, on an explicit go.** What follows is a plan, not a list: do it in order._
+_Last updated: **2026-09-21**, late. **Step 2 found #R9; the tablet found #R10 and #R12; a question
+asked at the tablet found #R13 — all four fixed (`802c1dc`, `aa395e4`, `c963e81`, `2389d36`).**
+Branch `feature/phase-10-payments`, **57 commits**, **516 JVM tests / 48 classes** and **25
+instrumented tests on the SM-T220** green, lint and both variants clean. **Still NOT merged — one
+device check of #R13, then the merge on an explicit go.** What follows is a plan, not a list: do it
+in order._
+
 
 
 
@@ -54,6 +55,9 @@ and 2 are both done; the merge (step 3) is next, on an explicit go.** What follo
      `/authorise` 20:18:56, polls 20:18:57 and 20:19:08, cancel tapped 20:19:12, no poll after.
      `pulse_state` read back: `{"type":"idle"}`, `updatedAt` 20:19:12, pulses 0, anchor null — the
      Idle and the pulse clear both landed and neither undid the other. #R12's fix, observed.
+   - [ ] **Device check of #R13 on the `2389d36` build:** digital fill-up → QR → *Cancel · collect
+     cash instead* must land on **cash collection** (no Cancel on that screen); CASH RECEIVED must
+     then write a `FILLUP_CASH` row, and a `PAYMENT_ABANDONED` row worded "cancelled" must exist.
    - Logcat **does** work on this tablet on a mock build: `adb logcat -d -v time --pid=<pid>`. It is
      only the Arduino bench run that takes the USB port. `adb run-as` reads the app's database.
 2. [x] **A review pass scoped to this round's fixes — DONE 2026-09-20. One blocking finding (#R9).**
@@ -124,7 +128,30 @@ and 2 are both done; the merge (step 3) is next, on an explicit go.** What follo
    - **Pre-existing** — older than phase 10 — but phase 10's cancels and 10d's resume are where it
      bites.
 
+2d. [x] **#R13 — cancelling a fill-up past shutoff dropped the sale to Idle and recorded nothing.
+   FIXED 2026-09-21 (`2389d36`).** Raised by the user at the tablet: *"if I cancel a fill-up
+   digital payment, don't I need to confirm cash received?"* — yes; the fuel is in the tank.
+   - The QR's **"Cancel · collect cash instead"** was wired to the generic `onCancel` → Idle, and
+     the customer-facing cash-confirm screen had a **"Cancel"** doing the same. Both from Phase 3e;
+     neither in the design (no cancel on the fill-up QR) nor in `state-machine.md` (Flow 3 leaves on
+     payment or to cash; cash-confirm leaves only on CASH RECEIVED). Two fill-up cancels on the
+     tablet that evening left no row.
+   - Now: the QR button → `FillupAwaitingCashConfirm` (local ref, pump price, both clocks stopped,
+     `PAYMENT_ABANDONED` worded "cancelled"); the cash-confirm Cancel is gone; `onCancel` refuses to
+     drop TankFull / cash-confirm and routes the QR case to cash.
+   - Six tests, all failing against the pre-fix code with the old wiring substituted in.
+   - **Closes the fill-up half of #R8.** Leaves #R14.
+
 ### After the merge — improvements, roughly in value order
+
+4b. [ ] **#R14 — a genuine drive-off has no exit.** Since #R13 a fill-up past shutoff can only be
+   closed by CASH RECEIVED, so a customer who leaves without paying wedges the pump on cash-confirm:
+   the attendant's choices are to record cash nobody received, or restart (which resumes the same
+   screen). The honest answer is an attendant **"unpaid / drive-off"** action behind the PIN that
+   closes the sale and writes an event with the litres and amount — **but the design specifies
+   exactly three attendant actions**, so a fourth is a deviation for the boss to approve, not ours to
+   make. Ask together with #R11: both are "what does an unattended pump do when a customer walks
+   away". (A 0 L fill-up is fine — it closes through CASH RECEIVED as a zero sale.)
 
 4a. [ ] **#R11 — a timed-out pre-pay sits on an error card until a person taps it.** `ErrorScreen`
    has no auto-dismiss and its button is the only way out (`CustomerStateHost.kt:194`), so an
@@ -136,7 +163,8 @@ and 2 are both done; the merge (step 3) is next, on an explicit go.** What follo
    loses that. Options are a timed auto-dismiss back to Idle, or leaving it and accepting a tap.
    Ask the boss; it is a forecourt-behaviour question, not a code one.
 
-5. [ ] **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** Only the two expiry timers do.
+5. [ ] **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** **Fill-up half DONE in #R13
+   (`2389d36`)** — what remains is the pre-pay cancel. Only the two expiry timers do.
    The backend does not expire transactions, so the checkout URL stays payable after a cancel — the
    exact scenario the event type's own doc describes. Small and additive: the row already has a
    writer (`recordAbandonedPayment`), it just needs calling from the cancel path with wording that
