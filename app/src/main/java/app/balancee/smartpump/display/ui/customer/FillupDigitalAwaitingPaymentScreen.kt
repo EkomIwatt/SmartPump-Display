@@ -60,7 +60,7 @@ fun FillupDigitalAwaitingPaymentScreen(
     priceKoboPerLitre: Long,
     qrContent: String,
     expiresInSeconds: Int,
-    onCancel: () -> Unit,
+    onCollectCashInstead: () -> Unit,
     modifier: Modifier = Modifier,
     pumpLabel: String = "Pump 1",
 ) {
@@ -168,9 +168,11 @@ fun FillupDigitalAwaitingPaymentScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
+        // Does what it says since #R13: the tank moves to cash collection. It used to drop the
+        // sale to Idle and record nothing, with the fuel already gone.
         BalanceeButton(
             label = "Cancel · collect cash instead",
-            onClick = onCancel,
+            onClick = onCollectCashInstead,
             variant = BalanceeButtonVariant.Secondary,
         )
     }
@@ -328,7 +330,7 @@ private fun FillupDigitalAwaitingPaymentPreview() {
             priceKoboPerLitre = 87_050,
             qrContent = "https://checkout.paystack.com/jn0ej3u6def5150",
             expiresInSeconds = 287,
-            onCancel = {},
+            onCollectCashInstead = {},
         )
     }
 }
@@ -344,7 +346,7 @@ private fun FillupDigitalAwaitingPaymentPortraitPreview() {
             priceKoboPerLitre = 87_050,
             qrContent = "https://checkout.paystack.com/jn0ej3u6def5150",
             expiresInSeconds = 287,
-            onCancel = {},
+            onCollectCashInstead = {},
         )
     }
 }

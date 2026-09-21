@@ -320,6 +320,140 @@ class CustomerViewModelLifecycleTest {
             assertTrue(state(vm) is TransactionState.Error)
         }
 
+    // ---- a fill-up cannot be cancelled, only paid another way (#R13) ------------------------------
+
+    /**
+     * **The fuel is already in the tank.** "Cancel · collect cash instead" used to drop to Idle and
+     * record nothing, so the litres left the pump with no transaction and no event — seen on the
+     * SM-T220 twice on 2026-09-21. The design has no route to Idle from here and neither does
+     * `state-machine.md`; the only way on is payment, or cash.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `cancelling a digital fill-up asks for cash for the tank instead of dropping the sale`() =
+        runTest(mainRule.dispatcher) {
+            harness.payment.pendingRef = SERVER_TXN_ID
+            harness.payment.pendingAmountKobo = 12_345L
+            val vm = harness.build()
+            val localRef = fillupToUnpaidQr(vm)
+
+            vm.onFillupDigitalCancel()
+            runCurrent()
+
+            val cash = state(vm) as TransactionState.FillupAwaitingCashConfirm
+            // The same settlement the expiry fall-back makes: this tank, at this pump's price,
+            // under the pump's own reference.
+            assertEquals(localRef, cash.txnId)
+            assertEquals(0.10, cash.verifiedLitres, 1e-9)
+            assertEquals(10_000L, cash.amountDueKobo)
+        }
+
+    /**
+     * The checkout page stays payable after the cancel, so the row is what answers a customer who
+     * pays by card later *and* has handed over cash. Worded as a cancel, not a timeout, because the
+     * two send whoever reads it to different people.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a cancelled digital fill-up is recorded as cancelled, against the server's id`() =
+        runTest(mainRule.dispatcher) {
+            harness.payment.pendingRef = SERVER_TXN_ID
+            harness.payment.pendingAmountKobo = 12_345L
+            val vm = harness.build()
+            fillupToUnpaidQr(vm)
+
+            vm.onFillupDigitalCancel()
+            runCurrent()
+
+            val row = harness.events.recorded.single { it.type == EventType.PAYMENT_ABANDONED }
+            assertEquals(SERVER_TXN_ID, row.transactionRef)
+            val detail = row.detail.orEmpty()
+            assertTrue("not worded as a cancel: $detail", detail.contains("cancelled"))
+            assertTrue("not the checkout page's figure: $detail", detail.contains("123.45"))
+        }
+
+    /** What the question was about: after the cancel, CASH RECEIVED closes it as a cash sale. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `cash received after a cancelled digital fill-up records the tank as a cash sale`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            val localRef = fillupToUnpaidQr(vm)
+            vm.onFillupDigitalCancel()
+            runCurrent()
+
+            vm.onAttendantCashReceived()
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.Complete)
+            val sale = harness.transactions.saved.single()
+            assertEquals(localRef, sale.id)
+            assertEquals(10_000L, sale.amountKobo)
+        }
+
+    /**
+     * Both clocks stop at the cancel. Without that, the countdown would later write a second,
+     * "window closed" row for a sale the attendant had already moved to cash — and the poller could
+     * still deliver a late Success into a screen that is collecting cash for the same tank.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `after the cancel neither the countdown nor the poller ends the sale again`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            fillupToUnpaidQr(vm)
+            vm.onFillupDigitalCancel()
+            runCurrent()
+
+            harness.payment.succeed()
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.FillupAwaitingCashConfirm)
+            assertEquals(1, harness.events.recorded.count { it.type == EventType.PAYMENT_ABANDONED })
+        }
+
+    /**
+     * The rule lives in the view model, not in which buttons a screen happens to show: the generic
+     * cancel cannot drop a fill-up past shutoff, from any of its three states.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `the generic cancel cannot drop a fill-up with fuel in the tank`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            vm.onAttendantFillUpAuthorise()
+            harness.pulseSource.emitPulse(count = 10)
+            vm.onSimulateNozzleShutoff()
+            runCurrent()
+
+            vm.onCancel()
+            assertTrue("tank full dropped", state(vm) is TransactionState.FillupTankFull)
+
+            vm.onFillupPayCash()
+            runCurrent()
+            vm.onCancel()
+            assertTrue(
+                "cash confirm dropped",
+                state(vm) is TransactionState.FillupAwaitingCashConfirm,
+            )
+            assertTrue(harness.transactions.saved.isEmpty())
+        }
+
+    /** And from the QR, the generic cancel takes the same route the button does. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `the generic cancel on a fill-up QR goes to cash collection`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            fillupToUnpaidQr(vm)
+
+            vm.onCancel()
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.FillupAwaitingCashConfirm)
+        }
+
     // ---- when the audit write itself fails (re-review finding #R5) ------------------------------
 
     /**

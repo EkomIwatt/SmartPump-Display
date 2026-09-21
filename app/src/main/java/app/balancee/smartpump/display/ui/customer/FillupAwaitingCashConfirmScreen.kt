@@ -26,8 +26,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.balancee.smartpump.display.ui.components.AmountDisplay
-import app.balancee.smartpump.display.ui.components.BalanceeButton
-import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
 import app.balancee.smartpump.display.ui.components.BalanceeCard
 import app.balancee.smartpump.display.ui.components.LabelText
 import app.balancee.smartpump.display.ui.components.LedgerRow
@@ -46,7 +44,6 @@ fun FillupAwaitingCashConfirmScreen(
     verifiedLitres: Double,
     amountDueKobo: Long,
     priceKoboPerLitre: Long,
-    onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     pumpLabel: String = "Pump 1",
 ) {
@@ -138,11 +135,11 @@ fun FillupAwaitingCashConfirmScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        BalanceeButton(
-            label = "Cancel",
-            onClick = onCancel,
-            variant = BalanceeButtonVariant.Secondary,
-        )
+        // **No Cancel on this screen** (#R13), and that is the design's answer, not an omission:
+        // the fuel is in the tank and the only way out is the attendant's CASH RECEIVED. There was
+        // one here, on the customer-facing screen, and it dropped the sale to Idle with nothing
+        // recorded — a customer could tap it and drive off. A genuine drive-off still needs an
+        // attendant exit that records the loss; that is TODO #R14, a question for the boss.
     }
 }
 
@@ -155,7 +152,6 @@ private fun FillupAwaitingCashConfirmPreview() {
             verifiedLitres = 38.10,
             amountDueKobo = 3_316_605,
             priceKoboPerLitre = 87_050,
-            onCancel = {},
         )
     }
 }
@@ -169,7 +165,6 @@ private fun FillupAwaitingCashConfirmPortraitPreview() {
             verifiedLitres = 38.10,
             amountDueKobo = 3_316_605,
             priceKoboPerLitre = 87_050,
-            onCancel = {},
         )
     }
 }

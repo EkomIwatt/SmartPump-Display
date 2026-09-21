@@ -167,6 +167,17 @@ class CustomerViewModel @Inject constructor(
     private var fillupWatchdogJob: Job? = null
 
     /**
+     * The tank the current digital fill-up is being paid for — what a fall-back to cash collects
+     * against. Set by [startFillupDigitalExpiry], which both the fresh and the resumed paths go
+     * through, so neither can forget it.
+     *
+     * Needed because the fall-back deliberately settles on the **local** reference and the pump's
+     * own amount (see [startFillupDigitalExpiry]), and the live
+     * [TransactionState.FillupDigitalAwaitingPayment] carries the server's id and figure instead.
+     */
+    private var fillupDigitalSource: TransactionState.FillupTankFull? = null
+
+    /**
      * The payment start that has been asked for and has not yet produced a first result — the one
      * window in which the screen still shows the button that started it (review #5).
      *
@@ -1103,6 +1114,46 @@ class CustomerViewModel @Inject constructor(
     }
 
     /**
+     * "Cancel · collect cash instead" on the fill-up QR (#R13). **The fuel is already in the tank**,
+     * so this is a change of payment method, never an end to the sale: it goes where its own label
+     * and the expiry fall-back both go — [TransactionState.FillupAwaitingCashConfirm] — and the only
+     * way out of that is the attendant's CASH RECEIVED.
+     *
+     * Until #R13 the button was wired to [onCancel], which dropped to Idle and recorded nothing:
+     * the litres left the pump with no transaction and no event. Seen on the SM-T220 on 2026-09-21,
+     * twice in one evening. Neither the design screen (no cancel on this screen at all) nor
+     * `state-machine.md` (Flow 3 leaves only on payment or expiry, to cash) has a route to Idle.
+     *
+     * The checkout page stays payable — the backend does not close it — so the abandonment is
+     * written down, worded as a cancel. That row is what lets someone answer a customer who later
+     * pays by card *and* has handed over cash (the fill-up half of #R8).
+     */
+    fun onFillupDigitalCancel() {
+        val awaiting = currentState() as? TransactionState.FillupDigitalAwaitingPayment ?: return
+        // Called from a tap, so neither of these is the coroutine we are running in (#R9).
+        paymentJob?.cancel()
+        expiryJob?.cancel()
+        // The local reference and the pump's own amount, exactly as the expiry fall-back uses: what
+        // is owed in cash is this tank at this pump's price. Reconstructed from the live state only
+        // if the tank was somehow never stashed, which would still beat a dead button.
+        val tank = fillupDigitalSource
+        setState(
+            TransactionState.FillupAwaitingCashConfirm(
+                txnId = tank?.txnId ?: awaiting.txnId,
+                verifiedLitres = tank?.verifiedLitres ?: awaiting.verifiedLitres,
+                amountDueKobo = tank?.amountDueKobo ?: awaiting.amountDueKobo,
+            )
+        )
+        _ui.update { it.copy(fillupDigitalExpiresInSeconds = 0) }
+        // After the transition and on its own coroutine: nothing waits on the row, so a slow or
+        // failed write cannot hold the attendant's screen back. The id and amount are the server's,
+        // for #R4's reason — they are what the still-live checkout page will charge.
+        viewModelScope.launch {
+            recordAbandonedPayment(awaiting.txnId, awaiting.amountDueKobo, cancelledAtPump = true)
+        }
+    }
+
+    /**
      * @param serverExpiry the deadline `/authorise` returned. **Null is a fallback, not a
      *   default.** Until the 10g review this method ignored the server entirely and always gave
      *   five minutes, while the processor polled to the real twenty — so a customer who scanned at
@@ -1115,6 +1166,7 @@ class CustomerViewModel @Inject constructor(
         serverExpiry: Instant? = null,
     ) {
         expiryJob?.cancel()
+        fillupDigitalSource = source
         expiryJob = viewModelScope.launch {
             var remaining = serverExpiry
                 ?.let { Duration.between(Instant.now(), it).seconds.toInt() }
@@ -1630,9 +1682,22 @@ class CustomerViewModel @Inject constructor(
      * two ever overlap by an instant, two truthful rows are a better failure than none, which is
      * what the tablet showed on 2026-09-20.
      */
-    private suspend fun recordAbandonedPayment(txnId: String, amountKobo: Long) {
-        val detail = "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
-            "The pump stopped watching; the checkout link may still be payable."
+    private suspend fun recordAbandonedPayment(
+        txnId: String,
+        amountKobo: Long,
+        /**
+         * Said in the row, because "timed out" and "cancelled" send whoever reads it to different
+         * people: a window that ran out means nobody acted, a cancel means someone at the pump did.
+         */
+        cancelledAtPump: Boolean = false,
+    ) {
+        val detail = if (cancelledAtPump) {
+            "Payment cancelled at the pump for ${formatNaira(amountKobo)}; cash was asked for " +
+                "instead. The checkout link may still be payable."
+        } else {
+            "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
+                "The pump stopped watching; the checkout link may still be payable."
+        }
         // [runCatchingCancellable], not `runCatching`, and the difference is load-bearing here:
         // `expiryJob` is cancelled the instant a payment succeeds, and this coroutine may be
         // suspended inside the write when that happens. A swallowed cancellation would let the
@@ -1744,6 +1809,20 @@ class CustomerViewModel @Inject constructor(
     // ---- Cancel / dismiss ----------------------------------------------------------
 
     fun onCancel() {
+        // **Fuel in the tank never leaves without a record** (#R13), and that is decided here rather
+        // than by which buttons a screen happens to show. A fill-up past shutoff can be paid for,
+        // or its payment method changed — never cancelled. A genuine drive-off has no exit yet:
+        // that is a question for the boss (TODO #R14), not a reason to let it vanish.
+        when (currentState()) {
+            is TransactionState.FillupDigitalAwaitingPayment -> {
+                onFillupDigitalCancel()
+                return
+            }
+            is TransactionState.FillupTankFull,
+            is TransactionState.FillupAwaitingCashConfirm,
+            -> return
+            else -> Unit
+        }
         cancelInFlightJobs()
         viewModelScope.launch { relay.stopFuelFlow() }
         resetToIdle(clearPulses = true)

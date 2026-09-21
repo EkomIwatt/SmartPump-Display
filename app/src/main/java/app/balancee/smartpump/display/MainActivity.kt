@@ -166,6 +166,7 @@ private fun SmartPumpRoot(
                         onFillupSelectIntent = customerVm::onFillupSelectIntent,
                         onFillupPayCash = customerVm::onFillupPayCash,
                         onFillupPayDigital = customerVm::onFillupPayDigital,
+                        onFillupDigitalCancel = customerVm::onFillupDigitalCancel,
                         onShareReceipt = customerVm::onShareReceipt,
                         onDismissComplete = customerVm::onDismissComplete,
                         onCancel = customerVm::onCancel,

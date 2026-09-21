@@ -51,6 +51,7 @@ fun CustomerStateHost(
     onFillupSelectIntent: (PostFillIntent) -> Unit,
     onFillupPayCash: () -> Unit,
     onFillupPayDigital: () -> Unit,
+    onFillupDigitalCancel: () -> Unit,
     onShareReceipt: () -> Unit,
     onDismissComplete: () -> Unit,
     onCancel: () -> Unit,
@@ -162,7 +163,9 @@ fun CustomerStateHost(
             priceKoboPerLitre = uiState.priceKoboPerLitre,
             qrContent = state.qrContent,
             expiresInSeconds = uiState.fillupDigitalExpiresInSeconds,
-            onCancel = onCancel,
+            // Not the generic cancel: the fuel is in the tank, so this changes how it is paid for
+            // and never ends the sale (#R13).
+            onCollectCashInstead = onFillupDigitalCancel,
             modifier = modifier,
         )
 
@@ -171,7 +174,6 @@ fun CustomerStateHost(
             verifiedLitres = state.verifiedLitres,
             amountDueKobo = state.amountDueKobo,
             priceKoboPerLitre = uiState.priceKoboPerLitre,
-            onCancel = onCancel,
             modifier = modifier,
         )
 
@@ -275,6 +277,7 @@ private fun CustomerStateHostIdlePreview() {
             onFillupSelectIntent = {},
             onFillupPayCash = {},
             onFillupPayDigital = {},
+            onFillupDigitalCancel = {},
             onShareReceipt = {},
             onDismissComplete = {},
             onCancel = {},
@@ -306,6 +309,7 @@ private fun CustomerStateHostModeSelectPreview() {
             onFillupSelectIntent = {},
             onFillupPayCash = {},
             onFillupPayDigital = {},
+            onFillupDigitalCancel = {},
             onShareReceipt = {},
             onDismissComplete = {},
             onCancel = {},
