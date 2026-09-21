@@ -9,8 +9,8 @@ _Last updated: **2026-09-21**, evening. **Step 2 found #R9; the tablet then foun
 all three fixed (`802c1dc`, `aa395e4`, `c963e81`).** Step 1's runs all passed on the device, and the
 database read that checked them is what exposed #R12. Branch `feature/phase-10-payments`, **55
 commits**, **510 JVM tests / 48 classes** and **25 instrumented tests on the SM-T220** green,
-`lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged — one
-re-check on the fixed build, then the merge.** What follows is a plan, not a list: do it in order._
+`lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged — steps 1
+and 2 are both done; the merge (step 3) is next, on an explicit go.** What follows is a plan, not a list: do it in order._
 
 
 
@@ -23,7 +23,7 @@ re-check on the fixed build, then the merge.** What follows is a plan, not a lis
 > write behind a self-cancel, which is #R9). Steps 1 and 2 existed because of that — step 2 is done
 > and it found the third. Step 1 is what is left, and it is the reason not to merge straight away.
 
-1. [ ] **Tablet smoke test — the one thing that has never been run against this code.**
+1. [x] **Tablet smoke test — DONE 2026-09-21, on the `c963e81` build.** It found #R10 and #R12.
    The 10g gate passed against a build that no longer exists: **seven defect fixes ago**, and one of
    them (#R6) rewrote the `init` boot coroutine that runs on *every* app start. Another (#R9)
    changed what happens when a pre-pay window closes unpaid. Nothing since has been on a device.
@@ -50,8 +50,10 @@ re-check on the fixed build, then the merge.** What follows is a plan, not a lis
      pre-pay expiry ✓ — `PAYMENT_ABANDONED` written by the **poller's** branch, one poll after the
      last (#R10's fix, on the path that actually fires). **The fill-up expiry half was not seen on
      a device** — the QR thought to be left open had in fact been cancelled (see #R12).
-   - [ ] **Re-check on the `c963e81` build:** cancel a digital fill-up at its QR, then read
-     `pulse_state` (`adb run-as`) — it must say **Idle**. That is #R12's fix, observed.
+   - [x] **Re-check on the `c963e81` build — PASSED 2026-09-21.** Digital fill-up `42b903d4-…`:
+     `/authorise` 20:18:56, polls 20:18:57 and 20:19:08, cancel tapped 20:19:12, no poll after.
+     `pulse_state` read back: `{"type":"idle"}`, `updatedAt` 20:19:12, pulses 0, anchor null — the
+     Idle and the pulse clear both landed and neither undid the other. #R12's fix, observed.
    - Logcat **does** work on this tablet on a mock build: `adb logcat -d -v time --pid=<pid>`. It is
      only the Arduino bench run that takes the USB port. `adb run-as` reads the app's database.
 2. [x] **A review pass scoped to this round's fixes — DONE 2026-09-20. One blocking finding (#R9).**
