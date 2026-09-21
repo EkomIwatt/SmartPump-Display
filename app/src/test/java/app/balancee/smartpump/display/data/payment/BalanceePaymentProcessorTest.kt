@@ -631,6 +631,16 @@ class BalanceePaymentProcessorTest {
         assertFalse(result.windowElapsed)
     }
 
+    /** Prepared at shutoff, the authorise quotes against that fetch instead of sending another. */
+    @Test
+    fun `a prepared sale does not fetch the price a second time`() = runTest {
+        processor.prepareToAuthorise()
+
+        processor.process(tender(500_000)).first()
+
+        assertEquals(1, service.configCalls)
+    }
+
     /** A tender too small to buy a single step of fuel is refused here, not by the server. */
     @Test
     fun `an amount that buys no fuel never reaches the server`() = runTest {

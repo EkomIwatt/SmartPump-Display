@@ -131,6 +131,12 @@ data class CustomerUiState(
     val fillupDigitalExpiresInSeconds: Int = 0,
     val ussdExpiresInSeconds: Int = 0,
     val priceKoboPerLitre: Long = 0L,
+    /**
+     * A digital fill-up has been tapped and its QR is not back yet. The screen deliberately stays on
+     * the total for that round trip (review #5), and until this existed nothing on it said the tap
+     * had registered — measured at up to 3.2 s on the SM-T220.
+     */
+    val preparingQr: Boolean = false,
 )
 
 @HiltViewModel
@@ -859,6 +865,11 @@ class CustomerViewModel @Inject constructor(
         )
         dispenseJob?.cancel()
         dispenseJob = null
+        // The customer is reading the total now, which is the time to fetch the price a digital
+        // payment would need — rather than after they tap. Untracked on purpose: `onFillupPayDigital`
+        // cancels the in-flight jobs, and this is the one thing it wants to find still running.
+        // Harmless for a cash sale; it refreshes the stored price and nothing consumes it.
+        viewModelScope.launch { paymentProcessor.prepareToAuthorise() }
     }
 
     /**
@@ -967,11 +978,13 @@ class CustomerViewModel @Inject constructor(
 
     private fun startFillupDigitalPayment(source: TransactionState.FillupTankFull) {
         paymentJob?.cancel()
+        _ui.update { it.copy(preparingQr = true) }
         paymentJob = viewModelScope.launch {
             paymentProcessor.process(fillupDigitalRequest(source)).collect { result ->
                 // The first result is what closes the window: every one of the three either moves
                 // the state or ends the flow, so the plain state check guards from here on.
                 authoriseJob = null
+                _ui.update { it.copy(preparingQr = false) }
                 when (result) {
                     is PaymentResult.Pending -> onFillupDigitalPending(source, result)
                     is PaymentResult.Success -> onFillupDigitalSuccess(source, result)
@@ -979,6 +992,9 @@ class CustomerViewModel @Inject constructor(
                 }
             }
         }
+        // And whenever the job ends without a first result — cancelled, or a flow that closed
+        // empty — so a greyed-out screen can never outlive the request it was waiting on.
+        paymentJob?.invokeOnCompletion { _ui.update { it.copy(preparingQr = false) } }
         authoriseJob = paymentJob
     }
 

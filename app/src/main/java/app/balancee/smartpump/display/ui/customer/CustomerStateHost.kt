@@ -153,6 +153,7 @@ fun CustomerStateHost(
             onPayCash = onFillupPayCash,
             onPayDigital = onFillupPayDigital,
             digitalEnabled = true,
+            preparingQr = uiState.preparingQr,
             modifier = modifier,
         )
 

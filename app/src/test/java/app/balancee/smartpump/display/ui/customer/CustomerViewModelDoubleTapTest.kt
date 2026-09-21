@@ -19,6 +19,7 @@ import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -43,6 +44,38 @@ class CustomerViewModelDoubleTapTest {
         vm.onAttendantFillUpAuthorise()
         harness.pulseSource.emitPulse(count = 380) // 3.80 L
         vm.onSimulateNozzleShutoff()
+    }
+
+    // ---- the wait for the QR, made visible (2026-09-21) -------------------------------
+
+    /** The price fetch starts at shutoff, not at the tap - the customer is reading the total. */
+    @Test
+    fun `nozzle shutoff prepares the digital sale before anyone taps`() {
+        val vm = harness.build()
+
+        fillUpToTankFull(vm)
+
+        assertEquals(1, harness.payment.prepareCount)
+        assertEquals(0, harness.payment.processCount)
+    }
+
+    /**
+     * The screen holds the total for the round trip (review #5); this is what tells the customer
+     * the tap registered. On until the QR arrives, and off the moment it does.
+     */
+    @Test
+    fun `the screen says the QR is being prepared until it arrives`() {
+        val vm = harness.build()
+        fillUpToTankFull(vm)
+        harness.payment.holdAuthorise()
+
+        vm.onFillupPayDigital()
+        assertTrue("no sign the tap registered", vm.ui.value.preparingQr)
+        assertTrue(state(vm) is TransactionState.FillupTankFull)
+
+        harness.payment.releaseAuthorise()
+        assertFalse("still preparing with the QR up", vm.ui.value.preparingQr)
+        assertTrue(state(vm) is TransactionState.FillupDigitalAwaitingPayment)
     }
 
     // ---- flow 3: fill-up, where the review found it --------------------------------

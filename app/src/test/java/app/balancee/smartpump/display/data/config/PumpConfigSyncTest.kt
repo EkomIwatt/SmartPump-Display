@@ -23,6 +23,11 @@ import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import app.balancee.smartpump.display.ui.customer.FakeDeviceConfigRepository
 import app.balancee.smartpump.display.ui.customer.FakeEventRepository
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
@@ -31,6 +36,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 class PumpConfigSyncTest {
 
@@ -51,6 +60,107 @@ class PumpConfigSyncTest {
         deviceConfig = deviceConfig,
         events = events,
     )
+
+    // ---- the prefetch at nozzle shutoff ----------------------------------------------
+
+    private val clock = MovableClock()
+    private val timedSync = PumpConfigSync(
+        client = PumpApiClient(service, FixedDeviceId),
+        deviceConfig = deviceConfig,
+        events = events,
+        clock = clock,
+    )
+
+    /**
+     * The point of the prefetch: the tap on "pay digitally" used to wait for this round trip and
+     * then `/authorise`, one after the other - up to 3.2 s on the SM-T220. Issued at shutoff, it has
+     * usually landed by the time the customer taps.
+     */
+    @Test
+    fun `a prefetch that has landed prices the authorise without a second request`() = runTest {
+        timedSync.prefetchForNextAuthorise()
+
+        val result = timedSync.fetchForAuthorise()
+
+        assertTrue(result is ApiResult.Success)
+        assertEquals(1, service.calls)
+    }
+
+    /** A tap that beats the prefetch waits for it rather than sending a second `/config`. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `an authorise during an in-flight prefetch waits for it instead of asking again`() = runTest {
+        service.gate = CompletableDeferred()
+        launch { timedSync.prefetchForNextAuthorise() }
+        runCurrent()
+
+        val authorise = async { timedSync.fetchForAuthorise() }
+        runCurrent()
+        service.gate!!.complete(Unit)
+
+        assertTrue(authorise.await() is ApiResult.Success)
+        assertEquals(1, service.calls)
+    }
+
+    /**
+     * OQ #8 still holds: the price is fetched fresh for the sale. A customer who stood at the total
+     * for longer than the window gets a fetch of their own.
+     */
+    @Test
+    fun `a prefetch older than its window is not used`() = runTest {
+        timedSync.prefetchForNextAuthorise()
+        clock.millis += PumpConfigSync.PREFETCH_MAX_AGE_MS + 1
+
+        timedSync.fetchForAuthorise()
+
+        assertEquals(2, service.calls)
+    }
+
+    /** Consumed once: a prefetch made for one sale must not price the next. */
+    @Test
+    fun `a prefetch prices one authorise, not two`() = runTest {
+        timedSync.prefetchForNextAuthorise()
+
+        timedSync.fetchForAuthorise()
+        timedSync.fetchForAuthorise()
+
+        assertEquals(2, service.calls)
+    }
+
+    /** A failure at shutoff is not the authorise's answer - the network may be back by the tap. */
+    @Test
+    fun `a failed prefetch is retried at the authorise`() = runTest {
+        service.failure = IOException("no route to host")
+        timedSync.prefetchForNextAuthorise()
+        service.failure = null
+
+        val result = timedSync.fetchForAuthorise()
+
+        assertTrue(result is ApiResult.Success)
+        assertEquals(2, service.calls)
+    }
+
+    /**
+     * A prefetch whose coroutine dies mid-request must not leave the authorise waiting on it
+     * forever. The slot is completed empty rather than cancelled - awaiting a cancelled Deferred
+     * would throw a CancellationException into the payment flow and end it as though the customer
+     * had walked away.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `an abandoned prefetch does not hang the authorise`() = runTest {
+        service.gate = CompletableDeferred()
+        val prefetch = launch { timedSync.prefetchForNextAuthorise() }
+        runCurrent()
+        prefetch.cancel()
+        runCurrent()
+        service.gate = null
+
+        val result = timedSync.fetchForAuthorise()
+
+        assertTrue(result is ApiResult.Success)
+        assertEquals(2, service.calls)
+    }
 
     // ---- storing what it reads ----------------------------------------------------
 
@@ -483,6 +593,14 @@ class PumpConfigSyncTest {
     }
 }
 
+/** A clock the prefetch tests can move past the window without waiting a real minute. */
+private class MovableClock(var millis: Long = 1_790_000_000_000L) : Clock() {
+    override fun getZone(): ZoneId = ZoneOffset.UTC
+    override fun withZone(zone: ZoneId?): Clock = this
+    override fun instant(): Instant = Instant.ofEpochMilli(millis)
+    override fun millis(): Long = millis
+}
+
 private object FixedDeviceId : DeviceIdProvider {
     override fun deviceId(): String = "device-fixed-0001"
 }
@@ -491,7 +609,15 @@ private object FixedDeviceId : DeviceIdProvider {
 private class FakeConfigService(var config: PumpConfigResponse) : PumpApiService {
     var failure: Throwable? = null
 
+    /** Every `/config` that left the device - the prefetch tests count round trips with it. */
+    var calls = 0; private set
+
+    /** Holds a request in flight, to sit in the window between a prefetch and the tap. */
+    var gate: CompletableDeferred<Unit>? = null
+
     override suspend fun config(): ApiEnvelope<PumpConfigResponse> {
+        calls++
+        gate?.await()
         failure?.let { throw it }
         return ApiEnvelope(status = true, message = "Pump config", data = config)
     }

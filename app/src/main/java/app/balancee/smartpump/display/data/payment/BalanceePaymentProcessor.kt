@@ -49,13 +49,21 @@ class BalanceePaymentProcessor @Inject constructor(
     private val clock: Clock,
 ) : PaymentProcessor {
 
+    /** Starts this sale's `/config` early. See `PumpConfigSync.prefetchForNextAuthorise`. */
+    override suspend fun prepareToAuthorise() {
+        configSync.prefetchForNextAuthorise()
+    }
+
     override fun process(request: PaymentRequest): Flow<PaymentResult> = flow {
         // The correctness guarantee (OQ #8): fetch the price immediately before authorising, every
         // time. Push is a freshness optimisation and is allowed to be missing or late; this is not.
         //
         // 10c-bis: the fetch now stores what it reads, so the price on the customer's screen is the
         // one this sale is about to be authorised at rather than a number an operator typed once.
-        val synced = when (val result = configSync.fetch()) {
+        //
+        // `fetchForAuthorise`, not `fetch`: a fill-up issues this sale's fetch at nozzle shutoff
+        // (see [prepareToAuthorise]), and this picks it up — still fresh, still for this sale.
+        val synced = when (val result = configSync.fetchForAuthorise()) {
             is ApiResult.Success -> result.data
             is ApiResult.Failure -> {
                 emit(PaymentResult.Failed(failure = result.error.toFailureCopy("could not read the price")))

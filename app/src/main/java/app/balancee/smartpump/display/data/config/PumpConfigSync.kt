@@ -40,6 +40,8 @@ import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.util.runCatchingCancellable
+import kotlinx.coroutines.CompletableDeferred
+import java.time.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -92,6 +94,8 @@ class PumpConfigSync @Inject constructor(
     private val client: PumpApiClient,
     private val deviceConfig: DeviceConfigRepository,
     private val events: EventRepository,
+    // Injected so a test can age a prefetch past its window without waiting a real minute.
+    private val clock: Clock = Clock.systemUTC(),
 ) : DeviceConfigSync {
 
     /** Boot path. The result is the stored config; a failure leaves the device as it was. */
@@ -122,6 +126,61 @@ class PumpConfigSync @Inject constructor(
             is ApiResult.Failure -> result
             is ApiResult.Success -> ApiResult.Success(writeThrough(result.data))
         }
+
+    /**
+     * Issue the `/config` the **next authorise** will need, now, off the tap path.
+     *
+     * Called at nozzle shutoff, while the customer is still reading the total. The tap on "pay
+     * digitally" used to wait for two trans-Atlantic round trips in sequence — this fetch, then
+     * `/authorise` — measured at 1.3 s and 3.2 s on the SM-T220 on 2026-09-21, with the fetch alone
+     * taking 1.9 s cold. Starting it at shutoff leaves the tap waiting on `/authorise` only.
+     *
+     * **OQ #8 still holds**: the price is fetched fresh for this sale; it is simply fetched a few
+     * seconds earlier. [fetchForAuthorise] refuses anything older than [PREFETCH_MAX_AGE_MS] and
+     * uses a result at most once, so a prefetch never outlives the moment it was made for.
+     *
+     * Suspends for the whole fetch; the caller runs it on its own coroutine. If that coroutine is
+     * cancelled the slot is completed empty rather than left pending, so an authorise waiting on it
+     * falls back to a fetch of its own instead of hanging.
+     */
+    suspend fun prefetchForNextAuthorise() {
+        val slot = Prefetch(startedAtMs = clock.millis(), result = CompletableDeferred())
+        prefetch = slot
+        try {
+            slot.result.complete(fetch())
+        } finally {
+            // Empty, not cancelled: awaiting a cancelled Deferred throws CancellationException into
+            // the authorise, which would end the payment flow as though the customer had gone.
+            slot.result.complete(null)
+        }
+    }
+
+    /**
+     * The `/config` an authorise quotes against: the prefetched one if it was issued recently and
+     * succeeded — awaiting it if it is still in flight — otherwise a fetch of its own.
+     *
+     * Consumed once. A prefetch made for one sale must not price a later one, and the
+     * `previousKoboPerLitre` it carries is only "the price moved during *this* sale" for the sale it
+     * was made for.
+     */
+    suspend fun fetchForAuthorise(): ApiResult<SyncedConfig> {
+        val slot = prefetch
+        prefetch = null
+        if (slot != null && clock.millis() - slot.startedAtMs <= PREFETCH_MAX_AGE_MS) {
+            val result = slot.result.await()
+            // A failed prefetch is not an answer for the authorise — the network may be back.
+            if (result is ApiResult.Success) return result
+        }
+        return fetch()
+    }
+
+    private class Prefetch(
+        val startedAtMs: Long,
+        val result: CompletableDeferred<ApiResult<SyncedConfig>?>,
+    )
+
+    /** See [prefetchForNextAuthorise]. Null when none is waiting to be used. */
+    private var prefetch: Prefetch? = null
 
     private suspend fun writeThrough(config: PumpConfigResponse): SyncedConfig {
         // **A read that failed is not a device with no config**, and the difference decides
@@ -248,8 +307,16 @@ class PumpConfigSync @Inject constructor(
     /** See [recordRejectedPriceIfNew]. Null means the last sync carried a usable price. */
     private var lastRejectedPrice: Long? = null
 
-    private companion object {
+    internal companion object {
         const val TAG = "PumpConfigSync"
+
+        /**
+         * How old a prefetched `/config` may be and still price a sale. Long enough to cover a
+         * customer reading the total and choosing; short enough that a price changed on the
+         * backend meanwhile is at worst a refused sale (`AMOUNT_MISMATCH`, which is recoverable and
+         * re-fetches), never a wrong charge — the server checks the amount against its own figure.
+         */
+        const val PREFETCH_MAX_AGE_MS = 60_000L
     }
 }
 

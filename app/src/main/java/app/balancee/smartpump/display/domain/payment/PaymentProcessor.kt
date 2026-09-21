@@ -27,6 +27,16 @@ interface PaymentProcessor {
     fun process(request: PaymentRequest): Flow<PaymentResult>
 
     /**
+     * A digital sale may be about to start: do now whatever [process] would otherwise do first.
+     *
+     * Called at fill-up nozzle shutoff, while the customer reads the total, so the tap on "pay
+     * digitally" waits for less. Best-effort and never required — [process] must work without it,
+     * and a processor with nothing to prepare does nothing. Suspends for the preparation; callers
+     * run it on a coroutine of its own.
+     */
+    suspend fun prepareToAuthorise() {}
+
+    /**
      * Re-attach to a payment that was **already started**, after a restart.
      *
      * The reason this is its own method rather than a flag on [process] (Phase 10d): calling

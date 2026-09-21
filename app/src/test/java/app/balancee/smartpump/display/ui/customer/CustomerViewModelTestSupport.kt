@@ -179,6 +179,11 @@ class FakePaymentProcessor : PaymentProcessor {
 
     fun holdAuthorise() { authoriseGate = CompletableDeferred() }
 
+    /** How many times the VM asked for a sale to be prepared ahead of the tap. */
+    var prepareCount = 0; private set
+
+    override suspend fun prepareToAuthorise() { prepareCount++ }
+
     fun releaseAuthorise() {
         authoriseGate?.complete(Unit)
         authoriseGate = null
