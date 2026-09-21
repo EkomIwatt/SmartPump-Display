@@ -7,7 +7,7 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 _Last updated: **2026-09-21**, late. **Step 2 found #R9; the tablet found #R10 and #R12; a question
 asked at the tablet found #R13 — all four fixed (`802c1dc`, `aa395e4`, `c963e81`, `2389d36`).**
-Branch `feature/phase-10-payments`, **57 commits**, **516 JVM tests / 48 classes** and **25
+Plus the fill-up QR wait (`de1e976`). Branch `feature/phase-10-payments`, **59 commits**, **525 JVM tests / 48 classes** and **25
 instrumented tests on the SM-T220** green, lint and both variants clean. **Still NOT merged — one
 device check of #R13, then the merge on an explicit go.** What follows is a plan, not a list: do it
 in order._
@@ -58,6 +58,9 @@ in order._
    - [ ] **Device check of #R13 on the `2389d36` build:** digital fill-up → QR → *Cancel · collect
      cash instead* must land on **cash collection** (no Cancel on that screen); CASH RECEIVED must
      then write a `FILLUP_CASH` row, and a `PAYMENT_ABANDONED` row worded "cancelled" must exist.
+   - [ ] **Device check of the QR wait on `de1e976`:** tap *Pay digitally* — the button must read
+     **"Preparing QR…"** at once, and the QR should follow faster than before (logcat: no `/config`
+     between the tap and `/authorise`; it went out at shutoff).
    - Logcat **does** work on this tablet on a mock build: `adb logcat -d -v time --pid=<pid>`. It is
      only the Arduino bench run that takes the USB port. `adb run-as` reads the app's database.
 2. [x] **A review pass scoped to this round's fixes — DONE 2026-09-20. One blocking finding (#R9).**
@@ -142,6 +145,14 @@ in order._
    - Six tests, all failing against the pre-fix code with the old wiring substituted in.
    - **Closes the fill-up half of #R8.** Leaves #R14.
 
+2e. [x] **The fill-up QR wait — DONE 2026-09-21 (`de1e976`).** Asked at the tablet. Logcat: the tap
+   waited on `/config` then `/authorise` in sequence, 1.3 s warm / 3.2 s cold, every call running in
+   Vercel `iad1` (Washington). Now the `/config` is issued at nozzle shutoff and picked up by the
+   authorise (used once, never after 60 s, retried if it failed, never left hanging), and the button
+   reads "Preparing QR…". **OQ #8 holds** — fetched fresh for the sale, just earlier. Cash stays live
+   during the wait (review #5's decision, kept). **Not done:** pre-pay has the same hold on
+   ModeSelect; and the server region is Balancee's — see item 11.
+
 ### After the merge — improvements, roughly in value order
 
 4b. [ ] **#R14 — a genuine drive-off has no exit.** Since #R13 a fill-up past shutoff can only be
@@ -201,7 +212,11 @@ in order._
     `740e2af7-3573-45b1-a92b-813f2730ac93` **PAID with no dispense recorded** (the ₦149 fill-up that
     exposed finding #6 of the sitting). Local row `BLC-77819` is condemned. This is someone's money
     sitting unreconciled; it does not get better by waiting.
-11. [ ] **Two backend asks are drafted and unsent:** does a transaction ever leave
+11. [ ] **Ask Balancee to move the pump API off `iad1`** (added 2026-09-21): every call from Lagos
+    enters Vercel at Cape Town (`cpt1`) and executes in Washington. A region nearer Nigeria roughly
+    halves every call — authorise, polls and uploads alike — and is a setting on their side, not
+    code. Send with the asks below.
+11b. [ ] **Two backend asks are drafted and unsent:** does a transaction ever leave
     `PENDING_PAYMENT`, and is the checkout URL still payable after `expiresAt`? Plus the user's
     question — **round the litres, not the money** (₦200 → ₦199.66); cash already behaves that way,
     so this is digital diverging from cash. #R8's wording depends on the second answer, so sending

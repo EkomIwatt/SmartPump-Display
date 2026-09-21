@@ -2825,3 +2825,45 @@ a question for the boss, because the approved design has no button for it.
 Install `2389d36`; run a digital fill-up to the QR, tap "Cancel · collect cash instead", confirm the
 cash screen has no Cancel, tap CASH RECEIVED, and read back a `FILLUP_CASH` row and a "cancelled"
 `PAYMENT_ABANDONED` row. Then merge, on the user's go. Ask the boss #R11 and #R14 together.
+
+
+---
+
+### Phase 10h (round 8) — the fill-up QR wait
+**Date:** 2026-09-21
+**Status:** done (device check pending)
+**Commit(s):** `de1e976`; this board/log update
+
+**Summary (plain language):**
+Tapping "pay digitally" after a fill-up took one to three seconds to show the QR, and the screen gave
+no sign the tap had worked. The pump was asking Balancee's server two questions one after the
+other — the current price, then the payment link — and each question travels to a server in the
+United States and back. The pump now asks the first question the moment the nozzle shuts, while the
+customer is still reading their total, so the tap only waits for the second. The button also says
+"Preparing QR…" straight away. Asking Balancee to host the server closer to Nigeria would speed up
+every request the pump makes; that is on the list of things to ask them.
+
+**Technical notes:**
+- **Measured (logcat, SM-T220):** tap → `/config` 382 ms → `/authorise` 828 ms (≈1.3 s); a cold run:
+  `/config` 1,913 ms → `/authorise` 1,075 ms (≈3.2 s). Response headers `x-vercel-id: cpt1::iad1`.
+- **Prefetch at shutoff:** `PaymentProcessor.prepareToAuthorise()` (default no-op; the Balancee
+  processor calls `PumpConfigSync.prefetchForNextAuthorise()`), launched untracked from
+  `fillupShutoff` so the pay-digital tap's `cancelInFlightJobs()` leaves it running.
+  `fetchForAuthorise()` uses the prefetch once, only within `PREFETCH_MAX_AGE_MS` (60 s), awaits it
+  if still in flight, and fetches afresh if it failed. The slot is completed **empty**, not
+  cancelled, when its coroutine dies — awaiting a cancelled Deferred would throw a
+  CancellationException into the payment flow. OQ #8's guarantee (a fresh price per authorise)
+  holds; a backend price change inside the window is at worst a recoverable `AMOUNT_MISMATCH`.
+- **Feedback:** `CustomerUiState.preparingQr`, on at the tap, off at the first result and on job
+  completion; the digital button reads "Preparing QR…" and is disabled meanwhile.
+- **A decision kept, not overridden:** I first greyed out Pay cash as well; a review-#5 test
+  (`an in-flight authorise does not block the cash button`) records the opposite choice, so cash
+  stays live during the wait.
+- **Not done:** pre-pay holds ModeSelect for the same round trip; the region is a Balancee setting
+  (TODO item 11).
+- Nine new tests; four mutation-checked (undo the change, the test fails). **525 JVM tests / 48
+  classes** green; lint and both variants clean.
+
+**Next:**
+On the tablet: the button should read "Preparing QR…" at once, and logcat should show no `/config`
+between the tap and `/authorise`. Plus the #R13 check. Then the merge, on the user's go.
