@@ -5,12 +5,13 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-21**. **Merge-gate step 2 is done; it found #R9 (`802c1dc`), and the tablet
-then found #R10 (`aa395e4`) — the abandonment row had never once been written.** Branch
-`feature/phase-10-payments`, **53 commits**, **510 tests / 48 classes** green, `lintDebug`,
-`assembleDebugProd` and `compileDebugRealHwKotlin` clean. `debugProd` is installed on the SM-T220.
-**Still NOT merged — the rest of step 1 is what is left.** What follows is a plan, not a list: do it
-in order._
+_Last updated: **2026-09-21**, evening. **Step 2 found #R9; the tablet then found #R10 and #R12 —
+all three fixed (`802c1dc`, `aa395e4`, `c963e81`).** Step 1's runs all passed on the device, and the
+database read that checked them is what exposed #R12. Branch `feature/phase-10-payments`, **55
+commits**, **510 JVM tests / 48 classes** and **25 instrumented tests on the SM-T220** green,
+`lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged — one
+re-check on the fixed build, then the merge.** What follows is a plan, not a list: do it in order._
+
 
 
 ### ⛳ Start here — the merge gate, in order
@@ -43,8 +44,16 @@ in order._
    - **Kill the app mid-dispense and reopen it.** `bootResume()` failures are now swallowed and
      logged instead of crashing — Idle-and-safe beats a crash loop, but it means a partial resume
      now fails *quietly*, and this is the only way to see that it does not.
-   - Remember: **logcat is unusable on this tablet.** Read evidence off the screen and off the
-     operator screen's event rows.
+   - **Results, 2026-09-20/21, all on the device:** cash fill-ups ✓ (three rows, ₦1,490/L, not
+     uploaded — correct); digital fill-up to QR then cancel ✓; kill mid-dispense ✓ resumed without
+     crashing (the #R6 path; the pulse gap is unrecoverable on mock hardware, as it should be);
+     pre-pay expiry ✓ — `PAYMENT_ABANDONED` written by the **poller's** branch, one poll after the
+     last (#R10's fix, on the path that actually fires). **The fill-up expiry half was not seen on
+     a device** — the QR thought to be left open had in fact been cancelled (see #R12).
+   - [ ] **Re-check on the `c963e81` build:** cancel a digital fill-up at its QR, then read
+     `pulse_state` (`adb run-as`) — it must say **Idle**. That is #R12's fix, observed.
+   - Logcat **does** work on this tablet on a mock build: `adb logcat -d -v time --pid=<pid>`. It is
+     only the Arduino bench run that takes the USB port. `adb run-as` reads the app's database.
 2. [x] **A review pass scoped to this round's fixes — DONE 2026-09-20. One blocking finding (#R9).**
    The whole branch has now been reviewed twice and the yield was concentrated in recently written
    code. A third whole-branch pass mostly re-reads code reviewed twice; what has **never** been
@@ -97,6 +106,21 @@ in order._
      poller cannot end (no `expiresAt`, so no deadline to pass).
    - **#R9's shape was in `onPaymentFailed` too** — `cancelInFlightJobs()` from inside `paymentJob`.
      It got away with it only because `setState` does not suspend. Named cancels now.
+
+2c. [x] **#R12 — two writers, one row: a cancel could leave the cancelled sale in `pulse_state`.
+   FIXED 2026-09-21 (`c963e81`).** Found by the database read meant to *check* step 1: the screen
+   was Idle after a cancel, and the row still said `fillup_digital_awaiting_payment`. Boot resume
+   trusts that row, so a restart would have resurrected a cancelled sale — and a cancelled
+   *dispense* the same way, relay and all.
+   - Every write was read-then-REPLACE of the whole row. `resetToIdle` fires the Idle (state writer)
+     and the pulse clear (its own launch) together; the pulse clear read first, wrote last, and put
+     the old state back. It runs the other way mid-dispense — a state write rolling the pulse count
+     and anchor back — which is an under-count on resume. Possibly #28/#36; not shown.
+   - Each writer now issues a column-scoped `UPDATE` after an `INSERT OR IGNORE`, and the DAO has no
+     full-row write left. No schema change. **Instrumented test on the SM-T220: on the pre-fix code
+     both race tests lose on iteration 0**; with the fix, 500 racing iterations each, clean.
+   - **Pre-existing** — older than phase 10 — but phase 10's cancels and 10d's resume are where it
+     bites.
 
 ### After the merge — improvements, roughly in value order
 
@@ -164,6 +188,9 @@ in order._
 - **A coroutine that cancels itself stops at its next suspension point.** #R9 was a self-cancel with
   a suspending Room write behind it, so everything after that line — including the transition that
   ended the sale — silently did not happen. Before cancelling a job, ask whether it is *this* job.
+- **A row with two writers is written column by column.** #R12: read-modify-write of a whole row
+  from two coroutines is a lost update waiting for its moment, and on the tablet the moment was the
+  first one. If two things own parts of a record, neither may write the other's part.
 - **Two timers on one deadline is one timer too many.** #R10: both digital flows armed a countdown
   and a poll deadline off the same `expiresAt`, each assuming it would be the one to end the sale.
   Whenever two things can end the same sale, ask which one actually does — on a device, not in a

@@ -1,6 +1,32 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-21 (**the tablet found what no review could: the abandonment row had never once been written**)
+## Current status — 2026-09-21, evening (**step 1 passed on the device; the check of it found #R12, now fixed; one re-check, then merge**)
+
+**Every smoke-test run passed on the SM-T220** — cash fill-ups, a digital fill-up to its QR and
+cancelled, kill-mid-dispense resumed, and a pre-pay expiry whose `PAYMENT_ABANDONED` row was written
+by the poller exactly one poll after the last (#R10's fix, on the path that really fires).
+
+**Then the check found the next defect.** Reading the database to confirm the runs, the persisted
+state still claimed a live digital fill-up QR that the screen, and logcat, showed had been cancelled
+at 18:50:33. **#R12:** `pulse_state` has two writers on separate coroutines and every write was a
+read-then-REPLACE of the whole row. `resetToIdle` fires the Idle and the pulse clear together; the
+pulse clear read first, wrote last, and put the cancelled sale back into the row boot resume
+trusts. A restart would have resurrected it — and a cancelled *dispense* the same way. Fixed in
+`c963e81` with column-scoped UPDATEs; an instrumented test on the tablet loses on **iteration 0**
+against the old code and survives 500 racing iterations against the new.
+
+**A correction worth keeping:** logcat does work on this tablet on a mock build
+(`adb logcat --pid`). Only the Arduino bench run takes the port. That, plus `adb run-as` on the
+database, is how both #R10 and #R12 were found — neither was findable from the screen.
+
+**Branch state:** `feature/phase-10-payments`, **55 commits**, **510 JVM tests / 48 classes** and
+**25 instrumented tests on the SM-T220** green, lint and both variants clean. **Still NOT merged.**
+Left: install `c963e81`, cancel one digital fill-up at its QR, confirm `pulse_state` says Idle.
+Then merge.
+
+---
+
+## Previous status — 2026-09-21 (**the tablet found what no review could: the abandonment row had never once been written**)
 
 **One evening, two findings, and the second one only a device could produce.** The scoped review
 (merge-gate step 2) found the six round-3 fixes sound and one blocking defect in their sibling:
@@ -2681,3 +2707,55 @@ is now written by whichever timer actually ends the sale.
 The rest of merge-gate step 1 on the tablet: a cash fill-up end to end, a digital sale to the QR then
 cancel, kill-mid-dispense-and-reopen, and the pre-pay expiry again — this time the row is the
 assertion, not the screen. Then merge.
+
+
+---
+
+### Phase 10h (round 6) — the smoke test passes, and the check of it finds a lost update
+**Date:** 2026-09-21
+**Status:** done
+**Commit(s):** `c963e81` (fix + instrumented test); this board/log update
+
+**Summary (plain language):**
+Every step of the tablet smoke test passed. But when we read the tablet's database afterwards to
+confirm it, the database disagreed with the screen: the screen was idle, and the database still said
+a customer was looking at a QR code — one the attendant had already cancelled. The pump keeps that
+record so it can pick up where it left off after a power cut, which means a power cut at the wrong
+moment would have brought a cancelled sale back to life. Two parts of the app were writing that one
+record at the same moment, and the slower one was putting back an out-of-date copy. Each part now
+writes only its own piece of the record, so the order they land in no longer matters.
+
+**Technical notes:**
+- **#R12 (`c963e81`).** `pulse_state` is one row with two owners — the state writer (every
+  `setState`) and the pulse writer (every N pulses, and the clear in `resetToIdle`) — on separate
+  coroutines. Every repository write read the row and REPLACEd the whole entity with its own fields
+  changed. A read landing before the other writer's write means the REPLACE puts back a stale copy.
+- **The evidence.** Logcat (`--pid`): `/authorise` at 18:50:28, one status poll at 18:50:29, a tap
+  at 18:50:33, then no poll ever again — the sale was cancelled. The row: `pulseCount 0`,
+  `adapterCount null`, `updatedAt` 18:50:33, state JSON still `fillup_digital_awaiting_payment` —
+  exactly `savePulseCount(0, 0, null)`'s signature, carrying the pre-Idle state it had read.
+- **Both directions.** Cancel → the Idle is lost and the cancelled sale is resumed on restart;
+  for a dispense that would re-open the relay toward the authorised litres. Mid-dispense → a state
+  write rolls the pulse count and anchor back, an under-count on resume. Whether that explains 7h's
+  #28/#36 is a suspicion only.
+- **Fix by shape, not by ordering.** Column-scoped `UPDATE`s behind an `INSERT OR IGNORE`; the DAO's
+  full-row `save` is removed so nothing can reach for it. No schema change, no migration.
+  `currentTransactionRef` keeps the `COALESCE` semantics a null ref always had, and the reconciler
+  still leaves `lastPulseTimeMs` alone.
+- **Instrumented, on the tablet.** `PulseRepositoryConcurrencyTest` runs the real SQL on an in-memory
+  Room database: two racing tests (500 iterations each) and four contract tests. Against the pre-fix
+  files both racing tests failed on **iteration 0** — this race loses by default. The throwaway
+  `debug` + test packages it installs were confirmed gone afterwards; `.prod` and `.realhw` untouched.
+- **Pre-existing**, older than phase 10. Phase 10's cancel paths and 10d's resume are where it bites.
+- **Smoke-test results, step 1:** cash fill-ups (three rows, ₦1,490/L, correctly not uploaded),
+  digital-to-QR-and-cancel, kill-mid-dispense resumed without crashing (unrecoverable gap on mock
+  hardware, as expected), pre-pay expiry with the abandonment row written by the poller. **Not seen
+  on a device:** the fill-up expiry half of #R10 — the unit test covers it.
+- **Correction to a standing note:** logcat is usable on this tablet on a mock build; only the Arduino
+  bench run takes the USB port.
+- Verified: **510 JVM tests / 48 classes**, **25 instrumented tests on the SM-T220**; `lintDebug`,
+  `assembleDebugProd` and `compileDebugRealHwKotlin` clean.
+
+**Next:**
+Install `c963e81` on the tablet, cancel one digital fill-up at its QR, and read `pulse_state` — it
+must say Idle. Then merge to `main` and push.
