@@ -242,7 +242,7 @@ compile. PROJECT_LOG entry filed.
 
 ## 🔴 API conformance — from the Reference PDF audit (2026-08-05)
 
-Full analysis: [`API_CONFORMANCE_AUDIT.md`](API_CONFORMANCE_AUDIT.md). The network layer was built
+Full analysis: [`API_CONFORMANCE_AUDIT.md`](closed/API_CONFORMANCE_AUDIT.md). The network layer was built
 against our *summary* of the API, not the Reference itself (which only landed in the repo 2026-08-04).
 9 issues found. **#11, #12, #13 and #16 are FIXED (2026-09-01), device-verified and merged to `main`
 (2026-09-02)**: the two that blocked backend integration and the first real activation, plus the two
@@ -490,13 +490,13 @@ directly on `5a378fe`. One commit, `ce4a0b8`. Verified: JVM **184 tests / 22 cla
   - ✅ **Stage 9d-1 BUILT 2026-09-16** (branch `feature/api-probe-panel`) — `debugProd` build type
     (the debug app pointed at production, own applicationId) plus an **API probe panel** on the
     operator screen that runs step 2 through the real client and keeps the literal bytes. Runbook:
-    [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md).
+    [`GATE_32_RUNBOOK.md`](closed/GATE_32_RUNBOOK.md).
   - ✅ **Stage 9d-2 BUILT 2026-09-16** — every remaining step has a button. Read-only ones
     (`/transactions/{id}`, and a `/config` signed ten minutes in the past for #15) press freely;
     `/authorise` and upload sit behind an acknowledgement switch that resets each time the panel is
     rebuilt. The panel does the amount arithmetic **before** sending and refuses to send a fractional
     naira amount, which is #18c answered by arithmetic: at ₦1490/L, every metered fill-up produces
-    one. Runbook: [`GATE_32_RUNBOOK.md`](GATE_32_RUNBOOK.md).
+    one. Runbook: [`GATE_32_RUNBOOK.md`](closed/GATE_32_RUNBOOK.md).
   - _Superseded, kept for the reasoning:_ before 9d-1, `activate()` was the only client method with
     an in-app caller, so `config()`, `authorise()`, `transactionStatus()` and `uploadTransaction()`
     could not be driven at all — and #32 requires driving them through `PumpApiClient` rather than
@@ -1078,7 +1078,7 @@ captures are the test fixtures.
   *endpoints*; this proves the *app*. A real small sale end to end through the customer UI against
   `SN-TEST-001`, scanning the QR with a phone. Sized like the #32 sitting. Nothing merges until it
   passes.
-  - **Runbook written 2026-09-19: [`GATE_10G_RUNBOOK.md`](GATE_10G_RUNBOOK.md).** Nine steps, each
+  - **Runbook written 2026-09-19: [`GATE_10G_RUNBOOK.md`](closed/GATE_10G_RUNBOOK.md).** Nine steps, each
     with its own pass criterion, built on the #32 runbook's shape.
   - **⚠️ Do not uninstall the `.prod` app before the sitting.** The tablet holds the **schema v4**
     database #32 wrote, including the real ₦149 row. Installing over it runs `MIGRATION_4_5` on

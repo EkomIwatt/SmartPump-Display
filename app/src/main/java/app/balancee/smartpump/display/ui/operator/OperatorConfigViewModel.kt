@@ -2,7 +2,7 @@
 //
 // This is the device-local half of what GET /api/pump/config will eventually push. It exists
 // because the Pump API has no endpoint that tells a pump which fuel it dispenses, and /authorise
-// requires one (API_CONFORMANCE_AUDIT.md §6 #4). When that endpoint ships this screen stays: it
+// requires one (docs/journal/closed/API_CONFORMANCE_AUDIT.md §6 #4). When that endpoint ships this screen stays: it
 // becomes the manual override and the backend-unreachable fallback, so nothing here is throwaway.
 package app.balancee.smartpump.display.ui.operator
 

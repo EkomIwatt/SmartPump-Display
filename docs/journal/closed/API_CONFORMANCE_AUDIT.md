@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-05
 **Auditor:** Claude (paired with Ekomobong Iwatt)
-**Trigger:** [`docs/pump-api-reference-v3.pdf`](../pump-api-reference-v3.pdf) was added to the repo
+**Trigger:** [`docs/pump-api-reference-v3.pdf`](../../pump-api-reference-v3.pdf) was added to the repo
 on 2026-08-04. This is the first time the **primary** API document has been available to read
 directly — the network layer was built in July against `docs/phase7_blocker_resolution.md`, our
 *summary* of it.
@@ -383,6 +383,6 @@ Had `PumpApiClientTest` used the Reference's verbatim JSON, #1 would have been c
 
 ---
 
-*Related: [`phase7_blocker_resolution.md`](../phase7_blocker_resolution.md) ·
-[`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) · [`BOSS_CONFIRMATIONS_DRAFT.md`](BOSS_CONFIRMATIONS_DRAFT.md) ·
-[`TODO.md`](TODO.md)*
+*Related: [`phase7_blocker_resolution.md`](../../phase7_blocker_resolution.md) ·
+[`OPEN_QUESTIONS.md`](../OPEN_QUESTIONS.md) · [`BOSS_CONFIRMATIONS_DRAFT.md`](../BOSS_CONFIRMATIONS_DRAFT.md) ·
+[`TODO.md`](../TODO.md)*

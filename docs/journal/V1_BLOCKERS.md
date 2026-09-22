@@ -208,7 +208,7 @@ Both are quietly holding up built code.
 - [x] **OQ #17 — error recovery copy — SETTLED 2026-09-12** (`c2c62f9`, `16d4495`). Customer gets
   one plain line, diagnostic detail goes to the **swipe-up attendant panel**, and a retryable
   failure now looks different from a terminal one. Copy in
-  [`ERROR_COPY_DRAFT.md`](ERROR_COPY_DRAFT.md). Still flagged: **no error screen exists in
+  [`ERROR_COPY_DRAFT.md`](closed/ERROR_COPY_DRAFT.md). Still flagged: **no error screen exists in
   `docs/Strict design screens/`**, so the layout is a deviation on record.
   - It no longer blocks **#14**'s mapping half or **#15**'s attendant half — both now wait only on
     **#8**, since nothing receives an `ApiError` until the payment flows exist.
@@ -216,7 +216,7 @@ Both are quietly holding up built code.
   early" button ends a fixed sale that will not reach its target, recording litres flowed against
   the amount paid. Covers the link-loss case the OQ named and the far more common one it did not: a
   tank that fills before the target. No automatic timeout. See
-  [`OQ22_OPTIONS_DRAFT.md`](OQ22_OPTIONS_DRAFT.md).
+  [`OQ22_OPTIONS_DRAFT.md`](closed/OQ22_OPTIONS_DRAFT.md).
 
 ## 6. Confirmed out of the V1 build cycle
 

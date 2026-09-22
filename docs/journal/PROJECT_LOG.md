@@ -381,7 +381,7 @@ Sandbox-testable; live money gated behind the 14-day parallel run.
 ### API conformance audit — Reference PDF vs the built network layer
 **Date:** 2026-08-05
 **Status:** done (audit + decisions; no code fixes yet)
-**Commit(s):** this entry + `docs/journal/API_CONFORMANCE_AUDIT.md`
+**Commit(s):** this entry + `docs/journal/closed/API_CONFORMANCE_AUDIT.md`
 
 **Summary (plain language):**
 The official API document from the backend team was added to the project folder yesterday — the first
@@ -410,7 +410,7 @@ payment phase.
 **Technical notes:**
 - **Method:** all 526 lines of the Reference (`pdftotext -layout`) vs `data/network/`,
   `domain/network/`, `di/NetworkModule.kt`. Full write-up with evidence, file:line refs, severities
-  and fixes in `docs/journal/API_CONFORMANCE_AUDIT.md`; tracked as TODO #11–#18.
+  and fixes in `docs/journal/closed/API_CONFORMANCE_AUDIT.md`; tracked as TODO #11–#18.
 - **Root cause:** the layer was built against `phase7_blocker_resolution.md` (our summary of a v3
   `.docx`). The summary was correct on **endpoint inventory and the signing scheme** — and those parts
   of the code are verified correct. Compression dropped the **response envelope**, the **once-only
@@ -929,7 +929,7 @@ attendant panel behind the PIN, where somebody can actually use it.
   under `Locale.UK` renders "Sept" on a modern JVM and "Sep" elsewhere, and the JVM's CLDR data is
   not Android's ICU data.
 - **OQ #17 error copy — SETTLED, all five review items.** Drafted as
-  [`ERROR_COPY_DRAFT.md`](ERROR_COPY_DRAFT.md) so it could be decided by reviewing words rather than
+  [`ERROR_COPY_DRAFT.md`](closed/ERROR_COPY_DRAFT.md) so it could be decided by reviewing words rather than
   answering an abstract question. **Design-authority flag stands on record: there is no error screen
   in `docs/Strict design screens/`**, so both the words and the layout are a deviation.
   - **The split:** customer gets one plain line ("…please see attendant"), diagnostics go to the
@@ -1133,7 +1133,7 @@ fine while the app understood nothing — is the bug that went unnoticed for two
   bytes, not as success.
 - **Not built, deliberately:** #32 steps 3–7 (`/authorise`, amount mismatch, decimal amount, status
   poll, upload). They create transactions; the only code we hold is for production.
-- **Runbook:** `docs/journal/GATE_32_RUNBOOK.md` — install, activate, verify against the dashboard's
+- **Runbook:** `docs/journal/closed/GATE_32_RUNBOOK.md` — install, activate, verify against the dashboard's
   Device ID column, restart to prove persistence, capture `/config`, `adb pull`.
 - Verified: JVM **254 tests / 30 classes** green (was 232 / 27); `compileDebugProdKotlin`,
   `compileDebugRealHwKotlin` and `lintDebug` clean, no lint findings in the new files.

@@ -26,7 +26,7 @@ object SmartPumpMigrations {
      * v2 → v3 (Phase 7b): adds `device_config.fuelType`.
      *
      * `/authorise` requires a fuel type and nothing in the Pump API supplies one
-     * (API_CONFORMANCE_AUDIT.md §6 #4), so an operator sets it on the device. Added as a
+     * (docs/journal/closed/API_CONFORMANCE_AUDIT.md §6 #4), so an operator sets it on the device. Added as a
      * **nullable** column with no default: existing rows migrate to NULL, which the transaction
      * guard treats as "not configured" and blocks on. Back-filling a guess — PETROL, say — would
      * silently authorise a diesel pump against the wrong fuel, so NULL is the honest state.

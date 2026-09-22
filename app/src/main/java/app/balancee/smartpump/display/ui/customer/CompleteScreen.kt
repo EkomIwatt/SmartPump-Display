@@ -130,7 +130,7 @@ fun CompleteScreen(
                     // OQ #22: the attendant ended a fixed sale short. Said plainly on the customer's
                     // screen, because the ledger below shows fewer litres than the amount paid buys,
                     // and the customer is the one who needs to go and settle it. No design screen
-                    // covers this line (flagged in OQ22_OPTIONS_DRAFT.md).
+                    // covers this line (flagged in docs/journal/closed/OQ22_OPTIONS_DRAFT.md).
                     if (litresTarget != null) {
                         Text(
                             text = "Sale ended early — %.2f of %.2f L. Please see the attendant."

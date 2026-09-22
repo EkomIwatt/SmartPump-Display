@@ -26,7 +26,7 @@ When sources disagree, this is the priority:
 3. `docs/design-system.md` — authoritative for tokens (color, type, spacing).
 4. Any other doc — secondary.
 
-Superseded design materials (old screen-spec PDFs, the original scaffolding prompt) were removed during cleanup — git history retains them if ever needed. There are no `_archive/` folders to consult.
+Superseded design materials (old screen-spec PDFs, the original scaffolding prompt) were removed during cleanup — git history retains them if ever needed. Closed runbooks, settled drafts and finished plans live in `docs/journal/closed/` (moved there 2026-09-22) — history, not a reading list; code comments point into it.
 
 ## After every completed phase / stage / run / milestone
 

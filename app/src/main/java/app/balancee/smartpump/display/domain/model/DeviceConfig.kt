@@ -18,7 +18,7 @@ import androidx.compose.runtime.Immutable
  * @param koboPerLitre         Current fuel price in kobo (100 kobo = ₦1). e.g. 87_000 = ₦870/L.
  * @param fuelType             Which fuel this pump dispenses. **Null until an operator sets it** —
  *                             `/authorise` requires it and nothing in the API supplies it
- *                             (`API_CONFORMANCE_AUDIT.md` §6 #4), so 7b sets it device-locally.
+ *                             (`docs/journal/closed/API_CONFORMANCE_AUDIT.md` §6 #4), so 7b sets it device-locally.
  *                             Null must block transactions exactly as a missing price does; see
  *                             [app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase].
  *                             Deliberately nullable rather than defaulted: guessing PETROL would

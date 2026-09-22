@@ -4,8 +4,9 @@
 // HEADERS ONLY. The one response that must never be logged — POST /api/pump/activate — carries
 // `apiKey` and `signingSecret` in its BODY (Reference §4.1), which is exactly what redactHeader
 // cannot touch. `debugRealHw` is a debug build, it runs on the bench tablet against the dev
-// backend, and committing logcats to docs/logcats/ is established practice on this project. So the
-// realistic failure was a live credential landing in git. Reference §4.1: those secrets are
+// backend, and committing logcats to the repo has been practice on this project (docs/logcats/,
+// removed 2026-09-22 — git history keeps them). So the realistic failure was a live credential
+// landing in git. Reference §4.1: those secrets are
 // "emitted exactly once on activation" — a leak costs a revoke-and-reissue at the station.
 //
 // The rule here is an ALLOWLIST, not a denylist: a path logs its body only if it appears in

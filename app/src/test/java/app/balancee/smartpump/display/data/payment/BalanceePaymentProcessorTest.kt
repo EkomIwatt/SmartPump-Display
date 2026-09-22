@@ -255,7 +255,7 @@ class BalanceePaymentProcessorTest {
     /**
      * The split (10e): the customer gets one plain line and the attendant gets the sentence that
      * says what to do about it. Before this the server's own prose went on the customer-facing
-     * display, which is the defect ERROR_COPY_DRAFT.md exists to fix.
+     * display, which is the defect docs/journal/closed/ERROR_COPY_DRAFT.md exists to fix.
      */
     @Test
     fun `a refusal splits into a customer line and an attendant line`() = runTest {

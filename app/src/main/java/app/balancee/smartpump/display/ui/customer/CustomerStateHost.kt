@@ -214,7 +214,7 @@ fun CustomerStateHost(
  * rather than inventing one. The button does the same thing either way: there is no retry in the
  * state machine, and inventing one here would be a behaviour change, not copy.
  *
- * No design screen covers this; see the flag at the top of ERROR_COPY_DRAFT.md.
+ * No design screen covers this; see the flag at the top of docs/journal/closed/ERROR_COPY_DRAFT.md.
  */
 @Composable
 private fun ErrorScreen(

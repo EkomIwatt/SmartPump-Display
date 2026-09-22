@@ -5,7 +5,7 @@
 // It exists because the split has to survive the trip out of the data layer. Until 10e the
 // processor handed back a single `reason` string and the ViewModel wrapped it in a fixed sentence,
 // so every server failure read "Payment was not completed." to the customer and the server's raw
-// prose to the attendant — one row of ERROR_COPY_DRAFT.md's Catalogue A, applied to all twelve.
+// prose to the attendant — one row of docs/journal/closed/ERROR_COPY_DRAFT.md's Catalogue A, applied to all twelve.
 // Deciding the copy is the mapper's job (see `ApiError.toFailureCopy`); carrying it is this type's.
 package app.balancee.smartpump.display.domain.model
 

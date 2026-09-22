@@ -1,4 +1,4 @@
-// ERROR_COPY_DRAFT.md Catalogue A, wired (TODO #14's copy half, 10e 2/2).
+// docs/journal/closed/ERROR_COPY_DRAFT.md Catalogue A, wired (TODO #14's copy half, 10e 2/2).
 //
 // **Matching is on the server's `code`, and on the 401 where there is no code. Never on a string
 // nobody has seen.** That is not caution for its own sake: the Reference PDF quotes "Amount mismatch
