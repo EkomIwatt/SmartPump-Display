@@ -77,6 +77,8 @@ class UsbSerialPulseSource @Inject constructor(
                 }
                 is SerialFrame.Heartbeat -> send(PulseMessage.Heartbeat())
                 is SerialFrame.Boot -> accumulator.onBoot(frame.cumulative) // re-baseline; not fuel
+                // Phase 11c parses these; 11d makes the sale's count come from them.
+                is SerialFrame.Arm, is SerialFrame.Stop -> Unit
                 is SerialFrame.Error -> send(PulseMessage.ParseError("ERR:${frame.code}"))
                 is SerialFrame.Invalid -> send(PulseMessage.ParseError(frame.raw))
             }

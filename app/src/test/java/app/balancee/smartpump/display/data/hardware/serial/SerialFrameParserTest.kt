@@ -77,6 +77,63 @@ class SerialFrameParserTest {
         assertEquals(0x00, SerialFrameParser.xor8("HB:0"))
     }
 
+    // --- Phase 11 session frames (docs/serial-protocol.md §3.2). Golden checksums from the spec,
+    // computed independently of xor8() and matched by the firmware's host test transcript.
+
+    @Test fun arm_golden_vector() {
+        assertEquals(SerialFrame.Arm(tag = 7, start = 12000), SerialFrameParser.parse("ARM:7:12000*5A"))
+    }
+
+    @Test fun stop_golden_vector() {
+        assertEquals(SerialFrame.Stop(tag = 7, cut = 12500), SerialFrameParser.parse("STOP:7:12500*19"))
+    }
+
+    @Test fun arm_and_stop_as_the_firmware_host_test_emitted_them() {
+        assertEquals(SerialFrame.Arm(8, 505), SerialFrameParser.parse("ARM:8:505*56"))
+        assertEquals(SerialFrame.Stop(8, 515), SerialFrameParser.parse("STOP:8:515*11"))
+        assertEquals(SerialFrame.Arm(11, 0), SerialFrameParser.parse("ARM:11:0*6E"))
+    }
+
+    @Test fun nosession_is_an_error_code() {
+        assertEquals(SerialFrame.Error("NOSESSION"), SerialFrameParser.parse("ERR:NOSESSION*20"))
+    }
+
+    @Test fun session_numbers_span_the_full_unsigned_32_bit_range() {
+        // The adapter's counters are unsigned long; Int would wrap the top half negative.
+        assertEquals(
+            SerialFrame.Arm(4_294_967_295, 4_294_967_295),
+            SerialFrameParser.parse(withChecksum("ARM:4294967295:4294967295")),
+        )
+    }
+
+    @Test fun session_start_of_zero_is_valid() {
+        assertEquals(SerialFrame.Arm(1, 0), SerialFrameParser.parse(withChecksum("ARM:1:0")))
+    }
+
+    @Test fun malformed_session_frames_are_invalid() {
+        listOf(
+            "ARM:7",                // one number
+            "ARM:7:1:2",            // three
+            "ARM::5",               // empty tag
+            "ARM:7:",               // empty start — parse() also rejects a body ending in ':'
+            "ARM:0:5",              // tag 0 is never issued
+            "STOP:0:5",
+            "ARM:7:-1",             // sign
+            "ARM:+7:5",
+            "ARM:7:12a",            // non-digit
+            "ARM:7: 5",             // space
+            "ARM:4294967296:1",     // 2^32 — does not fit the adapter's unsigned long
+            "STOP:7:12345678901",   // 11 digits
+        ).forEach { body ->
+            val frame = SerialFrameParser.parse(withChecksum(body))
+            assertTrue("$body should be Invalid, was $frame", frame is SerialFrame.Invalid)
+        }
+    }
+
+    @Test fun session_frame_with_bad_checksum_is_invalid() {
+        assertTrue(SerialFrameParser.parse("ARM:7:12000*5B") is SerialFrame.Invalid)
+    }
+
     /** Build a well-formed line by appending the parser's own checksum — for the cases whose
      *  point is type/payload handling, not checksum correctness (those use golden vectors above). */
     private fun withChecksum(body: String): String =

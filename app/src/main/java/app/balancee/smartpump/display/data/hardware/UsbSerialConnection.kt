@@ -26,6 +26,7 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import app.balancee.smartpump.display.data.hardware.serial.SerialCommands
 import app.balancee.smartpump.display.data.hardware.serial.SerialFrame
 import app.balancee.smartpump.display.data.hardware.serial.SerialFrameParser
 import com.hoho.android.usbserial.driver.UsbSerialDriver
@@ -217,6 +218,9 @@ class UsbSerialConnection @Inject constructor(
                 is SerialFrame.Pulse -> frame.cumulative
                 is SerialFrame.Heartbeat -> frame.cumulative
                 is SerialFrame.Boot -> frame.cumulative
+                // ARM/STOP carry a count from a past instant (the session's start, the cut), not
+                // the current one; the next PULSE/HB brings the current count within ~2 s.
+                is SerialFrame.Arm, is SerialFrame.Stop,
                 is SerialFrame.Error, is SerialFrame.Invalid -> null
             }
             if (count != null) _adapterCount.value = count
@@ -279,7 +283,7 @@ class UsbSerialConnection @Inject constructor(
 
         // app→device liveness heartbeat (the Arduino watchdog fails the relay closed without it).
         const val HEARTBEAT_PERIOD_MS = 1_000L
-        val HEARTBEAT_FRAME: String = "PING*%02X".format(SerialFrameParser.xor8("PING"))
+        val HEARTBEAT_FRAME: String = SerialCommands.PING
 
         val ACTION_USB_PERMISSION: String = "app.balancee.smartpump.display.USB_PERMISSION"
     }
