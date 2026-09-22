@@ -30,4 +30,12 @@ data class PulseStateEntity(
      */
     val adapterCount: Long?,
     val updatedAt: Long,
+    /**
+     * Phase 11e (v6): the adapter session the in-flight sale was armed under — see
+     * `domain.hardware.SaleSession`. All null / 0 when no sale holds one. A third writer on this
+     * row, so it too writes only its own columns (#R12).
+     */
+    val sessionTransactionRef: String? = null,
+    val sessionTag: Long? = null,
+    val sessionBasePulses: Int = 0,
 )

@@ -117,10 +117,33 @@ object SmartPumpMigrations {
         }
     }
 
+    /**
+     * v5 → v6 (Phase 11e): the adapter session the in-flight sale was armed under.
+     *
+     * Since Phase 11 the adapter holds each sale as a tagged session and stops the fuel at its
+     * limit itself (docs/serial-protocol.md). To resume a sale after a restart the app has to know
+     * which tag to ask the adapter about, and for which sale — so the tag is persisted before the
+     * arm is sent. Three ADDed columns on the single `pulse_state` row:
+     *
+     * - `sessionTransactionRef` / `sessionTag` — NULL: no sale holds a session. A pre-v6 row has
+     *   none, which is correct: nothing on it was armed under this protocol.
+     * - `sessionBasePulses` — 0: no earlier session's pulses to carry.
+     *
+     * No table rebuild; the audit log is not touched.
+     */
+    private val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE pulse_state ADD COLUMN sessionTransactionRef TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE pulse_state ADD COLUMN sessionTag INTEGER DEFAULT NULL")
+            db.execSQL("ALTER TABLE pulse_state ADD COLUMN sessionBasePulses INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
     /** All migrations, in order. */
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_2_3,
         MIGRATION_3_4,
         MIGRATION_4_5,
+        MIGRATION_5_6,
     )
 }

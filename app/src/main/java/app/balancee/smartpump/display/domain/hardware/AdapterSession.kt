@@ -10,6 +10,20 @@ import kotlin.random.Random
 /** A session the adapter acknowledged: sale [tag], started at lifetime count [start]. */
 data class AdapterSession(val tag: Long, val start: Long)
 
+/**
+ * The session a sale was last armed under, as this app persists it (Phase 11e) — so a restart can
+ * ask the adapter whether it still holds it, and resume it instead of arming a new one.
+ *
+ * @param transactionRef the sale it belongs to. A saved session is only ever reused for the same
+ *                       sale; the tag of an earlier sale must never open fuel for a later one.
+ * @param tag            the tag the adapter was armed with. Persisted **before** the arm is sent,
+ *                       so a crash between the two still leaves the app able to ask for it.
+ * @param basePulses     the sale's pulses from earlier sessions, when this one was armed. The sale's
+ *                       pulses are `basePulses + (count − start)`. Non-zero only after the adapter
+ *                       lost a session mid-sale and the sale was re-armed for what was left.
+ */
+data class SaleSession(val transactionRef: String, val tag: Long, val basePulses: Int)
+
 /** The adapter's answer to arm / resume / query (spec §3.2). */
 sealed interface SessionReply {
     /** The session is open (fuel authorised) or held (resumable). */

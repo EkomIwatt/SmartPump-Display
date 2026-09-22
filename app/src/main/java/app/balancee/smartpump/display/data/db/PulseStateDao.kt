@@ -66,4 +66,11 @@ interface PulseStateDao {
             "updatedAt = :now WHERE id = 1",
     )
     suspend fun updateReconciled(count: Int, adapterCount: Long, now: Long)
+
+    /** The session writer's columns (Phase 11e). All null / 0 clears it. */
+    @Query(
+        "UPDATE pulse_state SET sessionTransactionRef = :transactionRef, sessionTag = :tag, " +
+            "sessionBasePulses = :basePulses, updatedAt = :now WHERE id = 1",
+    )
+    suspend fun updateSession(transactionRef: String?, tag: Long?, basePulses: Int, now: Long)
 }

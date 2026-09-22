@@ -20,7 +20,7 @@ import app.balancee.smartpump.display.data.db.entities.TransactionEntity
         StationIdentityEntity::class,
         EventEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class SmartPumpDatabase : RoomDatabase() {

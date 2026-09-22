@@ -6,6 +6,7 @@
 package app.balancee.smartpump.display.data.repository
 
 import app.balancee.smartpump.display.data.db.PulseStateDao
+import app.balancee.smartpump.display.domain.hardware.SaleSession
 import app.balancee.smartpump.display.domain.model.TransactionState
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import kotlinx.serialization.encodeToString
@@ -64,6 +65,19 @@ class PulseRepositoryImpl @Inject constructor(
         // timer reads it, and moving it forward here would tell that timer fuel was flowing during
         // the outage, at a moment when the relay was shut.
         dao.updateReconciled(count, adapterCount, now)
+    }
+
+    override suspend fun saveSaleSession(session: SaleSession?) {
+        val now = System.currentTimeMillis()
+        dao.ensureRow(idleJson, now)
+        dao.updateSession(session?.transactionRef, session?.tag, session?.basePulses ?: 0, now)
+    }
+
+    override suspend fun restoreSaleSession(): SaleSession? {
+        val row = dao.get() ?: return null
+        val ref = row.sessionTransactionRef ?: return null
+        val tag = row.sessionTag ?: return null
+        return SaleSession(ref, tag, row.sessionBasePulses)
     }
 
     override suspend fun restorePulseCount(): Int = dao.get()?.pulseCount ?: 0

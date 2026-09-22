@@ -2,6 +2,7 @@
 // Written on every state transition and pulse milestone so recovery is always possible.
 package app.balancee.smartpump.display.domain.repository
 
+import app.balancee.smartpump.display.domain.hardware.SaleSession
 import app.balancee.smartpump.display.domain.model.TransactionState
 
 interface PulseRepository {
@@ -64,6 +65,18 @@ interface PulseRepository {
      * silent). Null is not zero — see PulseStateEntity.adapterCount.
      */
     suspend fun restoreAdapterAnchor(): Long?
+
+    /**
+     * Persist the adapter session a sale is armed under, or clear it with null (Phase 11e).
+     *
+     * Must be written — and awaited — **before** the arm is sent: a crash between the two then
+     * still leaves a tag to ask the adapter about, and the adapter's answer is what stops a
+     * restart handing the sale a second allowance.
+     */
+    suspend fun saveSaleSession(session: SaleSession?)
+
+    /** The last persisted sale session, or null. */
+    suspend fun restoreSaleSession(): SaleSession?
 
     /** The transaction reference stored alongside the last saved state, or null. */
     suspend fun getActiveTransactionRef(): String?

@@ -396,4 +396,42 @@ class SmartPumpMigrationTest {
                 assertTrue("a cash sale has no reference, at any version", c.isNull(2))
             }
     }
+
+    /**
+     * Phase 11e. A pump updated mid-sale must come up with the sale's state and count intact and
+     * **no** adapter session: nothing on a v5 row was armed under the session protocol, so a
+     * session read back from it would be invented.
+     */
+    @Test
+    fun migrate5To6_addsNoSession_andKeepsTheSaleInFlight() {
+        helper.createDatabase(TEST_DB, 5).use { db ->
+            db.execSQL(
+                """
+                INSERT INTO pulse_state (id, transactionStateJson, currentTransactionRef, pulseCount, lastPulseTimeMs, adapterCount, updatedAt)
+                VALUES (1, '{"type":"cash_fixed_dispensing"}', 'BLC-900', 250, 1717171717000, 4250, 1717171717000)
+                """.trimIndent(),
+            )
+        }
+
+        val db = helper.runMigrationsAndValidate(TEST_DB, 6, true, *SmartPumpMigrations.ALL)
+
+        db.query(
+            "SELECT currentTransactionRef, pulseCount, adapterCount, sessionTransactionRef, sessionTag, sessionBasePulses " +
+                "FROM pulse_state WHERE id = 1",
+        ).use { c ->
+            assertTrue("the in-flight row survived", c.moveToFirst())
+            assertEquals("BLC-900", c.getString(0))
+            assertEquals(250, c.getInt(1))
+            assertEquals(4_250L, c.getLong(2))
+            assertTrue("no sale was armed under the session protocol", c.isNull(3))
+            assertTrue(c.isNull(4))
+            assertEquals(0, c.getInt(5))
+        }
+    }
+
+    @Test
+    fun migrate2To6_chainsEveryMigration() {
+        helper.createDatabase(TEST_DB, 2).close()
+        helper.runMigrationsAndValidate(TEST_DB, 6, true, *SmartPumpMigrations.ALL).close()
+    }
 }

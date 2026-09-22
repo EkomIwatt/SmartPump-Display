@@ -14,6 +14,7 @@ import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.hardware.AdapterSession
 import app.balancee.smartpump.display.domain.hardware.SessionReply
+import app.balancee.smartpump.display.domain.hardware.SaleSession
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.EventType
@@ -390,6 +391,18 @@ class FakePulseRepository : PulseRepository {
     override suspend fun restorePulseCount(): Int = pulsesToRestore
     override suspend fun restoreAdapterAnchor(): Long? = anchorToRestore
     override suspend fun getActiveTransactionRef(): String? = activeRef
+
+    /** Seed to drive a Phase 11e resume; like the real row, a save replaces it. */
+    var saleSession: SaleSession? = null
+
+    /** Every session write, in order — null entries are clears. */
+    val savedSessions = mutableListOf<SaleSession?>()
+
+    override suspend fun saveSaleSession(session: SaleSession?) {
+        savedSessions += session
+        saleSession = session
+    }
+    override suspend fun restoreSaleSession(): SaleSession? = saleSession
 
     val lastSavedPulseCount: Pair<Int, Long>? get() = savedPulseCounts.lastOrNull()
 }
