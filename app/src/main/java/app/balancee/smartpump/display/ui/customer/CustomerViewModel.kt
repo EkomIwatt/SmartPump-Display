@@ -42,9 +42,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.domain.config.DeviceConfigSync
+import app.balancee.smartpump.display.domain.hardware.FILLUP_CEILING_LITRES
+import app.balancee.smartpump.display.domain.hardware.MAX_LIMIT_PULSES
 import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
+import app.balancee.smartpump.display.domain.hardware.SessionReply
+import app.balancee.smartpump.display.domain.hardware.litresToLimitPulses
+import app.balancee.smartpump.display.domain.hardware.newSessionTag
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.EventType
 import app.balancee.smartpump.display.domain.model.FailureCopy
@@ -837,7 +842,7 @@ class CustomerViewModel @Inject constructor(
         var lastPersistAtPulses = pulseBaseline
 
         dispenseJob = viewModelScope.launch {
-            relay.startFuelFlow()
+            openRelay(litresToLimitPulses(FILLUP_CEILING_LITRES))
             try {
                 pulseSource.observe().collect { msg ->
                     if (msg !is PulseMessage.Pulse) return@collect
@@ -1360,6 +1365,27 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Phase 11: open the relay under a limit the ADAPTER enforces (docs/serial-protocol.md).
+     * [totalLimitPulses] is the whole sale's limit; the adapter is armed for what is left of it
+     * after [pulseBaseline] — a resumed sale must not be handed its full allowance again. Every
+     * sale gets a fresh tag.
+     *
+     * 11d only opens; 11e acts on the reply (a sale the adapter would not arm should not sit on a
+     * dispensing screen) and resumes a held session instead of arming a new one on boot.
+     */
+    private suspend fun openRelay(totalLimitPulses: Long) {
+        val remaining = totalLimitPulses - pulseBaseline
+        if (remaining <= 0) {
+            // Unreachable while boot resume completes a met target first (targetAlreadyMet); if it
+            // is ever reached, no fuel is better than a pulse the customer did not pay for.
+            android.util.Log.w("CustomerVM", "Not opening the relay: nothing left of $totalLimitPulses pulses")
+            return
+        }
+        val reply = relay.startFuelFlow(remaining.coerceAtMost(MAX_LIMIT_PULSES), newSessionTag())
+        if (reply !is SessionReply.Armed) android.util.Log.w("CustomerVM", "Adapter did not arm the sale: $reply")
+    }
+
     private fun startCashFixedDispensing(
         litresCutoff: Double,
         cashAmountKobo: Long,
@@ -1368,7 +1394,7 @@ class CustomerViewModel @Inject constructor(
         dispenseJob?.cancel()
         var lastPersistAtPulses = pulseBaseline
         dispenseJob = viewModelScope.launch {
-            relay.startFuelFlow()
+            openRelay(litresToLimitPulses(litresCutoff))
             try {
                 pulseSource.observe().collect { msg ->
                     when (msg) {
@@ -1412,6 +1438,11 @@ class CustomerViewModel @Inject constructor(
                         is PulseMessage.Heartbeat,
                         is PulseMessage.Disconnected,
                         is PulseMessage.ParseError -> Unit
+                        // Phase 11e acts on these. Until then the adapter's own cut is caught by
+                        // the pulse check above (the final PULSE frame carries the limit), and a
+                        // lost session leaves the fuel off for the attendant to end the sale.
+                        is PulseMessage.Stopped,
+                        PulseMessage.SessionLost -> Unit
                     }
                 }
             } finally {
@@ -1839,7 +1870,7 @@ class CustomerViewModel @Inject constructor(
         dispenseJob?.cancel()
         var lastPersistAtPulses = pulseBaseline
         dispenseJob = viewModelScope.launch {
-            relay.startFuelFlow()
+            openRelay(litresToLimitPulses(litresAuthorised))
             try {
                 pulseSource.observe().collect { msg ->
                     when (msg) {
@@ -1885,6 +1916,11 @@ class CustomerViewModel @Inject constructor(
                         is PulseMessage.Heartbeat,
                         is PulseMessage.Disconnected,
                         is PulseMessage.ParseError -> Unit
+                        // Phase 11e acts on these. Until then the adapter's own cut is caught by
+                        // the pulse check above (the final PULSE frame carries the limit), and a
+                        // lost session leaves the fuel off for the attendant to end the sale.
+                        is PulseMessage.Stopped,
+                        PulseMessage.SessionLost -> Unit
                     }
                 }
             } finally {

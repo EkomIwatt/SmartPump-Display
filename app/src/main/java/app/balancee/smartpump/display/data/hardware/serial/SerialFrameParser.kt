@@ -1,7 +1,7 @@
 // Stateless line parser for the Arduino pulse-adapter protocol. One raw serial line in,
 // one typed SerialFrame out. No Android / coroutine deps so it is trivially unit-testable —
-// the must-be-right core of the Phase 7a hardware driver. Statefulness (cumulative → delta)
-// lives in PulseAccumulator; this layer only validates framing + checksum and classifies.
+// the must-be-right core of the hardware driver. Mapping counts onto a sale (count − the session
+// start) lives in UsbSerialPulseSource; this layer only validates framing + checksum and classifies.
 package app.balancee.smartpump.display.data.hardware.serial
 
 object SerialFrameParser {

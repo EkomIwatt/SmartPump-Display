@@ -1,6 +1,7 @@
 // Debug-build pulse source. Emits synthetic Pulse events at a configurable rate while
-// the relay is open, plus a periodic Heartbeat regardless. Pulse count resets on each
-// open→close→open cycle so each transaction starts at zero, matching real Arduino behavior.
+// the relay is open, plus a periodic Heartbeat regardless. Since Phase 11 every synthetic pulse goes
+// through the simulated board (MockRelayController.countPulse), so the sale's count is
+// `count − start` and the board cuts at the limit and emits Stopped — the same path as the rig.
 //
 // Defaults are tuned to a typical fuel meter (~50 pulses/sec ≈ 30 L/min at 100 ppl).
 // The debug screen (Phase 5) tweaks `pulsesPerSecond` and may inject failures via
@@ -9,7 +10,6 @@ package app.balancee.smartpump.display.data.hardware
 
 import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
-import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.PulseMessage
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -25,7 +25,7 @@ import javax.inject.Singleton
 
 @Singleton
 class MockPulseSource @Inject constructor(
-    private val relay: RelayController,
+    private val relay: MockRelayController,
 ) : PulseSource {
 
     private val _pulsesPerSecond = MutableStateFlow(DEFAULT_PPS)
@@ -43,20 +43,15 @@ class MockPulseSource @Inject constructor(
     // Out-of-band injection channel for debug-only failure simulation.
     private val injections = Channel<PulseMessage>(capacity = Channel.UNLIMITED)
 
-    private val _adapterCount = MutableStateFlow<Long?>(0L)
     /**
-     * Stands in for the real board's free-running lifetime counter: it advances with every
-     * synthetic pulse and, unlike the per-transaction count, never resets on relay-open.
-     *
-     * Starts at 0 rather than null because the simulated adapter is always "attached" — there is
-     * no cable to be missing. One faithful consequence worth knowing when testing recovery in the
-     * simulator: this object is rebuilt on every app start, so the count returns to 0, which a
-     * reader correctly interprets as "the adapter restarted too" and therefore declines to
-     * attribute. To exercise the attributable path in a debug build, use [injectAdapterGap].
+     * The simulated board's free-running lifetime counter (it lives on MockRelayController, which
+     * plays the board). It advances with every synthetic pulse and never resets on relay-open.
+     * Rebuilt on every app start, so it returns to 0 — which a reader correctly interprets as "the
+     * adapter restarted too". To exercise the attributable recovery path, use [injectAdapterGap].
      */
-    override val adapterCount: StateFlow<Long?> = _adapterCount.asStateFlow()
+    override val adapterCount: StateFlow<Long?> = relay.lifetimeCount
 
-    override suspend fun awaitAdapterCount(timeoutMs: Long): Long? = _adapterCount.value
+    override suspend fun awaitAdapterCount(timeoutMs: Long): Long? = adapterCount.value
 
     fun setPulsesPerSecond(value: Int) {
         _pulsesPerSecond.value = value.coerceIn(MIN_PPS, MAX_PPS)
@@ -83,12 +78,10 @@ class MockPulseSource @Inject constructor(
      * pulse-gap recovery path gets exercised without an Arduino on the bench.
      */
     fun injectAdapterGap(pulses: Int) {
-        _adapterCount.value = (_adapterCount.value ?: 0L) + pulses.coerceAtLeast(0)
+        relay.addUnwatchedPulses(pulses)
     }
 
     override fun observe(): Flow<PulseMessage> = flow {
-        var count = 0
-        var wasDispensing = false
         var lastHeartbeatMs = 0L
 
         while (currentCoroutineContext().isActive) {
@@ -102,22 +95,17 @@ class MockPulseSource @Inject constructor(
             val isDispensing = relay.isDispensing.value
             val rate = _pulsesPerSecond.value
 
-            // Fresh transaction → reset count on each start-of-dispense transition.
-            if (isDispensing && !wasDispensing) count = 0
-            wasDispensing = isDispensing
-
             if (now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
                 emit(PulseMessage.Heartbeat(now))
                 lastHeartbeatMs = now
             }
 
             val capacityPulses = (_tankCapacityLitres.value * PULSES_PER_LITRE).toInt()
-            val tankFull = capacityPulses > 0 && count >= capacityPulses
-            if (isDispensing && rate > 0 && !tankFull) {
-                count++
-                // The session count resets per transaction; the adapter's does not.
-                _adapterCount.value = (_adapterCount.value ?: 0L) + 1
-                emit(PulseMessage.Pulse(count, now))
+            val tankFull = capacityPulses > 0 && relay.salePulses() >= capacityPulses
+            val outcome = if (isDispensing && rate > 0 && !tankFull) relay.countPulse() else null
+            if (outcome != null) {
+                emit(PulseMessage.Pulse(outcome.salePulses, now))
+                if (outcome.cut) emit(PulseMessage.Stopped(outcome.salePulses))
                 delay(1_000L / rate)
             } else {
                 delay(IDLE_POLL_MS)

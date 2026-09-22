@@ -12,6 +12,8 @@ package app.balancee.smartpump.display.ui.customer
 
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
+import app.balancee.smartpump.display.domain.hardware.AdapterSession
+import app.balancee.smartpump.display.domain.hardware.SessionReply
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.EventType
@@ -118,15 +120,33 @@ class FakePulseSource : PulseSource {
     fun emitDisconnected() { flow.tryEmit(PulseMessage.Disconnected) }
 }
 
-/** Records relay start/stop calls and exposes the fuel-flow state the VM invariant depends on. */
+/**
+ * Records relay start/stop calls and exposes the fuel-flow state the VM invariant depends on.
+ * Acknowledges every arm (Phase 11) and records the limit and tag it was armed with.
+ */
 class FakeRelayController : RelayController {
     private val _isDispensing = MutableStateFlow(false)
     override val isDispensing: StateFlow<Boolean> = _isDispensing.asStateFlow()
 
+    private val _session = MutableStateFlow<AdapterSession?>(null)
+    override val session: StateFlow<AdapterSession?> = _session.asStateFlow()
+
     var startCount = 0; private set
     var stopCount = 0; private set
 
-    override suspend fun startFuelFlow() { startCount++; _isDispensing.value = true }
+    /** Every (limitPulses, tag) the VM armed with, in order. */
+    val arms = mutableListOf<Pair<Long, Long>>()
+    val lastLimit: Long? get() = arms.lastOrNull()?.first
+
+    override suspend fun startFuelFlow(limitPulses: Long, tag: Long): SessionReply {
+        startCount++
+        arms += limitPulses to tag
+        _isDispensing.value = true
+        return SessionReply.Armed(AdapterSession(tag, 0L)).also { _session.value = it.session }
+    }
+
+    override suspend fun resumeFuelFlow(tag: Long): SessionReply = SessionReply.NoSession
+    override suspend fun querySession(): SessionReply = SessionReply.NoSession
     override suspend fun stopFuelFlow() { stopCount++; _isDispensing.value = false }
 }
 

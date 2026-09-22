@@ -3,15 +3,14 @@
 // without the trailing '\n' — UsbSerialConnection.writeLine adds it.
 package app.balancee.smartpump.display.data.hardware.serial
 
+import app.balancee.smartpump.display.domain.hardware.MAX_LIMIT_PULSES
+import app.balancee.smartpump.display.domain.hardware.newSessionTag
 import kotlin.random.Random
 
 object SerialCommands {
 
-    /**
-     * The largest limit the adapter accepts (`MAX_LIMIT` in the firmware, spec §7). A sanity bound
-     * on a garbled frame, not a business rule: 10 000 L at 100 pulses/L.
-     */
-    const val MAX_LIMIT: Long = 1_000_000L
+    /** The largest limit the adapter accepts — see [MAX_LIMIT_PULSES]. */
+    const val MAX_LIMIT: Long = MAX_LIMIT_PULSES
 
     /** Liveness, ~1 Hz while the link is up; feeds the adapter's comms-loss watchdog. */
     val PING: String = frame("PING")
@@ -41,17 +40,8 @@ object SerialCommands {
         return frame("RES:$tag")
     }
 
-    /**
-     * A fresh tag for a new sale: random, non-zero, unsigned 32-bit (spec D2). Random rather than a
-     * counter because a counter restarts on reinstall and could match a stale session still held
-     * on the adapter; a random tag collides about once in four billion sales.
-     */
-    fun newTag(random: Random = Random.Default): Long {
-        while (true) {
-            val tag = random.nextInt().toLong() and SerialFrameParser.U32_MAX
-            if (tag != 0L) return tag
-        }
-    }
+    /** A fresh tag for a new sale (spec D2) — see [newSessionTag]. */
+    fun newTag(random: Random = Random.Default): Long = newSessionTag(random)
 
     private fun requireTag(tag: Long) {
         require(tag in 1..SerialFrameParser.U32_MAX) { "tag $tag outside 1..${SerialFrameParser.U32_MAX}" }

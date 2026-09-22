@@ -13,6 +13,8 @@ package app.balancee.smartpump.display.di
 import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.data.hardware.MockPulseSource
 import app.balancee.smartpump.display.data.hardware.MockRelayController
+import app.balancee.smartpump.display.data.hardware.SerialLink
+import app.balancee.smartpump.display.data.hardware.UsbSerialConnection
 import app.balancee.smartpump.display.data.hardware.UsbSerialPulseSource
 import app.balancee.smartpump.display.data.hardware.UsbSerialRelayController
 import app.balancee.smartpump.display.domain.hardware.PulseSource
@@ -27,6 +29,10 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object HardwareModule {
+
+    /** The USB link, behind the seam the relay controller and pulse source are tested against. */
+    @Provides
+    fun provideSerialLink(connection: UsbSerialConnection): SerialLink = connection
 
     @Provides
     @Singleton

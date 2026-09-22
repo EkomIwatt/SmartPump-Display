@@ -53,17 +53,17 @@ import javax.inject.Singleton
 @Singleton
 class UsbSerialConnection @Inject constructor(
     @ApplicationContext private val context: Context,
-) {
+) : SerialLink {
     private val usbManager: UsbManager =
         context.getSystemService(Context.USB_SERVICE) as UsbManager
 
     private val _frames = MutableSharedFlow<SerialFrame>(extraBufferCapacity = 256)
     /** Hot stream of parsed frames. No replay — pulses only matter while a collector is active. */
-    val frames: SharedFlow<SerialFrame> = _frames.asSharedFlow()
+    override val frames: SharedFlow<SerialFrame> = _frames.asSharedFlow()
 
     private val _connected = MutableStateFlow(false)
     /** True while a port is open. Pulse source maps true→false to PulseMessage.Disconnected. */
-    val connected: StateFlow<Boolean> = _connected.asStateFlow()
+    override val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
     private val _adapterCount = MutableStateFlow<Long?>(null)
     /**
@@ -77,7 +77,7 @@ class UsbSerialConnection @Inject constructor(
      * or rebooted, so the last value we saw is not evidence of anything — "unknown" is the honest
      * state and it stops the reconciler computing a gap against a stale anchor.
      */
-    val adapterCount: StateFlow<Long?> = _adapterCount.asStateFlow()
+    override val adapterCount: StateFlow<Long?> = _adapterCount.asStateFlow()
 
     @Volatile private var port: UsbSerialPort? = null
     @Volatile private var ioManager: SerialInputOutputManager? = null
@@ -100,7 +100,7 @@ class UsbSerialConnection @Inject constructor(
      * supported device is attached (a later attach broadcast retries automatically).
      */
     @Synchronized
-    fun ensureStarted() {
+    override fun ensureStarted() {
         if (running) return
         registerReceivers()
         val driver = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager).firstOrNull()
@@ -145,7 +145,7 @@ class UsbSerialConnection @Inject constructor(
      * Write one line (a trailing '\n' is appended). Returns false if the link is down. Serialised
      * via [writeLock] so the heartbeat coroutine and relay commands never interleave on the port.
      */
-    fun writeLine(line: String): Boolean = synchronized(writeLock) {
+    override fun writeLine(line: String): Boolean = synchronized(writeLock) {
         val p = port ?: return false
         try {
             p.write("$line\n".toByteArray(Charsets.US_ASCII), WRITE_TIMEOUT_MS)
