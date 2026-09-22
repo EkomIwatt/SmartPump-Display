@@ -1,16 +1,16 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22 (**Phase 11b done: the firmware owns the cutoff**)
+## Current status — 2026-09-22 (**Phase 11c done: the app speaks the new frames**)
 
-**`main` = `origin/main`, green (534 JVM tests).** Phase 11 on `feature/phase-11-adapter-cutoff`:
-**11a** (spec, [`docs/serial-protocol.md`](../serial-protocol.md)) and **11b** (firmware, `5e073f6`)
-are done. The firmware compiles clean for the Uno and the Mega and passes a new host-side test;
-it has **not** been flashed — and it must not be flashed on a rig used with a pre-Phase-11 app,
-which it refuses (no fuel, by design).
+**`main` = `origin/main`, green (534 JVM tests).** Phase 11 on `feature/phase-11-adapter-cutoff`
+(local, not pushed), green at **554**: **11a** spec ([`docs/serial-protocol.md`](../serial-protocol.md)),
+**11b** firmware (`5e073f6`, compiled + host-tested, **not flashed**), **11c** app parser + outbound
+frames (`f0233e5`). Nothing yet *uses* the new frames — the app still sends a bare `RLY:1`, which
+the new firmware refuses, so do not flash a rig used with this build until 11d/11e land.
 
-**Next session starts at 11c (app: parser + frames), awaiting an explicit go.** Olonade's Mega
-session on **Friday 2026-09-25** switches on `ENABLE_POWER_FAIL_SAVE`. The long pole to live money is
-unchanged: the K-factor (#22, Kelvin).
+**Next session starts at 11d (relay controller + pulse source), awaiting an explicit go.** Olonade's
+Mega session on **Friday 2026-09-25** switches on `ENABLE_POWER_FAIL_SAVE`. The long pole to live
+money is unchanged: the K-factor (#22, Kelvin).
 
 ---
 
@@ -2476,3 +2476,36 @@ and checked every case in the spec against it.
 **Next:**
 11c — the app's parser and frames (`SerialFrame.Arm`/`Stop` with two numbers, the outbound
 `RLY:1:<n>:<t>` / `RES` / `SES?` writers, tests against the spec's checksums). Awaiting go.
+
+### Phase 11c — app: parse the session frames, build every outbound frame in one place
+**Date:** 2026-09-22
+**Status:** done
+**Commit(s):** f0233e5
+
+**Summary (plain language):**
+The tablet can now read the adapter's two new messages — "sale armed, starting from count X" and
+"I stopped the fuel at count Y" — and write the new commands: open with a limit, resume, ask what
+sale you hold. Nothing uses them yet; that is the next step. This is the dictionary, not the
+conversation.
+
+**Technical notes:**
+- `SerialFrame.Arm(tag, start)` / `Stop(tag, cut)`. Parsed strictly — exactly two numbers, 1–10
+  digits, no sign, ≤ 2³² − 1, tag ≠ 0 — because a session frame read wrongly is a sale attributed
+  wrongly. The single-number frames keep their bench-verified `toLongOrNull` parsing (which accepts
+  a sign); not changed, deliberately.
+- `SerialCommands` builds every app → adapter line: `PING`, `RELAY_OFF`, `QUERY_SESSION`,
+  `arm(limit, tag)`, `resume(tag)`, `newTag()` (random non-zero unsigned 32-bit, spec D2).
+  `arm`/`resume` throw on a limit or tag the adapter would refuse — fail loudly in the app rather
+  than send a frame whose only outcome is `ERR:CMD`. `MAX_LIMIT` = 1 000 000, matching the firmware.
+- `UsbSerialConnection`'s `PING` now comes from `SerialCommands`. `Arm`/`Stop` are explicit no-ops
+  in `UsbSerialPulseSource` and in adapter-count tracking (they carry a count from a past instant,
+  not the current one) until 11d.
+- 20 new tests, golden checksums from the spec (computed independently of `xor8`) plus the exact
+  lines the firmware host test emitted — so the two halves are checked against the same bytes.
+  Loosening `parseU32` back to `toLongOrNull` fails the malformed-frames test. **554 green.**
+- `UsbSerialRelayController` still builds its own `RLY:1`/`RLY:0`; 11d rewrites it.
+
+**Next:**
+11d — `RelayController.startFuelFlow(limitPulses, tag)`, the reconnect sends `RES`, the pulse
+source counts `count − start` from `ARM`, `STOP` surfaces to the VM, and the mocks emulate the
+board. Awaiting go.
