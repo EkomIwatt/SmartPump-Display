@@ -7,7 +7,9 @@ session is **tagged by the app** (`RLY:1:<limit>:<tag>`, `ARM:<tag>:<start>`, `S
 behind `ENABLE_POWER_FAIL_SAVE`** (off until Olonade's Friday session). **11b DONE 2026-09-22**
 (`5e073f6`, compiled for Uno + Mega, `hardware/host_test/` passes; not flashed). **11c DONE
 2026-09-22** (`f0233e5`, 554 green). **11d DONE 2026-09-22** (`8bf9245`, 585 green — see the log for
-what moved from 11d's list into 11e). **Next: 11e, awaiting go.**_
+what moved from 11d's list into 11e). **11e DONE 2026-09-22** (`ac4f1e4` Room v6, `4b4c103` view
+model; 599 green; the instrumented 5→6 migration test not yet run). **Next: 11f, the bench gate —
+the user's, on the rig.**_
 
 This is a plan, not a log. Completed sub-deliverables get logged in `PROJECT_LOG.md` as usual.
 

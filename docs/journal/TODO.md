@@ -26,8 +26,10 @@ each entry.
 3. [x] **Tell Balancee about the orphan ₦149 sale** (item 10) — **told by the user 2026-09-22.**
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
-5. [~] **Phase 11 — the adapter owns the cutoff. 11a–11d DONE 2026-09-22; NEXT: 11e (view
-   model), awaiting go.** Firmware compiled + host-tested, **not flashed** — it refuses a
+5. [~] **Phase 11 — the adapter owns the cutoff. 11a–11e DONE 2026-09-22 (all code written,
+   599 green); NEXT: 11f, the bench gate on the Uno rig** (flash the 11b firmware + a `debugRealHw`
+   build of the branch; steps in `PHASE_11_PLAN.md`), then Olonade's Mega on Friday. Also run the
+   instrumented Room 5→6 test on the tablet. Firmware compiled + host-tested, **not flashed** — it refuses a
    pre-Phase-11 app (no fuel), so do not flash a rig still used with one. Branch `feature/phase-11-adapter-cutoff`. Spec confirmed:
    [`docs/serial-protocol.md`](../serial-protocol.md). OQ #26 agreed by Olonade and the boss; the
    user writes the Arduino code. Plan: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md). **Olonade's Mega has

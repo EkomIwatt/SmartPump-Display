@@ -1,17 +1,18 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22 (**Phase 11d done: the app runs on the adapter's session**)
+## Current status — 2026-09-22 (**Phase 11e done: the app side of Phase 11 is built**)
 
 **`main` = `origin/main`, green (534 JVM tests).** Phase 11 on `feature/phase-11-adapter-cutoff`
-(local, not pushed), green at **585**: 11a spec, 11b firmware (`5e073f6`, **not flashed**), 11c
-parser (`f0233e5`), **11d** relay controller + pulse source + mocks (`8bf9245`). The app now arms
-the adapter with a limit and counts `count − start`; what it does not yet do is *act* on the
-adapter's `STOP` / lost session or resume a held session on boot — that is 11e.
+(local, not pushed), green at **599**: 11a spec, 11b firmware (`5e073f6`, **not flashed**), 11c
+parser, 11d relay controller + pulse source, **11e** persistence (`ac4f1e4`, Room v6) and view model
+(`4b4c103`). Everything Phase 11 changes is now written and unit-tested; nothing of it has run on
+hardware.
 
-**Next session starts at 11e (view model), awaiting an explicit go.** New on the board: **#53**, a
-pre-existing floating-point floor in `DeviceConfig.litresCutoff` that short-changes some cash
-sales by 0.01 L. Olonade's Mega session on **Friday 2026-09-25**. The long pole to live money is
-unchanged: the K-factor (#22, Kelvin).
+**Next: 11f, the bench gate** — the user, on the Uno rig, with the 11b firmware flashed and a
+`debugRealHw` build of this branch. The instrumented Room 5→6 migration test is written but has
+not run (it needs the tablet; asked before running, since it reinstalls the debug app). Olonade's
+Mega session on **Friday 2026-09-25**. Also open: **#53** (cash cutoff float floor). The long pole
+to live money is unchanged: the K-factor (#22, Kelvin).
 
 ---
 
@@ -2560,3 +2561,54 @@ without an Arduino follows the same path.
 what is left, a refused/unacknowledged arm leaves the dispensing screen, the backstop compares
 pulses with the limit (an event row if it ever fires first), and boot resume persists the tag and
 uses `SES?` / `RES` instead of arming a new session. Awaiting go.
+
+### Phase 11e — the view model acts on the adapter's session
+**Date:** 2026-09-22
+**Status:** done (unit-tested; the Room 5→6 instrumented test not yet run on a device)
+**Commit(s):** ac4f1e4 (persistence, Room v6), 4b4c103 (view model)
+
+**Summary (plain language):**
+The tablet now listens to the pump's adapter. When the adapter stops the fuel at what was paid
+for, the sale completes. If the adapter restarts mid-sale, the tablet re-arms it for only what is
+left. If the adapter will not start a sale, an unpaid sale goes to a "please see attendant" screen,
+and a paid one stays on screen so the attendant can end it and the payment keeps its record. After
+a tablet restart, the tablet asks the adapter which sale it is holding and carries on with that
+exact count, instead of estimating what it missed.
+
+**Technical notes:**
+- **Persistence (v6):** `pulse_state` gains `sessionTransactionRef`, `sessionTag`,
+  `sessionBasePulses`, written by their own column-scoped UPDATE (#R12). `SaleSession`,
+  `PulseRepository.saveSaleSession` / `restoreSaleSession`. Schema 6.json exported (diff vs 5 is
+  the three columns). Instrumented `migrate5To6_…` and `migrate2To6_…` added and compiled; **not
+  run** — the tablet was attached, but `connectedAndroidTest` reinstalls and then uninstalls the
+  debug app, so it waits for the user's say-so.
+- **`openRelay(txnId, totalLimit, resume)`**: a new sale persists its session (awaited) **before**
+  the arm is sent; a resumed one re-sends the **same tag**, which the adapter treats as a resume
+  under the limit it already holds. A saved session is only ever reused for the same sale.
+- **STOP** completes fixed / cash-fixed exactly as the backstop does; on a fill-up it is the
+  ceiling (logged `FILLUP_CEILING_REACHED`). **SessionLost** re-arms for what is left under a new
+  tag from everything counted (logged `ADAPTER_SESSION_LOST`). **Arm refused / unanswered**:
+  cash-fixed and fill-up → `SEE_ATTENDANT` error (the detail says to return the cash when there is
+  some); paid pre-pay / USSD → stays for End sale early (OQ #22). Logged `ADAPTER_DID_NOT_ARM`.
+  Three new `EventType`s with operator-log headlines.
+- **Backstop in pulses.** Behaviour change worth knowing: a server-authorised figure like 3.355 L
+  arms 335 pulses and now completes at 3.35 L poured (billed 3.355 as before). The old litre test
+  waited for 3.36 L — 5 mL past what was paid for.
+- **Boot resume**: `heldSessionFor` asks `SES?` only for a dispensing state whose saved session
+  belongs to it. Held → resume on the adapter's count; the 7h gap estimate is **skipped** (it would
+  count the same fuel twice). Anything else → the 7h path, then a new session for what is left.
+  `resetToIdle` clears the saved session.
+- **Spec corrected** (§5): the backstop firing before `STOP` is a firmware-loop race, not a defect,
+  so it is not logged; persisting `start` is unnecessary (the adapter re-states it).
+- 14 new tests (**599 green**), `assembleDebug` and `lintDebug` clean in touched files. Against the
+  pre-11e view model 13 of 14 fail; the 14th guards new code and fails when the same-sale check is
+  removed. Two tests were tightened after the first check showed them passing on the old code for
+  the wrong reason.
+- Known window, not closed: a crash after the arm is sent but before the dispensing **state** is
+  persisted (the state writer is asynchronous) restores the pre-dispense screen; a re-attached
+  pre-pay then arms under a new tag, discarding the adapter's held session. Bounded by the
+  watchdog (3 s); the same exposure existed before Phase 11.
+
+**Next:**
+11f — the bench gate on the Uno rig (plan steps 1–8), then Olonade's Mega on Friday. Merge to
+`main` after 11f passes.

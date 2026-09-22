@@ -169,14 +169,19 @@ sale (§9, D2) and persists it **before** sending `RLY:1`.
   non-integer K-factor, `limit / PULSES_PER_LITRE` is slightly *below* `litresCutoff` (e.g. 3.35 L at
   98.7 pulses/L → limit 330 → 3.343 L), so a litres comparison would never fire and a sale whose
   `STOP` was lost would hang. Comparing `count − start >= limit` makes both cutoffs the same test.
-  If the app's fires before a `STOP` arrives, write an event row: that is a defect, not a fallback.
+  ~~If the app's fires before a `STOP` arrives, write an event row: that is a defect.~~
+  **Corrected 2026-09-22 (11e):** it is not a defect. The ISR can cut between the firmware's
+  `serviceStop()` and `emitFrames()` in one `loop()` pass, so a `PULSE` carrying the limit can
+  legitimately arrive before the `STOP`. Both end the sale the same way; neither is logged.
 - **Starting a sale.** Persist `tag` and `limit`, then send `RLY:1:<limit>:<tag>` and wait for
   `ARM:<tag>:…` (proposed: 500 ms). No `ARM` → **re-send the same frame** (safe by rule 1), up to 3
   times. Still nothing → the sale does not start and the app says so; the relay has either never come
   on, or is on under a limit the board enforces.
 - **Counting.** Before `ARM` arrives, pulses are not shown (the `PULSE` frames still carry `count`,
-  so nothing is lost — the app computes `count − start` once it knows `start`). Persist `start` when
-  `ARM` arrives.
+  so nothing is lost — the app computes `count − start` once it knows `start`). ~~Persist `start`
+  when `ARM` arrives.~~ **Not needed (11e):** after a restart `SES?` / `RES` answer with the start,
+  and a finished session's `cut − start` is the limit. What 11e persists is the sale, the tag and
+  the pulses from earlier sessions (`pulse_state` v6).
 - **Ending a sale early or a fill-up on nozzle idle:** `RLY:0`, as today.
 - **`STOP:<tag>:<cut>` for the current sale:** complete it exactly as the app's own cutoff does
   today, with sale pulses = `cut − start` (= `limit`). A `STOP` for another tag is logged and ignored.
@@ -186,7 +191,8 @@ sale (§9, D2) and persists it **before** sending `RLY:1`.
   that.)
 - **`ERR:WDOG` during a sale with the link still up:** send `RES:<tag>` (§9, D5).
 - **`BOOT` during a sale:** send `SES?`. The board may have brought the session back (§6.4); if so,
-  `RES:<tag>` as after any other interruption.
+  `RES:<tag>` as after any other interruption. (Built as a straight `RES:<tag>` — its reply is the
+  same `ARM` / `STOP` / `ERR:NOSESSION` a query would give, one round trip sooner.)
 - **`ERR:NOSESSION` in reply to `RES`/`SES?` during a sale:** the board lost the session — hand to
   the view model to re-arm (§6.4).
 - **Boot resume** (§6.2).
