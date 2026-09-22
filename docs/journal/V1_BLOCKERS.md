@@ -150,7 +150,8 @@ prerequisite *of the run*, which is why it is deferred rather than dropped.
   **OQ #26** firmware-owned cutoff. All three touch the same serial protocol and should go together;
   #26's `RLY:1:<pulses>` is also the signal #24 needs.
 - **#26 is the substantive one:** the fixed-dispense stop is currently a **USB round trip**, not a
-  decision the firmware can make on its own.
+  decision the firmware can make on its own. **Agreed 2026-09-22 by Olonade and the boss** — the
+  board will own the cutoff; the wire format, #23 and #24 are what is left of this conversation.
 
 ## 4. Was blocked on the backend — NOTHING HERE BLOCKS V1 ANY MORE
 

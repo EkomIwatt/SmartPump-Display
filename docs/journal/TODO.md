@@ -26,7 +26,8 @@ each entry.
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
 5. [ ] **Olonade — one conversation:** the serial-protocol questions (**#19**, OQ #23/#24/#26), with
-   **#38** alongside. Then the merged sketch (**#24**) flashed and bench-gated.
+   **#38** alongside. **OQ #26 AGREED 2026-09-22 by Olonade and the boss** (the board owns the
+   cutoff); the wire format and #23/#24 are still to settle. Then the merged sketch (**#24**) flashed and bench-gated.
 6. [ ] **Accuracy before the run:** **#36** (~20 pulses lost per restart), and the fact that no build
    type is yet both real hardware and production (the "no build type" entry under Phase 10).
 7. [ ] **Robustness:** **#42** (a RuntimeException in the OkHttp chain kills the process), **#15**'s

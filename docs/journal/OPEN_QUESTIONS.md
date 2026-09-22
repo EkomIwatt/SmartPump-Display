@@ -35,7 +35,7 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
 - **#23** CAL frame — how the sealed K-factor reaches the app · **protocol**
 - **#24** Session mark — `max()` compares a lifetime count against a per-transaction one · **protocol**
 - **#25** Lost pulses on tablet restart — **decided + built (7h)**; adapter-down half still open
-- **#26** Firmware-owned cutoff — the fixed-dispense stop is a USB round trip · **protocol**
+- **#26** Firmware-owned cutoff — **agreed by Olonade and the boss 2026-09-22**; wire format and build still to do · **protocol**
 
 **Payment integration** — 7-8
 - **#7** Late-payment / QR-expiry reconciliation — backend policy
@@ -146,7 +146,17 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
 
     **Merge gate:** never run against a real board. See the 7h bench checklist in `TODO.md`.
 
-26. **Firmware-owned cutoff — the fixed-dispense stop is a USB round trip, and the overrun can exceed the TEST-01 tolerance.** Raised 2026-09-04. On the fixed/pre-pay/cash-fixed flows the app — not the adapter — decides when to stop: the firmware counts a pulse, frames it, ships it over USB, the app compares litres against the cutoff (`CustomerViewModel.kt:680-682`, and the same shape at `:918`), then sends `RLY:0` back down the wire. Every one of those hops is fuel on the ground. Budget: **0–30 ms** in the firmware's own `PULSE_TX_MIN_MS` throttle before the pulse is even transmitted, **~1–15 ms** of USB plus Android scheduling inbound, a coroutine hop, then `stopFuelFlow()`'s `withContext(Dispatchers.IO)` thread hop and the outbound write (`UsbSerialRelayController.kt:80`), then the firmware's `handleSerial()`. Call it **50–150 ms of controllable latency**, on top of a relay-coil + solenoid + fluid-coast term of 10–50 ms that no software change can touch. At 40 L/min that is **35–100 mL** of unbilled fuel per fixed sale — always in the customer's favour, so the station absorbs it.
+26. **Firmware-owned cutoff — the fixed-dispense stop is a USB round trip, and the overrun can exceed the TEST-01 tolerance.** Raised 2026-09-04.
+
+    > **AGREED 2026-09-22 — Olonade and the boss both agreed (reported by the user).** The adapter
+    > owns the cutoff: the app sends the start and the limit, the board stops the relay itself and
+    > reports back on completion. That agreement also answers this entry's NIS 348 question (is a
+    > board-decided stop acceptable when the adapter is specified read-only on the pulse path) —
+    > the adapter's owner has accepted it. **Still open:** the exact wire format (the proposal below
+    > is ours, not yet ratified), whether #24's session mark and a board-reported session count ride
+    > on the same frame (which would retire #36 by design), and the build + bench gate on top of 7g.
+    > Kept here rather than moved to Resolved until the format is settled.
+ On the fixed/pre-pay/cash-fixed flows the app — not the adapter — decides when to stop: the firmware counts a pulse, frames it, ships it over USB, the app compares litres against the cutoff (`CustomerViewModel.kt:680-682`, and the same shape at `:918`), then sends `RLY:0` back down the wire. Every one of those hops is fuel on the ground. Budget: **0–30 ms** in the firmware's own `PULSE_TX_MIN_MS` throttle before the pulse is even transmitted, **~1–15 ms** of USB plus Android scheduling inbound, a coroutine hop, then `stopFuelFlow()`'s `withContext(Dispatchers.IO)` thread hop and the outbound write (`UsbSerialRelayController.kt:80`), then the firmware's `handleSerial()`. Call it **50–150 ms of controllable latency**, on top of a relay-coil + solenoid + fluid-coast term of 10–50 ms that no software change can touch. At 40 L/min that is **35–100 mL** of unbilled fuel per fixed sale — always in the customer's favour, so the station absorbs it.
 
     **The money is the small half.** On a 10 L run 100 mL is **1%**, which is twice the ±0.5% that `TEST-01-detail` demands and that `docs/FIELD_RUN_SHEET_2026-09-04.md` §0a flags as the pass/fail question. If the relay is gating real fuel during a calibration run, **the round trip alone can fail the accuracy gate** — and it would present as a meter/K-factor problem, which it is not. This is a reason to keep the relay out of the dispenser for the first calibration visit (run sheet §0b already recommends exactly that, for different reasons).
 
