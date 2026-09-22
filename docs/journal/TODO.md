@@ -25,10 +25,12 @@ each entry.
 3. [x] **Tell Balancee about the orphan ₦149 sale** (item 10) — **told by the user 2026-09-22.**
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
-5. [ ] **Olonade — one conversation:** the serial-protocol questions (**#19**, OQ #23/#24/#26), with
-   **#38** alongside. **OQ #26 AGREED 2026-09-22 by Olonade and the boss** (the board owns the
-   cutoff); the wire format and #23/#24 are still to settle. Then the merged sketch (**#24**) flashed and bench-gated.
-6. [ ] **Accuracy before the run:** **#36** (~20 pulses lost per restart), and the fact that no build
+5. [ ] **Phase 11 — the adapter owns the cutoff. PLANNED 2026-09-22; NEXT SESSION STARTS HERE —
+   awaiting an explicit go.** OQ #26 agreed by Olonade and the boss; the user writes the Arduino
+   code. Plan: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md) — start at **11a** (protocol spec, for the
+   user to confirm). Retires **#36**, OQ #24/#26 and the **7g firmware gate (#19/#24)**, and
+   possibly **#38**. OQ #23 (`CAL`) stays open.
+6. [ ] **Accuracy before the run:** ~~**#36**~~ (folded into Phase 11), and the fact that no build
    type is yet both real hardware and production (the "no build type" entry under Phase 10).
 7. [ ] **Robustness:** **#42** (a RuntimeException in the OkHttp chain kills the process), **#15**'s
    enforcement half (clock skew), **#44**.
@@ -798,7 +800,7 @@ sold.
 
 **Not blocked:** #20 and #21 can proceed now. #19 gates the firmware half.
 
-## 🟢 Phase 7h — pulse continuity across restarts (BUILT, gate PASSED 2026-09-13, ready to merge)
+## ✅ Phase 7h — pulse continuity across restarts — MERGED (pushed 2026-09-13, `fcba619`)
 
 Branch `feature/phase-7h-pulse-continuity`, five commits, off `main` at `3aea28c`. Closes the live
 under-billing in OQ #25. **Needed nothing from Olonade, the backend, the boss or the meter** — the
@@ -857,7 +859,10 @@ original five, plus `15dee70` from the bench gate.
   genuine fuel — a **4.48 L gap was rejected on the bench and was almost certainly real**. Rejecting
   under-bills, so it fails safe, but the station absorbs it. Add a lag term when recomputing.
 - [→] **29. The `events` table has no backend home.** — moved to [`POST_V1.md`](POST_V1.md) 2026-09-22: not V1-blocking.
-- [ ] **36. The app loses ~20 pulses per restart.** New, and only visible once the trace was on
+- [~] **36. The app loses ~20 pulses per restart. → Phase 11 (2026-09-22).** Root cause confirmed
+  in code: `startDispensing` opens the relay *before* the collector attaches, and the fresh
+  `PulseAccumulator` zeroes the first frame. Fixed by design by the board-latched session start
+  (`ARM`) in [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md); no separate app-only fix. Original entry: New, and only visible once the trace was on
   screen. Tracking the offset between the board's count and the app's transaction count across one
   sale with three restarts: 2389 → 2391 → 2414 → 2436 → 2456, so the app ends each cycle ~22 pulses
   (~0.22 L) behind the board, 67 across the run. It **under**-counts, so the customer is never
@@ -899,7 +904,7 @@ original five, plus `15dee70` from the bench gate.
   measured in step 8. One-line firmware change, so it belongs with **#19**'s firmware work rather
   than on its own. Not a substitute for **OQ #26** — see there.
 
-## 🔼 Phase 10 — payment feature flows (#8) — PLANNED, NOT STARTED
+## ✅ Phase 10 — payment feature flows (#8) — MERGED 2026-09-22 (`2d7c06d`); below is the plan as built
 
 _Planned 2026-09-17, immediately after the gate (#32) closed. **Awaiting an explicit go.**_
 

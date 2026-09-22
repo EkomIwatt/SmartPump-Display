@@ -1,6 +1,19 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22, afternoon (**#R11 and #R8 merged; the V1 app work left is items 6–8**)
+## Current status — 2026-09-22, session end (**Phase 11 planned: the adapter owns the cutoff**)
+
+**`main` = `origin/main`, green (534 JVM tests).** Today: #R11 and #R8 merged and device-checked; the
+orphan ₦149 reported to Balancee; **OQ #26 agreed by Olonade and the boss** — the adapter will stop
+the relay itself at a limit the app sends, and the user writes the Arduino code.
+
+**Next session starts at Phase 11, sub-deliverable 11a** — a protocol spec for the user to confirm
+before any code: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md). Awaiting an explicit go. It retires #36
+(root cause now confirmed in code), OQ #24/#26 and the 7g firmware gate. The long pole to live money
+is unchanged: the K-factor (#22, Kelvin).
+
+---
+
+## Previous status — 2026-09-22, afternoon (**#R11 and #R8 merged; the V1 app work left is items 6–8**)
 
 **`main` = `origin/main`, green (534 JVM tests).** #R8 merged (`9045c3b`): a pre-pay QR cancelled
 at the pump now leaves a `PAYMENT_ABANDONED` row, seen on the tablet. The orphan ₦149 has been
@@ -3037,3 +3050,34 @@ Before this, a cancelled pre-pay left no trace at all. Checked on the real table
 
 **Next:**
 The V1 path in `TODO.md`, items 6–8: #36, #42, #15's enforcement half, #44, then #40 and #34.
+
+### Phase 11 planned — the adapter owns the cutoff; docs tidied
+**Date:** 2026-09-22
+**Status:** done (planning only — no code)
+**Commit(s):** `dc3ea13` (OQ #26 agreed), and this commit
+
+**Summary (plain language):**
+The pump's controller board will now stop the fuel itself when a sale reaches its paid amount,
+instead of waiting for the tablet to tell it to. That means an app crash can no longer give fuel
+away, stops are sharper, and a small counting loss after restarts goes away. Olonade and the boss
+agreed to it; the plan is written and the work starts next session with a short protocol document
+to confirm.
+
+**Technical notes:**
+- **#36 root cause confirmed in code:** `startDispensing` calls `relay.startFuelFlow()` before
+  `pulseSource.observe().collect`, and the fresh `PulseAccumulator` returns 0 for the first frame,
+  whose cumulative already includes everything since the relay opened. Fixed by design in Phase 11
+  (board-latched session start, `ARM`), so the app-only fix was not built.
+- Plan: `docs/journal/PHASE_11_PLAN.md` — 11a spec → 11b firmware (on the 7g sketch, `hardware/`
+  files only) → 11c frames → 11d relay/pulse source → 11e view model → 11f one bench session that
+  also closes the 7g gate. Recommended resume design: `RES` (the board keeps the limit), not
+  re-sending a remaining count.
+- NIS 348 explained to the user (SON's accuracy standard; the spec's reading is "the adapter must be
+  read-only"); the board-decided stop is accepted by the adapter's owner.
+- Docs tidied: stale headers corrected on `TODO.md` (7h and Phase 10 said unmerged/not started);
+  status banners on `BOSS_CONFIRMATIONS_DRAFT.md`, `GATE_10G_RUNBOOK.md`, `PHASE_7_PLAN.md`,
+  `BRANCH_7G_SUMMARY.md`, `V1_BLOCKERS.md` §3. Nothing deleted; larger reorganisation proposed to the
+  user, not done.
+
+**Next:**
+Phase 11a on the user's go.

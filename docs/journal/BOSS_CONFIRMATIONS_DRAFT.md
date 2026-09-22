@@ -5,8 +5,11 @@
 message, because they go to overlapping audiences and several of the #18 asks are sharper versions of
 questions the original draft already carried.
 
-**Status:** draft, not yet sent. When answers come back → reconcile into `OPEN_QUESTIONS.md`, update
-`phase7_blocker_resolution.md`, and unblock #8 (payment feature flows).
+**Status (corrected 2026-09-22):** never sent, and no longer the gate it was written as. Items 1–4
+were answered **by observation** at the #32 gate (2026-09-16/17) before the message went out, and #8
+is built and merged. What is still worth asking lives in [`POST_V1.md`](POST_V1.md), which points
+back here for wording. _Original status line:_ draft, not yet sent. When answers come back →
+reconcile into `OPEN_QUESTIONS.md`, update `phase7_blocker_resolution.md`, and unblock #8.
 
 _Originally drafted 2026-07-04. Rewritten 2026-09-02 after the API conformance audit — see
 `API_CONFORMANCE_AUDIT.md` §6._

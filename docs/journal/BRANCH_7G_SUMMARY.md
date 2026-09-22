@@ -2,6 +2,10 @@
 
 **Written:** 2026-09-02 · **Updated:** 2026-09-07
 
+> **2026-09-22 — the firmware now merges inside Phase 11** ([`PHASE_11_PLAN.md`](PHASE_11_PLAN.md)):
+> its `hardware/` files are the base the adapter-owned cutoff is built on, and its bench gate is
+> step 1 of 11f. Retire this file once Phase 11 merges.
+
 > **Status 2026-09-07 — the split recommended below was carried out.** The docs and the app-side
 > `PULSES_PER_LITRE` change are now on `main`. The **five firmware commits are still on the branch**,
 > unmerged, exactly as the merge assessment argues. Everything is pushed. The gate has not moved:

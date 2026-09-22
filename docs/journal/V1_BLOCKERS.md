@@ -25,7 +25,7 @@ work sorted by a different question: **who is holding it up, and what can move t
 |---|---|
 | Built and merged | all 5 flows, **the digital payment flows + upload job (Phase 10, #8, merged 2026-09-22)**, real Arduino pulse + relay, operator config, persistence/boot-resume, signed network layer, encrypted credentials, device identity, 7h pulse continuity, Phase 9 API work + the activation step, the API probe panel |
 | Proven against production | the whole paid lifecycle — activate → `/config` → authorise → Paystack → `PAID` → dispense upload, by observation, on a real ₦149 sale (**#32**, 2026-09-16/17) |
-| Built, unmerged | 7g firmware (bench gate) |
+| Built, unmerged | 7g firmware (bench gate) — **to be merged inside Phase 11**, gated in the same rig session |
 | Not built | release signing (deferred to last by decision) |
 | Never measured | the meter K-factor — every litre figure runs on a placeholder |
 
@@ -145,6 +145,11 @@ prerequisite *of the run*, which is why it is deferred rather than dropped.
     Not a backend dependency.
 
 ## 3. Blocked on Olonade — one conversation, not three
+
+> **2026-09-22: #26 agreed; the user writes the firmware.** This section is now **Phase 11** —
+> see [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md). #24 is built there as the board-latched session
+> start; #23 (`CAL`) is what remains here.
+
 
 - [ ] **OQ #23** `CAL` frame (how the sealed K-factor reaches the app) · **OQ #24** session mark ·
   **OQ #26** firmware-owned cutoff. All three touch the same serial protocol and should go together;

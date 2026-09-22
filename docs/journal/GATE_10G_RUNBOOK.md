@@ -10,6 +10,9 @@ not run one of these. Same tablet, same pump (`SN-TEST-001`), same live backend,
 
 Nothing on `feature/phase-10-payments` merges until this passes.
 
+**Status (2026-09-22):** passed on real money 2026-09-20; Phase 10 merged to `main` 2026-09-22
+(`2d7c06d`). Kept as the template for the next gate run on a phone and a live backend.
+
 ---
 
 ## ⚠️ Read this before you plug anything in

@@ -7,6 +7,9 @@ sub-phase replaces **one** mock and leaves the rest — and the build — green.
 
 This is a plan, not a log. Completed sub-phases get logged in `PROJECT_LOG.md` as usual.
 
+**Status (2026-09-22): historical.** 7a/7b/7e/7f and the network layer shipped (7e as part of
+Phase 10); 7d (USSD) is parked in `POST_V1.md`. Current work is tracked in `TODO.md`.
+
 ## Scope (resolves OPEN_QUESTIONS #20)
 
 **All six sub-phases below are V1.** Confirmed 2026-05-28. None of them touch the spec's
