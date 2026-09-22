@@ -170,7 +170,11 @@ wanted._
 4a. [ ] **#R11 — a timed-out pre-pay sits on an error card until a person taps it.** `ErrorScreen`
    has no auto-dismiss and its button is the only way out (`CustomerStateHost.kt:194`), so an
    unattended pump whose customer walked away stays on "This pump stopped waiting for the payment"
-   indefinitely and the next customer cannot start a sale. The countdown's own path used to return
+   indefinitely. **Not a lockout** (corrected 2026-09-22): "Start over" is on the customer's screen,
+   so the next customer can tap past it — but they arrive to an error card first. Options: leave it;
+   show it for a fixed time (e.g. 2 min) then return to Idle — **recommended**, the
+   `PAYMENT_ABANDONED` row keeps a late "I paid" answerable either way; or return to Idle at once and
+   lose the message. The countdown's own path used to return
    to Idle, which is where the expectation in step 1 came from; the poller's path does not, and the
    poller is the one that runs. **Not a defect — a product decision**: the copy is doing real work
    (it tells a customer who may have paid to see the attendant) and dropping it to Idle silently
