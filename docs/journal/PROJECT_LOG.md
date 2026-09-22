@@ -1,18 +1,16 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22 (**Phase 11e done: the app side of Phase 11 is built**)
+## Current status — 2026-09-22 (**Phase 11e done and device-tested: the app side of Phase 11 is built**)
 
 **`main` = `origin/main`, green (534 JVM tests).** Phase 11 on `feature/phase-11-adapter-cutoff`
-(local, not pushed), green at **599**: 11a spec, 11b firmware (`5e073f6`, **not flashed**), 11c
-parser, 11d relay controller + pulse source, **11e** persistence (`ac4f1e4`, Room v6) and view model
-(`4b4c103`). Everything Phase 11 changes is now written and unit-tested; nothing of it has run on
-hardware.
+(local, not pushed): **599 unit tests green, and the whole instrumented suite 27/27 on the SM-T220**
+— which caught a defect that would have silently disabled power-cut recovery on every fresh
+install (fixed, `7841812`). 11a–11e are built; nothing of Phase 11 has run against the adapter yet.
 
 **Next: 11f, the bench gate** — the user, on the Uno rig, with the 11b firmware flashed and a
-`debugRealHw` build of this branch. The instrumented Room 5→6 migration test is written but has
-not run (it needs the tablet; asked before running, since it reinstalls the debug app). Olonade's
-Mega session on **Friday 2026-09-25**. Also open: **#53** (cash cutoff float floor). The long pole
-to live money is unchanged: the K-factor (#22, Kelvin).
+`debugRealHw` build of this branch (`PHASE_11_PLAN.md`). Then Olonade's Mega on **Friday
+2026-09-25**. Also open: **#53** (cash cutoff float floor). The long pole to live money is
+unchanged: the K-factor (#22, Kelvin).
 
 ---
 
@@ -2612,3 +2610,33 @@ exact count, instead of estimating what it missed.
 **Next:**
 11f — the bench gate on the Uno rig (plan steps 1–8), then Olonade's Mega on Friday. Merge to
 `main` after 11f passes.
+
+### Phase 11e (device check) — instrumented suite on the tablet; a fresh-install defect fixed
+**Date:** 2026-09-22
+**Status:** done
+**Commit(s):** 7841812
+
+**Summary (plain language):**
+We ran the database tests on the real tablet. The new upgrade path passed, but a neighbouring test
+showed that on a brand-new install the app could never create the record it uses to survive a
+power cut — so it would have silently lost that protection, with no error anywhere. Tablets that
+upgrade from the current version were not affected. Fixed and re-tested on the tablet: all 27
+device tests pass.
+
+**Technical notes:**
+- `SmartPumpMigrationTest` (incl. the new `migrate5To6_…` / `migrate2To6_…`): 13/13 on the SM-T220.
+- `PulseRepositoryConcurrencyTest`: **5 of 6 failed** — the row was never there. Cause:
+  `PulseStateDao.ensureRow` is `INSERT OR IGNORE` with an explicit column list; on a database Room
+  creates fresh, `sessionBasePulses` was `NOT NULL` with no SQL default, so the insert violated the
+  constraint and `OR IGNORE` swallowed it. Every state / pulse / session UPDATE then hit no row. A
+  migrated database was fine (the migration adds `DEFAULT 0`), which is why the migration tests
+  passed and the unit tests (fake repository) could not see it.
+- Fix: `@ColumnInfo(defaultValue = "0")` on the entity (fresh schema now matches a migrated one;
+  `6.json` regenerated — v6 never shipped) **and** `ensureRow` names every column. `ensureRow` is
+  the only hand-written INSERT in the app.
+- Whole instrumented suite: **27/27**. Unit suite: 599. The test run installs and uninstalls the
+  plain debug app only; the tablet's `.realhw` and `.prod` installs were checked before and after
+  and are untouched.
+
+**Next:**
+11f — the bench gate on the Uno rig.

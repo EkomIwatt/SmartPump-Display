@@ -28,8 +28,8 @@ each entry.
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
 5. [~] **Phase 11 — the adapter owns the cutoff. 11a–11e DONE 2026-09-22 (all code written,
    599 green); NEXT: 11f, the bench gate on the Uno rig** (flash the 11b firmware + a `debugRealHw`
-   build of the branch; steps in `PHASE_11_PLAN.md`), then Olonade's Mega on Friday. Also run the
-   instrumented Room 5→6 test on the tablet. Firmware compiled + host-tested, **not flashed** — it refuses a
+   build of the branch; steps in `PHASE_11_PLAN.md`), then Olonade's Mega on Friday. Instrumented
+   suite 27/27 on the tablet (2026-09-22) — it caught a fresh-install defect, fixed in `7841812`. Firmware compiled + host-tested, **not flashed** — it refuses a
    pre-Phase-11 app (no fuel), so do not flash a rig still used with one. Branch `feature/phase-11-adapter-cutoff`. Spec confirmed:
    [`docs/serial-protocol.md`](../serial-protocol.md). OQ #26 agreed by Olonade and the boss; the
    user writes the Arduino code. Plan: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md). **Olonade's Mega has
@@ -65,6 +65,11 @@ each entry.
 - **A fake that never suspends cannot see a cancellation.** Three tests were incapable of failing
   until `FakeEventRepository` got one `yield()`. When the thing under test is coroutine-shaped, the
   fake has to be too.
+- **A hand-written INSERT must name every NOT NULL column, and the instrumented suite runs after
+  every schema change.** Phase 11e: `ensureRow`'s `INSERT OR IGNORE` left out a new NOT NULL column
+  with no SQL default, so on a fresh database the insert failed and `OR IGNORE` made it silent —
+  power-cut recovery gone, no error. Migrated databases were fine, so the migration test passed and
+  only `PulseRepositoryConcurrencyTest` on the tablet saw it. JVM tests use fakes and cannot.
 - `lintDebug` and `assembleDebugProd` must be **separate** gradle invocations — together they race
   on generated Hilt sources and lint dies with an internal error that is not a code defect.
 - Wait for an explicit **"go"** before starting a new phase; commit per logical sub-deliverable.
