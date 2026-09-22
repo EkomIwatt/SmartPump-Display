@@ -83,4 +83,31 @@ enum class EventType {
      * Not an error, and common — most are simply someone changing their mind at the screen.
      */
     PAYMENT_ABANDONED,
+
+    /**
+     * The pulse adapter would not start a sale — it refused the command or never acknowledged it
+     * (Phase 11). No fuel was authorised. Refused usually means firmware older than the app; no
+     * answer means the cable, the adapter's power, or the adapter itself.
+     *
+     * A paid sale stays on its dispensing screen so the attendant can end it (OQ #22) and the
+     * money keeps its record; an unpaid one goes to an error. Either way this row is what tells the
+     * operator the pump, not the customer, was the problem.
+     */
+    ADAPTER_DID_NOT_ARM,
+
+    /**
+     * The pulse adapter restarted mid-sale and no longer held the sale's session, so the app
+     * re-armed it for what was left (Phase 11). Fuel the adapter counted but had not yet reported
+     * before it restarted is in neither count — the same loss 7h's reconciliation reports as
+     * unexplained. [pulses] is what the sale had counted when it was re-armed.
+     */
+    ADAPTER_SESSION_LOST,
+
+    /**
+     * A fill-up reached the adapter's runaway ceiling (FILLUP_CEILING_LITRES) and the adapter cut
+     * the fuel (Phase 11, spec D4). The ceiling is a backstop, not a limit anyone chose for this
+     * customer: it means the app kept the relay open without the nozzle-idle shutoff ending the
+     * sale, or the ceiling is set below a real fill. Either way, worth a look.
+     */
+    FILLUP_CEILING_REACHED,
 }

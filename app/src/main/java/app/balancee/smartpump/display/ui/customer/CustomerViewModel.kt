@@ -47,6 +47,7 @@ import app.balancee.smartpump.display.domain.hardware.MAX_LIMIT_PULSES
 import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
+import app.balancee.smartpump.display.domain.hardware.SaleSession
 import app.balancee.smartpump.display.domain.hardware.SessionReply
 import app.balancee.smartpump.display.domain.hardware.litresToLimitPulses
 import app.balancee.smartpump.display.domain.hardware.newSessionTag
@@ -409,7 +410,15 @@ class CustomerViewModel @Inject constructor(
     private suspend fun bootResume() {
         val restored = pulseRepository.restoreTransactionState()
         val persistedPulses = pulseRepository.restorePulseCount()
-        val restoredPulses = persistedPulses + reconcileGapOnResume(restored, persistedPulses)
+        // Phase 11e: if the adapter still holds this sale's session, its count is exact — the sale
+        // resumes from it, and the 7h gap estimate (which would count the same fuel twice) is
+        // skipped. Only when the adapter has lost the session does the old reconciliation run.
+        val held = heldSessionFor(restored)
+        val restoredPulses = if (held != null) {
+            held.basePulses
+        } else {
+            persistedPulses + reconcileGapOnResume(restored, persistedPulses)
+        }
         when (restored) {
             is TransactionState.Idle,
             is TransactionState.ModeSelect,
@@ -498,7 +507,7 @@ class CustomerViewModel @Inject constructor(
                     )
                 } else {
                     setState(restored.copy(litresSoFar = resumedLitres(restored.litresSoFar)))
-                    startDispensing(restored.litresAuthorised, method)
+                    startDispensing(restored.litresAuthorised, method, resume = held)
                 }
             }
 
@@ -521,6 +530,7 @@ class CustomerViewModel @Inject constructor(
                         litresCutoff = restored.litresCutoff,
                         cashAmountKobo = restored.cashAmountKobo,
                         txnId = restored.txnId,
+                        resume = held,
                     )
                 }
             }
@@ -530,8 +540,34 @@ class CustomerViewModel @Inject constructor(
                 // No target to overshoot on an open-ended fill-up, so there is no completion
                 // branch here — recovery only ever corrects the running figure.
                 setState(restored.copy(litresSoFar = resumedLitres(restored.litresSoFar)))
-                startFillupDispensing(restored.txnId)
+                startFillupDispensing(restored.txnId, resume = held)
             }
+        }
+    }
+
+    /**
+     * Phase 11e — the adapter session this restored sale was armed under, if the adapter still
+     * holds it (open, held by its watchdog, or finished at its limit). Null for any state that was
+     * not dispensing, for a saved session that belongs to another sale, and whenever the adapter
+     * says anything else — it rebooted, it is not there, or it holds someone else's tag. Null
+     * sends boot resume down the 7h path.
+     *
+     * The saved session must match on the sale as well as the tag: a tag is only ever reused for the
+     * sale it was issued to.
+     */
+    private suspend fun heldSessionFor(restored: TransactionState): SaleSession? {
+        val txnId = when (restored) {
+            is TransactionState.FixedDispensing -> restored.txnId
+            is TransactionState.CashFixedDispensing -> restored.txnId
+            is TransactionState.FillupDispensing -> restored.txnId
+            else -> return null
+        }
+        val saved = runCatchingCancellable { pulseRepository.restoreSaleSession() }.getOrNull() ?: return null
+        if (saved.transactionRef != txnId) return null
+        return when (val reply = relay.querySession()) {
+            is SessionReply.Armed -> saved.takeIf { reply.session.tag == saved.tag }
+            is SessionReply.Stopped -> saved.takeIf { reply.tag == saved.tag }
+            else -> null
         }
     }
 
@@ -657,6 +693,8 @@ class CustomerViewModel @Inject constructor(
                 // anchor, and a stale one would let the next start invent a gap out of fuel that
                 // was never part of a sale.
                 runCatching { pulseRepository.savePulseCount(0, 0L, null) }
+                // And the adapter session: a finished sale's tag must never be offered to the next.
+                runCatching { pulseRepository.saveSaleSession(null) }
             }
         }
         pulseBaseline = 0
@@ -833,41 +871,62 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    private fun startFillupDispensing(txnId: String) {
+    private fun startFillupDispensing(txnId: String, resume: SaleSession? = null) {
         dispenseJob?.cancel()
         fillupWatchdogJob?.cancel()
         // viewModelScope is Main-confined, so a local Long mutated by both the pulse
         // coroutine and the watchdog coroutine is safe without synchronisation.
         var lastPulseMs = 0L
         var lastPersistAtPulses = pulseBaseline
+        var salePulses = pulseBaseline
+        // The runaway backstop (spec D4) — a fill-up ends on nozzle idle, not here.
+        val totalLimit = litresToLimitPulses(FILLUP_CEILING_LITRES)
 
         dispenseJob = viewModelScope.launch {
-            openRelay(litresToLimitPulses(FILLUP_CEILING_LITRES))
             try {
+                when (openRelay(txnId, totalLimit, resume)) {
+                    Arming.FLOWING -> Unit
+                    Arming.FINISHED -> { fillupCeilingReached(txnId, totalLimit.toInt()); return@launch }
+                    Arming.FAILED -> { onAdapterDidNotStart(cashInHand = false); return@launch }
+                }
                 pulseSource.observe().collect { msg ->
-                    if (msg !is PulseMessage.Pulse) return@collect
-                    lastPulseMs = msg.timestampMs
-                    val current = currentState() as? TransactionState.FillupDispensing
-                        ?: return@collect
-                    val cumulativePulses = pulseBaseline + msg.count
-                    val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
-                    setState(current.copy(litresSoFar = litres))
-                    if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
-                        lastPersistAtPulses = cumulativePulses
-                        runCatching {
-                            // Anchor the adapter's own free-running count to this write. A restart then
-                            // measures the gap as (count now - count then); null here means the link was
-                            // down, which reads as "unknown" rather than zero.
-                            pulseRepository.savePulseCount(
-                                cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
-                            )
+                    when (msg) {
+                        is PulseMessage.Pulse -> {
+                            lastPulseMs = msg.timestampMs
+                            val current = currentState() as? TransactionState.FillupDispensing
+                                ?: return@collect
+                            salePulses = pulseBaseline + msg.count
+                            setState(current.copy(litresSoFar = salePulses.toDouble() / PULSES_PER_LITRE))
+                            if (salePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
+                                lastPersistAtPulses = salePulses
+                                runCatching {
+                                    // Anchor the adapter's own free-running count to this write. A restart then
+                                    // measures the gap as (count now - count then); null here means the link was
+                                    // down, which reads as "unknown" rather than zero.
+                                    pulseRepository.savePulseCount(
+                                        salePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                                    )
+                                }
+                            }
                         }
+
+                        is PulseMessage.Stopped -> fillupCeilingReached(txnId, pulseBaseline + msg.count)
+
+                        PulseMessage.SessionLost ->
+                            if (rearmAfterLostSession(txnId, totalLimit, salePulses) == Arming.FINISHED) {
+                                fillupCeilingReached(txnId, salePulses)
+                            }
+
+                        is PulseMessage.Heartbeat,
+                        is PulseMessage.Disconnected,
+                        is PulseMessage.ParseError -> Unit
                     }
                 }
             } finally {
                 relay.stopFuelFlow()
             }
         }
+
 
         fillupWatchdogJob = viewModelScope.launch {
             while (true) {
@@ -907,6 +966,27 @@ class CustomerViewModel @Inject constructor(
         // cancels the in-flight jobs, and this is the one thing it wants to find still running.
         // Harmless for a cash sale; it refreshes the stored price and nothing consumes it.
         viewModelScope.launch { paymentProcessor.prepareToAuthorise() }
+    }
+
+    /**
+     * The adapter cut a fill-up at the runaway ceiling (spec D4). Ends it exactly as nozzle idle
+     * does — on what flowed, [salePulses] — and records it, because a real sale should never reach
+     * the ceiling.
+     */
+    private suspend fun fillupCeilingReached(txnId: String, salePulses: Int) {
+        val current = currentState() as? TransactionState.FillupDispensing ?: return
+        runCatchingCancellable {
+            events.record(
+                type = EventType.FILLUP_CEILING_REACHED,
+                pulses = salePulses,
+                transactionRef = txnId,
+                detail = "The pulse adapter stopped a fill-up at the ${FILLUP_CEILING_LITRES.toInt()} L " +
+                    "safety limit. The sale ended on what flowed.",
+            )
+        }
+        fillupWatchdogJob?.cancel()
+        fillupWatchdogJob = null
+        fillupShutoff(current.copy(litresSoFar = salePulses.toDouble() / PULSES_PER_LITRE))
     }
 
     /**
@@ -1365,90 +1445,188 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
+    /** What arming the adapter for a sale came to (Phase 11e). */
+    private enum class Arming {
+        /** The adapter acknowledged; count the sale. */
+        FLOWING,
+
+        /** The adapter already delivered the sale's whole limit — it holds it as finished. */
+        FINISHED,
+
+        /** The adapter refused or never answered. No fuel is authorised. */
+        FAILED,
+    }
+
     /**
-     * Phase 11: open the relay under a limit the ADAPTER enforces (docs/serial-protocol.md).
-     * [totalLimitPulses] is the whole sale's limit; the adapter is armed for what is left of it
-     * after [pulseBaseline] — a resumed sale must not be handed its full allowance again. Every
-     * sale gets a fresh tag.
+     * Open the relay for sale [txnId] under a limit the ADAPTER enforces (docs/serial-protocol.md).
+     * [totalLimitPulses] is the whole sale's limit.
      *
-     * 11d only opens; 11e acts on the reply (a sale the adapter would not arm should not sit on a
-     * dispensing screen) and resumes a held session instead of arming a new one on boot.
+     * - [resume] is a session boot resume found the adapter still holding for this sale. It is
+     *   re-sent with the **same tag**, which the adapter treats as a resume under the limit it
+     *   already has (spec §4, rule 1) — so a restart can never hand the sale a second allowance —
+     *   and the sale's pulses carry on from where the adapter counted them, including any that
+     *   flowed while this app was down.
+     * - Otherwise the sale is armed as a new session for what is left after [pulseBaseline], with a
+     *   fresh tag that is persisted **before** the command is sent, so a crash between the two
+     *   still leaves a tag to ask the adapter about.
      */
-    private suspend fun openRelay(totalLimitPulses: Long) {
-        val remaining = totalLimitPulses - pulseBaseline
-        if (remaining <= 0) {
-            // Unreachable while boot resume completes a met target first (targetAlreadyMet); if it
-            // is ever reached, no fuel is better than a pulse the customer did not pay for.
-            android.util.Log.w("CustomerVM", "Not opening the relay: nothing left of $totalLimitPulses pulses")
-            return
+    private suspend fun openRelay(txnId: String, totalLimitPulses: Long, resume: SaleSession?): Arming {
+        val reply = if (resume != null) {
+            pulseBaseline = resume.basePulses
+            // The limit is ignored for a tag the adapter holds; sent only because the frame needs one.
+            val limit = (totalLimitPulses - resume.basePulses).coerceIn(1L, MAX_LIMIT_PULSES)
+            relay.startFuelFlow(limit, resume.tag)
+        } else {
+            val remaining = totalLimitPulses - pulseBaseline
+            if (remaining <= 0) return Arming.FINISHED
+            val session = SaleSession(txnId, newSessionTag(), pulseBaseline)
+            runCatchingCancellable { pulseRepository.saveSaleSession(session) }.onFailure {
+                // Arm anyway: a sale that cannot be resumed by tag still resumes the 7h way.
+                android.util.Log.e("CustomerVM", "Could not persist the adapter session for $txnId", it)
+            }
+            relay.startFuelFlow(remaining.coerceAtMost(MAX_LIMIT_PULSES), session.tag)
         }
-        val reply = relay.startFuelFlow(remaining.coerceAtMost(MAX_LIMIT_PULSES), newSessionTag())
-        if (reply !is SessionReply.Armed) android.util.Log.w("CustomerVM", "Adapter did not arm the sale: $reply")
+        return when (reply) {
+            is SessionReply.Armed -> Arming.FLOWING
+            is SessionReply.Stopped -> Arming.FINISHED
+            else -> {
+                runCatchingCancellable {
+                    events.record(
+                        type = EventType.ADAPTER_DID_NOT_ARM,
+                        transactionRef = txnId,
+                        detail = adapterRefusalDetail(reply),
+                    )
+                }
+                Arming.FAILED
+            }
+        }
+    }
+
+    private fun adapterRefusalDetail(reply: SessionReply): String = when (reply) {
+        is SessionReply.Refused ->
+            "The pulse adapter refused the start command (${reply.code}). Its firmware is probably older than this app."
+        SessionReply.NoReply ->
+            "The pulse adapter did not answer. Check its cable and power."
+        SessionReply.NoSession ->
+            "The pulse adapter no longer held this sale. It may have restarted."
+        else -> "The pulse adapter did not start the sale."
+    }
+
+    /**
+     * The adapter restarted mid-sale and lost its session (`ERR:NOSESSION` in reply to the relay
+     * controller's automatic RES). Re-arm for what is left, from everything this sale has counted —
+     * the one case that falls back to the app's own figure (spec §6.4).
+     */
+    private suspend fun rearmAfterLostSession(txnId: String, totalLimitPulses: Long, salePulses: Int): Arming {
+        runCatchingCancellable {
+            events.record(
+                type = EventType.ADAPTER_SESSION_LOST,
+                pulses = salePulses,
+                transactionRef = txnId,
+                detail = "The pulse adapter restarted mid-sale. Re-armed for the remaining " +
+                    "${totalLimitPulses - salePulses} pulses; fuel it counted but had not yet " +
+                    "reported before it restarted is not in this sale.",
+            )
+        }
+        pulseBaseline = salePulses
+        return openRelay(txnId, totalLimitPulses, resume = null)
+    }
+
+    /**
+     * An unpaid sale (cash-fixed, fill-up) the adapter would not start: leave the dispensing
+     * screen for an error rather than sit on it with no fuel coming. A paid one does not come here —
+     * it stays, so the attendant can end it and the money keeps its record.
+     */
+    private suspend fun onAdapterDidNotStart(cashInHand: Boolean) {
+        relay.stopFuelFlow()
+        runCatchingCancellable { pulseRepository.saveSaleSession(null) }
+        setState(
+            FailureCopy(
+                customerMessage = FailureCopy.SEE_ATTENDANT,
+                attendantDetail = "The pump did not start: the pulse adapter did not accept the sale. " +
+                    (if (cashInHand) "Return the customer's cash. " else "") +
+                    "Check the adapter's cable and power, then start again.",
+                recoverable = true,
+            ).toErrorState()
+        )
     }
 
     private fun startCashFixedDispensing(
         litresCutoff: Double,
         cashAmountKobo: Long,
         txnId: String,
+        resume: SaleSession? = null,
     ) {
         dispenseJob?.cancel()
+        // Pulses, not litres — see startDispensing.
+        val totalLimit = litresToLimitPulses(litresCutoff)
         var lastPersistAtPulses = pulseBaseline
+        var salePulses = pulseBaseline
         dispenseJob = viewModelScope.launch {
-            openRelay(litresToLimitPulses(litresCutoff))
             try {
+                when (openRelay(txnId, totalLimit, resume)) {
+                    Arming.FLOWING -> Unit
+                    Arming.FINISHED -> { completeCashFixed(litresCutoff, cashAmountKobo, txnId); return@launch }
+                    Arming.FAILED -> { onAdapterDidNotStart(cashInHand = true); return@launch }
+                }
                 pulseSource.observe().collect { msg ->
                     when (msg) {
                         is PulseMessage.Pulse -> {
                             val current = currentState() as? TransactionState.CashFixedDispensing
                                 ?: return@collect
-                            val cumulativePulses = pulseBaseline + msg.count
-                            val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
-                            if (litres >= litresCutoff) {
-                                relay.stopFuelFlow()
-                                completeAndRecord(
-                                    TransactionState.Complete(
-                                        flow = TransactionFlow.CASH_FIXED,
-                                        txnId = txnId,
-                                        litres = litresCutoff,
-                                        amountKobo = cashAmountKobo,
-                                        method = null,
-                                        priceKoboPerLitre = current.priceKoboPerLitre,
-                                    )
-                                )
+                            salePulses = pulseBaseline + msg.count
+                            if (salePulses >= totalLimit) {
+                                completeCashFixed(litresCutoff, cashAmountKobo, txnId)
                                 return@collect
                             }
-                            setState(current.copy(litresSoFar = litres))
-                            if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
-                                lastPersistAtPulses = cumulativePulses
+                            setState(current.copy(litresSoFar = salePulses.toDouble() / PULSES_PER_LITRE))
+                            if (salePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
+                                lastPersistAtPulses = salePulses
                                 runCatching {
                                     // Anchor the adapter's own free-running count to this write. A restart then
                                     // measures the gap as (count now - count then); null here means the link was
                                     // down, which reads as "unknown" rather than zero.
                                     pulseRepository.savePulseCount(
-                                        cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                                        salePulses, msg.timestampMs, pulseSource.adapterCount.value,
                                     )
                                 }
                             }
                         }
 
-                        // The USB cable is fixed in the kiosk, so the app no longer models a
-                        // disconnect/pause state. Comms-loss safety still holds on the adapter's own
-                        // dead-man watchdog (relay fails closed when the PING heartbeat stops); on a
-                        // genuine transient the relay controller re-asserts RLY:1 and counting resumes.
+                        is PulseMessage.Stopped -> completeCashFixed(litresCutoff, cashAmountKobo, txnId)
+
+                        PulseMessage.SessionLost ->
+                            if (rearmAfterLostSession(txnId, totalLimit, salePulses) == Arming.FINISHED) {
+                                completeCashFixed(litresCutoff, cashAmountKobo, txnId)
+                            }
+
+                        // See startDispensing: no disconnect state; the adapter's watchdog and the
+                        // relay controller's RES carry a transient.
                         is PulseMessage.Heartbeat,
                         is PulseMessage.Disconnected,
                         is PulseMessage.ParseError -> Unit
-                        // Phase 11e acts on these. Until then the adapter's own cut is caught by
-                        // the pulse check above (the final PULSE frame carries the limit), and a
-                        // lost session leaves the fuel off for the attendant to end the sale.
-                        is PulseMessage.Stopped,
-                        PulseMessage.SessionLost -> Unit
                     }
                 }
             } finally {
                 relay.stopFuelFlow()
             }
         }
+    }
+
+    /** A cash-fixed sale reached its cutoff — by the adapter's cut or the backstop. */
+    private suspend fun completeCashFixed(litresCutoff: Double, cashAmountKobo: Long, txnId: String) {
+        val current = currentState() as? TransactionState.CashFixedDispensing ?: return
+        relay.stopFuelFlow()
+        completeAndRecord(
+            TransactionState.Complete(
+                flow = TransactionFlow.CASH_FIXED,
+                txnId = txnId,
+                litres = litresCutoff,
+                amountKobo = cashAmountKobo,
+                method = null,
+                priceKoboPerLitre = current.priceKoboPerLitre,
+            )
+        )
     }
 
     private fun generateCashTxnId(): String =
@@ -1866,67 +2044,93 @@ class CustomerViewModel @Inject constructor(
         }
     }
 
-    private fun startDispensing(litresAuthorised: Double, method: PaymentMethod?) {
+    private fun startDispensing(
+        litresAuthorised: Double,
+        method: PaymentMethod?,
+        resume: SaleSession? = null,
+    ) {
         dispenseJob?.cancel()
+        val txnId = (currentState() as? TransactionState.FixedDispensing)?.txnId ?: return
+        // Pulses, not litres — the same number the adapter was armed with, so the backstop below and
+        // the adapter's own cut are one test. A litre comparison can sit a fraction of a pulse under
+        // its target forever at a non-integer K-factor.
+        val totalLimit = litresToLimitPulses(litresAuthorised)
         var lastPersistAtPulses = pulseBaseline
+        var salePulses = pulseBaseline
         dispenseJob = viewModelScope.launch {
-            openRelay(litresToLimitPulses(litresAuthorised))
             try {
+                when (openRelay(txnId, totalLimit, resume)) {
+                    Arming.FLOWING -> Unit
+                    Arming.FINISHED -> { completeFixed(litresAuthorised, method); return@launch }
+                    // Paid for: stays on its screen so the attendant can end it (OQ #22) and the
+                    // money keeps its record. The event row says the pump was the problem.
+                    Arming.FAILED -> return@launch
+                }
                 pulseSource.observe().collect { msg ->
                     when (msg) {
                         is PulseMessage.Pulse -> {
                             val current = currentState() as? TransactionState.FixedDispensing
                                 ?: return@collect
-                            val cumulativePulses = pulseBaseline + msg.count
-                            val litres = cumulativePulses.toDouble() / PULSES_PER_LITRE
-                            if (litres >= litresAuthorised) {
-                                relay.stopFuelFlow()
-                                completeAndRecord(
-                                    TransactionState.Complete(
-                                        flow = current.flow,
-                                        txnId = current.txnId,
-                                        litres = litresAuthorised,
-                                        amountKobo = current.amountKobo,
-                                        method = method,
-                                        paymentReference = current.paymentReference,
-                                        startedAtEpochMs = current.startedAtEpochMs,
-                                        priceKoboPerLitre = current.priceKoboPerLitre,
-                                    )
-                                )
+                            salePulses = pulseBaseline + msg.count
+                            // The backstop. Which arrives first — this pulse or the adapter's STOP —
+                            // is a race in the firmware's own loop, not a defect; both end the sale
+                            // the same way.
+                            if (salePulses >= totalLimit) {
+                                completeFixed(litresAuthorised, method)
                                 return@collect
                             }
-                            setState(current.copy(litresSoFar = litres))
-                            if (cumulativePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
-                                lastPersistAtPulses = cumulativePulses
+                            setState(current.copy(litresSoFar = salePulses.toDouble() / PULSES_PER_LITRE))
+                            if (salePulses - lastPersistAtPulses >= PULSE_PERSIST_EVERY_N) {
+                                lastPersistAtPulses = salePulses
                                 runCatching {
                                     // Anchor the adapter's own free-running count to this write. A restart then
                                     // measures the gap as (count now - count then); null here means the link was
                                     // down, which reads as "unknown" rather than zero.
                                     pulseRepository.savePulseCount(
-                                        cumulativePulses, msg.timestampMs, pulseSource.adapterCount.value,
+                                        salePulses, msg.timestampMs, pulseSource.adapterCount.value,
                                     )
                                 }
                             }
                         }
 
+                        is PulseMessage.Stopped -> completeFixed(litresAuthorised, method)
+
+                        PulseMessage.SessionLost ->
+                            if (rearmAfterLostSession(txnId, totalLimit, salePulses) == Arming.FINISHED) {
+                                completeFixed(litresAuthorised, method)
+                            }
+
                         // The USB cable is fixed in the kiosk, so the app no longer models a
-                        // disconnect/pause state. Comms-loss safety still holds on the adapter's own
-                        // dead-man watchdog (relay fails closed when the PING heartbeat stops); on a
-                        // genuine transient the relay controller re-asserts RLY:1 and counting resumes.
+                        // disconnect/pause state. Comms-loss safety holds on the adapter's own
+                        // dead-man watchdog, and the relay controller resumes the held session
+                        // (RES) when the link, the watchdog or the adapter comes back.
                         is PulseMessage.Heartbeat,
                         is PulseMessage.Disconnected,
                         is PulseMessage.ParseError -> Unit
-                        // Phase 11e acts on these. Until then the adapter's own cut is caught by
-                        // the pulse check above (the final PULSE frame carries the limit), and a
-                        // lost session leaves the fuel off for the attendant to end the sale.
-                        is PulseMessage.Stopped,
-                        PulseMessage.SessionLost -> Unit
                     }
                 }
             } finally {
                 relay.stopFuelFlow()
             }
         }
+    }
+
+    /** A fixed sale reached what was paid for — by the adapter's cut or the backstop. */
+    private suspend fun completeFixed(litresAuthorised: Double, method: PaymentMethod?) {
+        val current = currentState() as? TransactionState.FixedDispensing ?: return
+        relay.stopFuelFlow()
+        completeAndRecord(
+            TransactionState.Complete(
+                flow = current.flow,
+                txnId = current.txnId,
+                litres = litresAuthorised,
+                amountKobo = current.amountKobo,
+                method = method,
+                paymentReference = current.paymentReference,
+                startedAtEpochMs = current.startedAtEpochMs,
+                priceKoboPerLitre = current.priceKoboPerLitre,
+            )
+        )
     }
 
     // ---- Cancel / dismiss ----------------------------------------------------------

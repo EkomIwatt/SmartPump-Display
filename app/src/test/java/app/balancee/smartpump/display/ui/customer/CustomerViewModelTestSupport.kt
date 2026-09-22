@@ -118,6 +118,12 @@ class FakePulseSource : PulseSource {
     }
 
     fun emitHeartbeat() { flow.tryEmit(PulseMessage.Heartbeat(0L)) }
+
+    /** The adapter cut the relay at the sale's limit; [count] is the session's pulses at the cut. */
+    fun emitStopped(count: Int) { flow.tryEmit(PulseMessage.Stopped(count)) }
+
+    /** The adapter restarted and no longer holds the sale's session. */
+    fun emitSessionLost() { flow.tryEmit(PulseMessage.SessionLost) }
     fun emitDisconnected() { flow.tryEmit(PulseMessage.Disconnected) }
 }
 
@@ -139,15 +145,31 @@ class FakeRelayController : RelayController {
     val arms = mutableListOf<Pair<Long, Long>>()
     val lastLimit: Long? get() = arms.lastOrNull()?.first
 
+    /** What the adapter answers an arm with. Defaults to acknowledging it from count 0. */
+    var armReply: (limitPulses: Long, tag: Long) -> SessionReply =
+        { _, tag -> SessionReply.Armed(AdapterSession(tag, 0L)) }
+
+    /** What the adapter answers `SES?` with — boot resume asks it. */
+    var queryReply: SessionReply = SessionReply.NoSession
+    var queryCount = 0; private set
+
+    /** Runs as each arm is sent, before the reply — for asserting what was persisted by then. */
+    var onArm: ((limitPulses: Long, tag: Long) -> Unit)? = null
+
     override suspend fun startFuelFlow(limitPulses: Long, tag: Long): SessionReply {
         startCount++
         arms += limitPulses to tag
-        _isDispensing.value = true
-        return SessionReply.Armed(AdapterSession(tag, 0L)).also { _session.value = it.session }
+        onArm?.invoke(limitPulses, tag)
+        val reply = armReply(limitPulses, tag)
+        if (reply is SessionReply.Armed) {
+            _session.value = reply.session
+            _isDispensing.value = true
+        }
+        return reply
     }
 
     override suspend fun resumeFuelFlow(tag: Long): SessionReply = SessionReply.NoSession
-    override suspend fun querySession(): SessionReply = SessionReply.NoSession
+    override suspend fun querySession(): SessionReply { queryCount++; return queryReply }
     override suspend fun stopFuelFlow() { stopCount++; _isDispensing.value = false }
 }
 

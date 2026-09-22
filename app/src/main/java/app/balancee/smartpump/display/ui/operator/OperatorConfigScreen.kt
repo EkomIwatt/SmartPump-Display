@@ -326,6 +326,15 @@ private fun headlineFor(entry: OperationalEvent): Pair<String, androidx.compose.
         // unaccounted for at the pump (10f).
         EventType.DISPENSE_UPLOAD_FAILED ->
             (entry.litres?.let { "%.2f L not recorded".format(it) } ?: "Sale not recorded") to WarningRed
+
+        // Red: a customer was turned away by the pump itself (Phase 11).
+        EventType.ADAPTER_DID_NOT_ARM -> "Pump did not start" to WarningRed
+
+        // Red: fuel may have gone uncounted while the adapter restarted.
+        EventType.ADAPTER_SESSION_LOST -> "Adapter restarted mid-sale" to WarningRed
+
+        // Gold: a real fill hit the backstop, or something kept the relay open.
+        EventType.FILLUP_CEILING_REACHED -> "Fill-up hit the safety limit" to PrimaryGold
     }
 
 @Composable
