@@ -28,4 +28,19 @@ data class TransactionEntity(
      * a guess.
      */
     val recoveredLitres: Double = 0.0,
+    /**
+     * The server's `BPM-…` reference from `/authorise`. NULL for a cash sale, which nothing
+     * authorised and which therefore has nothing to upload — see `Transaction.isUploadable`.
+     * Nullable rather than defaulted for the same reason `device_config.fuelType` is: there is no
+     * honest value to invent for a row that never had one.
+     */
+    val paymentReference: String? = null,
+    /** Epoch millis when fuel began to flow. NULL on rows written before 10f. */
+    val startedAt: Long? = null,
+    /**
+     * Why this row will never be uploaded — set only for a TERMINAL failure. A row carrying this
+     * is deliberately left unsynced: it stays in the audit log, visible, with the reason attached,
+     * rather than being retried forever or silently marked done.
+     */
+    val uploadError: String? = null,
 )

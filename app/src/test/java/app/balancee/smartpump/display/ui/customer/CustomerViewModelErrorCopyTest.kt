@@ -6,6 +6,7 @@
 // error in front of someone who cannot act on either.
 package app.balancee.smartpump.display.ui.customer
 
+import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.PaymentMethod
 import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
@@ -117,9 +118,8 @@ class CustomerViewModelErrorCopyTest {
     // ---- The recoverable flag is now read --------------------------------------------------------
 
     /**
-     * Every local failure is recoverable today, so this pins the flag rather than proving both
-     * branches. The screen reads it now — gold "please try again" against red "cannot continue" —
-     * and the non-recoverable branch arrives with the server errors in the payment phase.
+     * Every local failure is recoverable: an attendant can set a price, and a customer can be sent
+     * to find one. The terminal branch belongs to the server, and is pinned below.
      */
     @Test
     fun `local failures are marked recoverable`() {
@@ -129,5 +129,53 @@ class CustomerViewModelErrorCopyTest {
         vm.onStartTransaction()
 
         assertTrue(error(vm).recoverable)
+    }
+
+    // ---- The server decides both lines (10e) -----------------------------------------------------
+
+    /**
+     * The customer's sentence is the **processor's**, not one the ViewModel picks at the call site.
+     * Until 10e every server failure read "Payment was not completed." here, so a refusal that was
+     * really a *not yet* told the customer their money had bounced.
+     */
+    @Test
+    fun `the customer line comes from the failure, not from the call site`() {
+        val vm = startPrepay()
+
+        harness.payment.fail(
+            reason = "Balanceè has not seen this payment yet — DO NOT DISPENSE.",
+            customerMessage = FailureCopy.PAYMENT_NOT_CONFIRMED,
+        )
+
+        assertEquals(FailureCopy.PAYMENT_NOT_CONFIRMED, error(vm).message)
+    }
+
+    /**
+     * The branch the screen's red state exists for. A pump whose credentials the server rejects
+     * cannot sell, and painting that gold invites an attendant to keep retrying it.
+     */
+    @Test
+    fun `a terminal server refusal reaches the screen as a dead end`() {
+        val vm = startPrepay()
+
+        harness.payment.fail(
+            reason = "This pump's credentials were rejected (401).",
+            customerMessage = FailureCopy.SEE_ATTENDANT,
+            recoverable = false,
+        )
+
+        val e = error(vm)
+        assertEquals(FailureCopy.SEE_ATTENDANT, e.message)
+        assertTrue(!e.recoverable)
+    }
+
+    private fun startPrepay(): CustomerViewModel {
+        val vm = harness.build()
+        vm.onStartTransaction()
+        vm.onModeTileTap(TransactionMode.PRE_PAY)
+        vm.onAmountTileTap(amountNaira = 5000)
+        vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+        vm.onModeConfirm()
+        return vm
     }
 }

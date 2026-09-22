@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.balancee.smartpump.display.BuildConfig
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
@@ -202,14 +203,22 @@ private fun HardwareCard(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Tank capacity: %.1f L".format(tankCapacityLitres),
+            // Two decimals, not one: the floor is now well below 0.1 L and a single decimal
+            // rendered every small value as "0.1 L" or "0.0 L", which is what made 0.5 look like
+            // the bottom of the range.
+            text = "Tank capacity: %.2f L".format(tankCapacityLitres),
             style = MaterialTheme.typography.titleMedium,
             color = TextPrimary,
         )
         Slider(
             value = tankCapacityLitres.toFloat(),
             onValueChange = { onTankCapacity(it.toDouble()) },
-            valueRange = 0.5f..200f,
+            // Floor dropped from 0.5 L for the 10g gate (2026-09-19). A fill-up fixes its amount
+            // before the QR appears — there is no amount-entry step to keep it small — so the
+            // simulated tank *is* the bill. At ₦1,490/L, 0.5 L is ₦745 of a real card on a real
+            // Paystack checkout, and 60 L (the default) is ₦89,400. Dragging fully left now gives
+            // ~₦149, which is what makes proving Flow 3 against production affordable.
+            valueRange = 0.1f..200f,
         )
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -239,8 +248,23 @@ private fun PaymentCard(
     onFailureReason: (String) -> Unit,
     onTriggerInstantResolve: () -> Unit,
 ) {
-    BalanceeCard(borderColor = PrimaryGold) {
-        LabelText(text = "Mock payment processor", color = PrimaryGold)
+    BalanceeCard(borderColor = if (BuildConfig.MOCK_PAYMENTS) PrimaryGold else WarningRed) {
+        LabelText(
+            text = "Mock payment processor",
+            color = if (BuildConfig.MOCK_PAYMENTS) PrimaryGold else WarningRed,
+        )
+        if (!BuildConfig.MOCK_PAYMENTS) {
+            // 10d: this build talks to the real backend, so nothing below does anything. Saying so
+            // matters on the gate build — an attendant pressing "force resolve" on a live sale and
+            // seeing no effect would reasonably conclude the app was broken.
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "This build takes REAL payments. Every sale reaches Balanceè and charges a " +
+                    "real card — the controls below are inert.",
+                style = MaterialTheme.typography.bodySmall,
+                color = WarningRed,
+            )
+        }
         Spacer(Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),

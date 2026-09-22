@@ -47,7 +47,26 @@ sealed class TransactionState {
 
     // ---- PRE-PAY (Flow 1, Flow 5 entry) ----
 
-    /** QR / NFC / digital wait. 5-min expiry, then auto-cancel back to Idle. */
+    /**
+     * QR / digital wait, then auto-cancel back to Idle.
+     *
+     * **The window is the server's, not ours (TODO #43).** It was documented here as five minutes
+     * for a year; production gives **twenty**, measured six times across two sittings. A screen that
+     * gave up at five abandoned a sale the server would still have honoured for another fifteen,
+     * with the customer standing at the pump. [expiresAtEpochMs] carries the server's own figure and
+     * the countdown reads it; the five-minute constant survives only as the fallback for a response
+     * that omitted it.
+     *
+     * @param amountKobo **what will be collected**, not what the customer tendered. From 10d this
+     *   carries the authorised figure, because that is what the Paystack page shows: at ₦1,490/L a
+     *   ₦5,000 pre-pay is authorised at ₦4,998.95, and the screen used to print the ₦5,000 beside a
+     *   QR that would charge the other number.
+     * @param checkoutUrl the Paystack page the QR encodes — **the only thing a customer can pay**.
+     *   Null on a state persisted before 10c, and on the mock's fabricated sales; the screen falls
+     *   back to showing the reference rather than a QR that goes nowhere.
+     * @param expiresAtEpochMs server expiry. Epoch millis rather than an Instant because this class
+     *   is persisted through kotlinx and a Long needs no serializer.
+     */
     @Serializable @SerialName("prepay_awaiting_payment")
     data class PrepayAwaitingPayment(
         val flow: TransactionFlow,           // FIXED_PREPAY_DIGITAL or USSD_OFFLINE
@@ -55,6 +74,17 @@ sealed class TransactionState {
         val method: PaymentMethod,
         val txnId: String,
         val priceKoboPerLitre: Long,
+        val checkoutUrl: String? = null,
+        val expiresAtEpochMs: Long? = null,
+        /**
+         * Litres the server authorised, when it authorised any (10d).
+         *
+         * Persisted because a restart has to resume the sale that exists rather than re-derive it:
+         * the quote lands on a payable litre step while `DeviceConfig.litresCutoff` floors to 2 dp,
+         * so re-deriving stops the pump a few millilitres short of what was paid for. Null on a
+         * state written before 10d and on the mock's sales, where the fallback still applies.
+         */
+        val litresAuthorised: Double? = null,
     ) : TransactionState()
 
     /** USSD-specific: SMS expected on the pump SIM. */
@@ -89,6 +119,15 @@ sealed class TransactionState {
         val txnId: String,
         val priceKoboPerLitre: Long,
         val litresSoFar: Double,
+        /**
+         * When fuel actually began to flow, for `POST /transactions/upload`'s `startedAt` (10f).
+         *
+         * Carried on the state rather than held in the ViewModel because the upload is what the
+         * 14-day parallel run reconciles the station's records against, and a power cut mid-dispense
+         * is precisely when the app most needs to still know when the sale began. Null on states
+         * persisted before 10f; the uploader falls back to the completion time and says so.
+         */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /** Nozzle shutoff detected. Verified count locked. Customer chooses cash or QR. */
@@ -98,6 +137,8 @@ sealed class TransactionState {
         val priceKoboPerLitre: Long,
         val verifiedLitres: Double,
         val amountDueKobo: Long,
+        /** Carried through from [FillupDispensing] — the fuel flowed before the payment. */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /** Customer chose digital after fill-up. Dynamic NIP QR shown. */
@@ -106,7 +147,15 @@ sealed class TransactionState {
         val txnId: String,
         val verifiedLitres: Double,
         val amountDueKobo: Long,
-        val qrContent: String,               // NIP transfer payload
+        /**
+         * What the QR encodes. Was a fabricated NIP transfer payload built from the operator's
+         * virtual account; from 10c it is the Paystack checkout URL the server returned, which is
+         * the only form of it a customer can actually pay.
+         */
+        val qrContent: String,
+        val expiresAtEpochMs: Long? = null,
+        /** Carried through from [FillupTankFull]. See [FixedDispensing.startedAtEpochMs]. */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     /** Customer chose cash. Attendant has not yet tapped CASH RECEIVED. */
@@ -155,6 +204,26 @@ sealed class TransactionState {
         val litresAuthorised: Double,
         val litresSoFar: Double,
         val method: PaymentMethod? = null,
+        /**
+         * The server's own reference for this sale (`BPM-…`), from the authorise (10f).
+         *
+         * `POST /transactions/upload` **requires** it, and only `/authorise` issues one — so a
+         * dispense whose reference was not kept can never be reported, no matter how faithfully its
+         * litres were counted. It arrived on `PaymentResult.Success` from 10a onward and was
+         * dropped on the floor at every call site until 10f went looking for it.
+         *
+         * Null for cash flows, which have nothing to upload, and for the mock.
+         */
+        val paymentReference: String? = null,
+        /**
+         * When fuel actually began to flow, for `POST /transactions/upload`'s `startedAt` (10f).
+         *
+         * Carried on the state rather than held in the ViewModel because the upload is what the
+         * 14-day parallel run reconciles the station's records against, and a power cut mid-dispense
+         * is precisely when the app most needs to still know when the sale began. Null on states
+         * persisted before 10f; the uploader falls back to the completion time and says so.
+         */
+        val startedAtEpochMs: Long? = null,
     ) : TransactionState()
 
     // ---- TERMINAL ----
@@ -173,6 +242,24 @@ sealed class TransactionState {
          * sale that finished normally. Defaulted, so rows persisted before it existed still decode.
          */
         val litresTarget: Double? = null,
+        /** See [FixedDispensing.paymentReference]. Null for a cash sale: nothing to upload. */
+        val paymentReference: String? = null,
+        /** See [FixedDispensing.startedAtEpochMs]. */
+        val startedAtEpochMs: Long? = null,
+        /**
+         * The price this sale was struck at, in kobo per litre — **the price that goes on the
+         * receipt**.
+         *
+         * Carried rather than looked up. `completeAndRecord` used to pass `CustomerViewModel`'s
+         * own `priceKoboPerLitre` field into the audit row, and that field is a *display* copy of
+         * whatever `DeviceConfig` held when the sale started. 10g fixed the state's price and left
+         * the record reading the field, so a receipt could still print a price the customer was
+         * never charged — the same defect through the one door that was not closed.
+         *
+         * Nullable and defaulted so rows persisted before it existed still decode; the view
+         * model's field stays the fallback for those.
+         */
+        val priceKoboPerLitre: Long? = null,
     ) : TransactionState()
 
     /**

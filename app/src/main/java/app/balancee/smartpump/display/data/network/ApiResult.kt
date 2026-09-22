@@ -48,13 +48,96 @@ sealed interface ApiError {
     data class Unknown(val cause: Throwable) : ApiError
 }
 
-/** True for failures worth retrying: transient network, and 5xx server errors. */
-val ApiError.isRetryable: Boolean
+/**
+ * What to do about a failure — three outcomes, not two (TODO #45).
+ *
+ * The taxonomy had only retryable and terminal, and `ApiError.Business` was flatly terminal on the
+ * grounds that it is "a considered refusal". `PAYMENT_NOT_CONFIRMED` is a 409 that parses as
+ * `Business` and is **not** a refusal: it is true now and false a minute later, once payment
+ * confirms. An upload job treating it as final drops the record permanently — a dispense that never
+ * reaches the backend, which is the single outcome the upload job exists to prevent.
+ */
+enum class RetryPolicy {
+
+    /** Transport trouble. Worth an immediate backoff inside the same call window. */
+    RETRY_NOW,
+
+    /**
+     * The server's answer is not a verdict on the work, so asking again later can succeed. **Not**
+     * worth retrying in-flight: three attempts over a second and a half will not outlast a payment
+     * confirming, let alone someone correcting a clock. This wants rescheduling.
+     *
+     * Two kinds of thing land here, and the second was added by the 2026-09-20 review. One is a
+     * refusal that becomes a success on its own, like `PAYMENT_NOT_CONFIRMED`. The other is a
+     * status saying the server never evaluated the request at all — see [NOT_A_VERDICT].
+     */
+    RETRY_LATER,
+
+    /** Asking again produces the same answer. The only outcome that may discard work. */
+    TERMINAL,
+}
+
+/**
+ * HTTP statuses that mean the server never got as far as judging the request.
+ *
+ * **A verdict is about the sale; these are about the caller**, and the difference decides whether a
+ * record may be thrown away. 401 is the one that matters: the observed clock-skew failure —
+ * `{"status":false,"message":"Request timestamp is not fresh"}`, captured twice on production at
+ * the #32 gate — carries no `code`, so it parsed as an unrecognised business refusal and was called
+ * final. It is nothing of the kind. Nobody has ruled on the dispense; the pump was not let through
+ * the door, and it will be once a clock or a credential is put right.
+ *
+ * That made the taxonomy contradict the copy layer, which has always said this same 401 is
+ * `recoverable` and tells an attendant how to fix it — while the upload queue was condemning the
+ * dispense permanently on the strength of it (2026-09-20 review, finding 1).
+ *
+ * 408 and 429 join it on the same reading: a timeout and a rate limit are statements about this
+ * attempt. 403 deliberately does not — it is a considered refusal to serve this caller, and
+ * retrying it forever is the behaviour this set exists to avoid handing out freely.
+ */
+private val NOT_A_VERDICT = setOf(401, 408, 429)
+
+/**
+ * How to treat this failure.
+ *
+ * `Business` splits on the server's `code` and never on its prose (TODO #18f) — see
+ * [PumpErrorCodes.NOT_YET]. A `Business` with no code at all is terminal, which is the safe
+ * reading: the app cannot tell a temporary refusal from a permanent one without being told, and
+ * retrying an unknown refusal forever is worse than surfacing it to a human once.
+ *
+ * **The status is consulted before that rule, not after it** ([NOT_A_VERDICT]). "No code" is only
+ * evidence of an unclassifiable *refusal* when the server actually refused something; on a 401 it
+ * is evidence the request was never read.
+ */
+val ApiError.retryPolicy: RetryPolicy
     get() = when (this) {
-        is ApiError.Network -> true
-        is ApiError.Http -> code in 500..599
-        else -> false
+        is ApiError.Network -> RetryPolicy.RETRY_NOW
+
+        is ApiError.Http -> when {
+            code in 500..599 -> RetryPolicy.RETRY_NOW
+            code in NOT_A_VERDICT -> RetryPolicy.RETRY_LATER
+            else -> RetryPolicy.TERMINAL
+        }
+
+        is ApiError.Business -> when {
+            code != null && code in PumpErrorCodes.NOT_YET -> RetryPolicy.RETRY_LATER
+            httpCode != null && httpCode in NOT_A_VERDICT -> RetryPolicy.RETRY_LATER
+            else -> RetryPolicy.TERMINAL
+        }
+
+        is ApiError.NotActivated -> RetryPolicy.TERMINAL
+        is ApiError.Serialization -> RetryPolicy.TERMINAL
+        is ApiError.Unknown -> RetryPolicy.TERMINAL
     }
+
+/**
+ * Worth retrying **within this call window**, which is narrower than "worth retrying at all".
+ *
+ * Deliberately false for [RetryPolicy.RETRY_LATER]: that case needs a scheduler, not a tight loop.
+ * Unchanged in behaviour from before #45 — transient network and 5xx, nothing else.
+ */
+val ApiError.isRetryable: Boolean
+    get() = retryPolicy == RetryPolicy.RETRY_NOW
 
 inline fun <T, R> ApiResult<T>.map(transform: (T) -> R): ApiResult<R> = when (this) {
     is ApiResult.Success -> ApiResult.Success(transform(data))

@@ -53,8 +53,16 @@ fun FillupTankFullScreen(
     modifier: Modifier = Modifier,
     pumpLabel: String = "Pump 1",
     digitalEnabled: Boolean = false,
+    /**
+     * The digital tap has been made and the QR is on its way — up to 3.2 s measured on the SM-T220.
+     * The digital button says so and stops taking taps: one that changed nothing for that long read
+     * as a dead button. **Cash stays live** on purpose (review #5: the in-flight guard is about one
+     * button, not the state), so a customer can still change their mind while the network is slow.
+     */
+    preparingQr: Boolean = false,
 ) {
     val accent = PrimaryGold
+    val digitalLabel = if (preparingQr) "Preparing QR…" else "Pay digitally · scan QR"
 
     Column(
         modifier = modifier
@@ -148,9 +156,9 @@ fun FillupTankFullScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 BalanceeButton(
-                    label = "Pay digitally · scan QR",
+                    label = digitalLabel,
                     onClick = onPayDigital,
-                    enabled = digitalEnabled,
+                    enabled = digitalEnabled && !preparingQr,
                     variant = BalanceeButtonVariant.Secondary,
                     accentColor = accent,
                     modifier = Modifier.fillMaxWidth(),
@@ -168,9 +176,9 @@ fun FillupTankFullScreen(
                     modifier = Modifier.weight(1f),
                 )
                 BalanceeButton(
-                    label = "Pay digitally · scan QR",
+                    label = digitalLabel,
                     onClick = onPayDigital,
-                    enabled = digitalEnabled,
+                    enabled = digitalEnabled && !preparingQr,
                     variant = BalanceeButtonVariant.Secondary,
                     accentColor = accent,
                     modifier = Modifier.weight(1f),

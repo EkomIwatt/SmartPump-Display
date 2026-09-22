@@ -4,6 +4,7 @@
 package app.balancee.smartpump.display.di
 
 import app.balancee.smartpump.display.BuildConfig
+import app.balancee.smartpump.display.data.config.PumpConfigSync
 import app.balancee.smartpump.display.data.network.KeystorePumpCredentialsStore
 import app.balancee.smartpump.display.data.network.PersistentDeviceIdProvider
 import app.balancee.smartpump.display.data.network.ProbeClock
@@ -13,6 +14,7 @@ import app.balancee.smartpump.display.data.network.ProbeResponseRecorder
 import app.balancee.smartpump.display.data.network.PumpApiService
 import app.balancee.smartpump.display.data.network.PumpLoggingInterceptor
 import app.balancee.smartpump.display.data.network.PumpSigningInterceptor
+import app.balancee.smartpump.display.domain.config.DeviceConfigSync
 import app.balancee.smartpump.display.domain.network.DeviceIdProvider
 import app.balancee.smartpump.display.domain.network.PumpCredentialsStore
 import dagger.Module
@@ -36,6 +38,12 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideCredentialsStore(impl: KeystorePumpCredentialsStore): PumpCredentialsStore = impl
+
+    // 10c-bis. The interface is the narrow boot-time view ("refresh what you know"); the payment
+    // processor takes the concrete PumpConfigSync, because it needs the response it just stored.
+    @Provides
+    @Singleton
+    fun provideDeviceConfigSync(impl: PumpConfigSync): DeviceConfigSync = impl
 
     // Mint-once, never-changing deviceId in its own prefs file (TODO #16) — deliberately outside
     // the encrypted blob above, so a KeyStore wipe cannot change this device's identity.

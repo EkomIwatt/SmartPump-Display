@@ -6,15 +6,44 @@ an abstract question._
 **OQ #17 is settled — all five items, 2026-09-12.** The principle and the "see attendant" fallback
 were approved; the diagnostic half goes to the **swipe-up attendant panel**; a retryable failure now
 looks different from a terminal one; and the local messages that contradicted any of it are fixed.
-Built across `c2c62f9` and `16d4495`. **Catalogue B is live. Catalogue A is not — see below.**
+Built across `c2c62f9` and `16d4495`. **Catalogue B went live then; Catalogue A followed on
+2026-09-19 — see immediately below.**
 
-**Catalogue A is not wired and cannot be yet**: no code path receives an `ApiError` and sets
-`TransactionState.Error`, because the payment feature flows (**TODO #8**) do not exist. The mapping
-is the unit #8 will consume — building it before there is a call site would repeat the mistake this
-file already flags, namely carrying data nothing reads.
+**Catalogue A IS NOW WIRED — 2026-09-19, phase 10e (2/2).** `ApiError.toFailureCopy()` maps a
+failure to a `FailureCopy(customerMessage, attendantDetail, recoverable)`, which `PaymentResult.Failed`
+carries out of the data layer and `toErrorState()` turns into the screen's `TransactionState.Error`.
+**TODO #14 is closed** (parsing landed 2026-09-12, mapping now) and the attendant-facing half of
+**TODO #15** with it.
 
-Blocks: **TODO #14**'s mapping half (parsing landed 2026-09-12) and the attendant-facing half of
-**TODO #15**. Both are otherwise ready.
+**Three decisions taken at wiring time, each a departure from the table below:**
+
+1. **Matching is on the server's `code`, and on the 401 where there is no code — never on prose.**
+   Only five rows can be keyed that way today. The Reference quotes `"Amount mismatch for PETROL…"`;
+   production actually returns *"The sale amount does not match the current station price for this
+   fuel type. Refresh the pump price and try again."* for that same `AMOUNT_MISMATCH`. The one
+   Reference string this project has been able to compare against the wire **had already been
+   reworded** — so a table keyed on the other eleven would mostly not fire, and would fail silently
+   the day it stopped. The three rows below that exist only as Reference prose (**out of stock**,
+   **invalid station price**, **fuel type not sold here**) are therefore *parked*: each is wired the
+   moment someone observes the `code` it arrives with, the same rule `PumpErrorCodes.NOT_YET`
+   follows. Until then they take the last row.
+   - **One exception, and it is the rule rather than a hole in it: the clock-skew 401.** The rule is
+     not *never match prose*, it is **never match a string nobody has seen** — and this one was seen
+     twice on production at the #32 gate, `401 {"status":false,"message":"Request timestamp is not
+     fresh"}` with no code. It shares its bucket with a rejected API key, and the credentials line
+     ("it may need re-activating") would send an attendant to the one screen that cannot fix a
+     wrong clock. A rewording costs the match and falls back to that credentials line — terminal,
+     pointing at a person, never wrong about whether the sale can proceed. **This closes #15's
+     mapping half.**
+2. **`PAYMENT_NOT_CONFIRMED` is recoverable**, against the `no` in the table. That row was written
+   2026-09-12, before **#45** existed; #45 made it `RETRY_LATER` — the one refusal that becomes a
+   success on its own. Painting it red tells an attendant a sale is dead when it is seconds from
+   confirming. Its customer line is unchanged.
+3. **`recoverable` is authored per row, not derived from `RetryPolicy`.** They answer different
+   questions: `RetryPolicy` asks whether re-sending the same bytes *unattended* could work,
+   `recoverable` asks whether trying again could work *after a human does what the detail says*. An
+   amount mismatch is `TERMINAL` to a retry loop and recoverable to an attendant who fixes the
+   price. The two meet at exactly one point, and it is decision 2.
 
 ---
 
@@ -25,9 +54,12 @@ labels, and requires a deviation to be **flagged before it is built**. **There i
 that set.** So every word below is invention, and the layout it lands in was invented too — the
 existing `ErrorScreen` in `CustomerStateHost.kt` was written without a spec to match.
 
-This is the flag. Nothing gets wired in until someone says yes.
+This is the flag. Nothing gets wired in until someone says yes — **said 2026-09-12** for the
+principle, the fallback, the panel and the recoverable distinction, and **2026-09-19** for the
+code-keyed half of Catalogue A. The design-authority deviation stands: there is still no error
+screen in the strict set, so every word here remains invention that a reviewer can overrule.
 
-## What exists today
+## What existed on 2026-09-12 (kept as the record of what this draft was answering)
 
 `ErrorScreen` renders a `BalanceeCard` with a red border, the label "Error", the message, and one
 button reading "Back to idle". It is driven by `TransactionState.Error(message, recoverable)`, and
@@ -69,24 +101,31 @@ every row.
 `API_CONFORMANCE_AUDIT.md`. Matching should key on the stable `code` where the server sends one and
 fall back to the message otherwise — codes are currently sent on some paths only (TODO #18f).
 
+**Legend:** ✅ wired, keyed on the `code` shown (or on the 401) · ⏸ parked — the copy is agreed,
+but nothing keys it yet, so it takes the last row until someone observes the `code` it arrives with.
+
 | server says | provenance | customer sees | attendant sees | recoverable |
 |---|---|---|---|---|
-| "Amount mismatch for PETROL…" | Reference | "Could not start — please see attendant." | "Price on this pump does not match the station's. Re-check the price, then retry." | yes |
-| "PETROL is currently out of stock" | Reference | "This pump is out of fuel." | "Station reports this fuel out of stock. Sales are blocked until stock is updated." | no |
-| "Fuel station has an invalid price per unit" | Reference | "Could not start — please see attendant." | "The station's price is not set on the backend. Nothing to fix on this tablet." | no |
-| "Fuel type not available at station: PETROL" | Reference | "Could not start — please see attendant." | "This pump is set to a fuel the station does not sell. Check the fuel type in settings." | yes |
-| "Payment has not been confirmed…" | Reference | "Payment not confirmed yet." | "The backend has not seen this payment. **Do not dispense.** Wait, or refund and retry." | no |
-| "Request timestamp is not fresh" | Reference | "Could not start — please see attendant." | "This tablet's clock is wrong. Turn on automatic date and time in Android settings." | yes |
-| "Invalid request timestamp" | Reference | "Could not start — please see attendant." | "The pump sent a malformed timestamp. This is a software fault — report it." | no |
-| "Invalid API key" | observed | "Could not start — please see attendant." | "This pump's credentials were rejected. It may need re-activating." | no |
-| "Missing pump authentication headers" | observed | "Could not start — please see attendant." | "Software fault — the pump did not authenticate. Report it." | no |
-| "pumpId does not match authenticated device" | Reference | "Could not start — please see attendant." | "This tablet is activated against a different pump. Re-activation needed." | no |
-| "Device id does not match credential" | Reference | "Could not start — please see attendant." | "Identity mismatch after a reinstall. Re-activation needed." | no |
-| anything else, incl. no envelope | — | "Could not start — please see attendant." | the raw server message, verbatim, plus the HTTP status | no |
+| ✅ `AMOUNT_MISMATCH` | Reference + observed | "Could not start — please see attendant." | "The price on this pump does not match the station's. Open Pump settings, re-check the price, then start the sale again." | yes |
+| ⏸ "PETROL is currently out of stock" | Reference | "This pump is out of fuel." | "Station reports this fuel out of stock. Sales are blocked until stock is updated." | no |
+| ⏸ "Fuel station has an invalid price per unit" | Reference | "Could not start — please see attendant." | "The station's price is not set on the backend. Nothing to fix on this tablet." | no |
+| ⏸ "Fuel type not available at station: PETROL" | Reference | "Could not start — please see attendant." | "This pump is set to a fuel the station does not sell. Check the fuel type in settings." | yes |
+| ✅ `PAYMENT_NOT_CONFIRMED` | Reference + observed | "Payment not confirmed yet." | "Balanceè has not seen this payment yet — DO NOT DISPENSE. It may confirm on its own, so wait and then retry. Refund the customer if it never does." | **yes** (decision 2) |
+| ✅ 401 + the observed message "…timestamp is not fresh" | Reference **+ observed** | "Could not start — please see attendant." | "This tablet's clock is wrong, so the server rejected the request. Turn on automatic date and time in Android settings, then try the sale again." | yes |
+| ✅ `INVALID_REQUEST` — one code for every malformed request, so the server's own sentence is carried rather than paraphrased | Reference + observed | "Could not start — please see attendant." | "The pump sent a request the server rejected as malformed. Software fault; report it." + the server's own sentence, quoted | no |
+| ✅ 401 with no code — covers both "Invalid API key" and "Missing pump authentication headers", and every other reworded 401 | observed | "Could not start — please see attendant." | "This pump's credentials were rejected (401). It may need re-activating." + the server's own sentence, quoted | no |
+| ⏸ "pumpId does not match authenticated device" | Reference | "Could not start — please see attendant." | "This tablet is activated against a different pump. Re-activation needed." | no |
+| ⏸ "Device id does not match credential" | Reference | "Could not start — please see attendant." | "Identity mismatch after a reinstall. Re-activation needed." | no |
+| ✅ anything else, incl. an unrecognised code and no envelope | — | "Could not start — please see attendant." | the raw server message, verbatim, plus the HTTP status **and the code** | no |
 
 The last row is the one that must exist. The Reference's list will not stay complete, and an
 unrecognised error must degrade to showing the attendant exactly what came back rather than being
 swallowed.
+
+**One row is not in the table above and is wired anyway: `TRANSACTION_NOT_FOUND`.** It was observed
+at the #32 gate, it is one of the four codes production actually sends, and "the server has no
+record of this sale, so nothing was charged for it — start a new one" is what an attendant needs to
+hear. Recoverable, because a new sale can work.
 
 ## Catalogue B — local errors (no backend involved)
 

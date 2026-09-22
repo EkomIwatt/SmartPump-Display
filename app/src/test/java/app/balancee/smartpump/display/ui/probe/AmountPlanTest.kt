@@ -1,10 +1,14 @@
 // The arithmetic behind TODO #18c, which turned out to be the substantive half of the question.
 //
 // The server checks `amount == expectedLitres × pricePerUnit` exactly. At the observed ₦1490/L most
-// litre figures produce a fractional naira amount, and `AuthoriseRequest.amount` is a Long — so the
-// sale cannot be expressed, let alone rounded. Whether that is survivable depends on an answer we
-// do not have yet; what this file pins down is when the question arises, which is far more often
-// than "occasionally".
+// litre figures produce a fractional naira amount — which, while `amount` was a `Long`, meant the
+// sale could not be expressed at all, let alone rounded.
+//
+// **Both halves are answered now.** The gate observed that the server accepts a decimal
+// (#18c, 2026-09-16), and #44 made `amount` a `BigDecimal` so the app can send one. What survives
+// here is the frequency claim, which is what made the question urgent and is unchanged: a fractional
+// amount is the ordinary case for a metered fill-up, not an edge one. The classification is now a
+// label on a probe screen rather than a gate on what can be sent.
 package app.balancee.smartpump.display.ui.probe
 
 import org.junit.Assert.assertEquals
@@ -29,7 +33,7 @@ class AmountPlanTest {
     }
 
     @Test
-    fun `hundredths are not — this is the case that breaks fill-ups`() {
+    fun `hundredths are fractional — this is the case that used to break fill-ups`() {
         val plan = amountFor(2.35, price)
 
         assertTrue(plan is AmountPlan.Fractional)
@@ -37,18 +41,27 @@ class AmountPlanTest {
     }
 
     @Test
-    fun `a metered fill-up lands on the broken case as a matter of course`() {
+    fun `a metered fill-up lands on the fractional case as a matter of course`() {
         // A fill-up stops when the tank is full, not on a convenient figure. 38.17 L is the sort of
-        // number a real dispense produces, and it cannot be authorised in whole naira.
+        // number a real dispense produces. This is why whole naira was never going to be enough.
         assertTrue(amountFor(38.17, price) is AmountPlan.Fractional)
     }
 
     @Test
-    fun `a price ending in 50 kobo would break even half-litres`() {
-        // Not hypothetical: the Reference's own worked example uses ₦870.50/L. Our price field is a
-        // Long, so such a price cannot even be received today — but the arithmetic is the reason
-        // the decimals question matters beyond one field's type.
+    fun `a price ending in 50 kobo makes even half-litres fractional`() {
+        // Not hypothetical: the Reference's own worked example uses ₦870.50/L.
         assertTrue(amountFor(0.5, 871L) is AmountPlan.Fractional)
+    }
+
+    /**
+     * The point of #44: the classification no longer decides whether anything can be sent. Both
+     * branches produce a wire amount, and the fractional one is the exact figure the server checks
+     * against — 3501.5, which is the literal byte the gate captured.
+     */
+    @Test
+    fun `both branches now produce a sendable wire amount`() {
+        assertEquals(0, java.math.BigDecimal("2980").compareTo(amountFor(2.0, price).wireAmount))
+        assertEquals(0, java.math.BigDecimal("3501.5").compareTo(amountFor(2.35, price).wireAmount))
     }
 
     @Test

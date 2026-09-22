@@ -61,6 +61,7 @@ import app.balancee.smartpump.display.ui.theme.Background
 import app.balancee.smartpump.display.ui.theme.BorderSubtle
 import app.balancee.smartpump.display.ui.theme.Dimensions
 import app.balancee.smartpump.display.ui.theme.OnBrand
+import app.balancee.smartpump.display.ui.theme.PrimaryGold
 import app.balancee.smartpump.display.ui.theme.SuccessGreen
 import app.balancee.smartpump.display.ui.theme.Surface
 import app.balancee.smartpump.display.ui.theme.TextPrimary
@@ -141,6 +142,24 @@ fun OperatorConfigScreen(
 
         BalanceeCard(borderColor = if (ui.koboPerLitre == null) WarningRed else SuccessGreen) {
             LabelText(text = "Price per litre")
+            Spacer(Modifier.height(4.dp))
+            // 10c-bis. Before this, what was typed here WAS the price, and it had nothing to do
+            // with the price sales were authorised at. Saying so matters: an operator who thinks
+            // this field is authoritative will not think to check why their figure keeps changing.
+            Text(
+                text = "Balanceè sets this price and the pump fetches it automatically. " +
+                    "What you enter here is used until the pump can reach Balanceè.",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+            )
+            ui.priceUpdatedAtMillis?.let {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Price last changed ${formatLogTimestamp(it)}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
+            }
             Spacer(Modifier.height(12.dp))
             ConfigField(
                 label = "Naira per litre",
@@ -167,7 +186,8 @@ fun OperatorConfigScreen(
             LabelText(text = "Identification")
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Station name prints on receipts. Pump label is the caption on this screen.",
+                text = "Station name prints on receipts, and the backend's name replaces it once " +
+                    "this pump is activated. Pump label is the caption on this screen.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
             )
@@ -229,23 +249,28 @@ fun OperatorConfigScreen(
 }
 
 /**
- * Fuel the adapter counted while the app was not running (Phase 7h, OPEN_QUESTIONS #25).
+ * The pump's operational log: fuel the adapter counted while the app was not running (Phase 7h,
+ * OPEN_QUESTIONS #25) and price changes the operator pushed from the backend (Phase 10c-bis).
  *
  * The empty state is worth as much as the populated one: "nothing unaccounted for" is the answer
  * an operator is usually looking for, and a section that vanishes when empty cannot give it.
  *
  * Litres are shown from the K-factor stamped on each row at write time, not today's, so a figure
  * here does not quietly change value when calibration corrects that constant.
+ *
+ * One chronological list rather than two cards, because the entries explain each other: a sale
+ * charged at a figure the customer disputes is answered by the price row logged a minute before it.
  */
 @Composable
 private fun FuelLogSection(entries: List<OperationalEvent>) {
     val unexplained = entries.count { it.type == EventType.PULSE_GAP_UNEXPLAINED }
 
     BalanceeCard(borderColor = if (unexplained > 0) WarningRed else BorderSubtle) {
-        LabelText(text = "Fuel log")
+        LabelText(text = "Pump log")
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "Fuel measured by the pump adapter while this screen was off or restarting.",
+            text = "Fuel measured while this screen was off or restarting, and price changes " +
+                "received from the backend.",
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary,
         )
@@ -267,9 +292,45 @@ private fun FuelLogSection(entries: List<OperationalEvent>) {
     }
 }
 
+/**
+ * The headline for one log row, and its colour.
+ *
+ * A price entry has no litres, so the fuel wording ("Amount unknown", in red) would read as lost
+ * fuel where nothing is missing at all. Each kind states its own finding instead.
+ */
+private fun headlineFor(entry: OperationalEvent): Pair<String, androidx.compose.ui.graphics.Color> =
+    when (entry.type) {
+        EventType.PULSE_GAP_UNEXPLAINED ->
+            // An unknown amount is a worse finding than a number, not a smaller one, so it is
+            // spelled out rather than shown as a dash the eye slides over.
+            (entry.litres?.let { "%.2f L".format(it) } ?: "Amount unknown") to WarningRed
+
+        EventType.PULSE_GAP_RECOVERED ->
+            (entry.litres?.let { "%.2f L".format(it) } ?: "Amount unknown") to TextPrimary
+
+        EventType.PRICE_SYNCED -> "Price updated" to TextPrimary
+
+        // Red: card sales have stopped, and nothing else on this screen says so. The row exists
+        // because the cause is a backend field, not anything an attendant did or can see.
+        EventType.PRICE_SYNC_REJECTED -> "No price from Balanceè" to WarningRed
+
+        // Not red: most abandoned payments are someone changing their mind. It is here so that a
+        // customer who says they paid and got nothing can be looked up rather than disbelieved.
+        EventType.PAYMENT_ABANDONED -> "Payment not completed" to TextSecondary
+
+        // Gold: money, and a figure a customer may come back and ask about.
+        EventType.PRICE_CHANGED_MID_SALE -> "Price changed mid-sale" to PrimaryGold
+
+        // Red, and the litres are the headline: the station has sold fuel that the backend's
+        // ledger does not know about, which is the same class of finding as fuel that went
+        // unaccounted for at the pump (10f).
+        EventType.DISPENSE_UPLOAD_FAILED ->
+            (entry.litres?.let { "%.2f L not recorded".format(it) } ?: "Sale not recorded") to WarningRed
+    }
+
 @Composable
 private fun FuelLogRow(entry: OperationalEvent) {
-    val unexplained = entry.type == EventType.PULSE_GAP_UNEXPLAINED
+    val (headline, headlineColor) = headlineFor(entry)
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -277,11 +338,9 @@ private fun FuelLogRow(entry: OperationalEvent) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                // An unknown amount is a worse finding than a number, not a smaller one, so it is
-                // spelled out rather than shown as a dash the eye slides over.
-                text = entry.litres?.let { "%.2f L".format(it) } ?: "Amount unknown",
+                text = headline,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (unexplained) WarningRed else TextPrimary,
+                color = headlineColor,
             )
             Text(
                 text = formatLogTimestamp(entry.createdAtMs),

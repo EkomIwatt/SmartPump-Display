@@ -63,7 +63,7 @@ class MockPulseSource @Inject constructor(
     }
 
     fun setTankCapacityLitres(value: Double) {
-        _tankCapacityLitres.value = value.coerceIn(0.5, MAX_TANK_CAPACITY_LITRES)
+        _tankCapacityLitres.value = value.coerceIn(MIN_TANK_CAPACITY_LITRES, MAX_TANK_CAPACITY_LITRES)
     }
 
     /** Debug-only: inject a synthetic disconnect event into the next observe() collection. */
@@ -132,6 +132,20 @@ class MockPulseSource @Inject constructor(
         const val HEARTBEAT_INTERVAL_MS = 5_000L
         const val IDLE_POLL_MS = 100L
         const val DEFAULT_TANK_CAPACITY_LITRES = 60.0
+        /**
+         * Floor for the simulated tank, lowered from 0.5 L for the 10g gate (2026-09-19).
+         *
+         * A fill-up fixes its amount *before* the QR appears — there is no amount-entry step to
+         * keep it small — so on `debugProd`, which takes real payments, this number **is the
+         * bill**. At ₦1,490/L the old floor was ₦745 of a real card, and the 60 L default is
+         * ₦89,400. At 0.1 L it is about ₦149, which is what makes proving Flow 3 against
+         * production affordable rather than a decision about money.
+         *
+         * The slider in `DebugScreen` carries the same floor; both have to move together, which
+         * is why this one is named rather than a literal — changing only the slider looks like it
+         * works and does nothing.
+         */
+        const val MIN_TANK_CAPACITY_LITRES = 0.1
         const val MAX_TANK_CAPACITY_LITRES = 500.0
     }
 }

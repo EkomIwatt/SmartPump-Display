@@ -230,6 +230,15 @@ internal fun ApiProbePanelContent(
                     modifier = Modifier.weight(1f),
                 )
             }
+            Spacer(Modifier.height(8.dp))
+            BalanceeButton(
+                label = "…4dp litres (pre-pay precision)",
+                onClick = { actions.onProbeAuthorise(AuthoriseVariant.Precision) },
+                variant = BalanceeButtonVariant.Secondary,
+                enabled = state.canWrite,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            PrecisionLine(state = state)
 
             Spacer(Modifier.height(8.dp))
             BalanceeButton(
@@ -362,6 +371,29 @@ private fun WritesGate(state: ApiProbeUiState, onAcknowledge: (Boolean) -> Unit)
  * rounding inconvenience, it is a sale that cannot be authorised.
  */
 @Composable
+private fun PrecisionLine(state: ApiProbeUiState) {
+    val config = state.config ?: return
+    val litres = state.litresValue ?: return
+    val koboPerLitre = config.pricePerUnit * 100
+    // The same zero the payment path screens (review #7) — here it would be an ArithmeticException
+    // out of a @Composable, taking the probe panel down with the one reading that explains it.
+    if (koboPerLitre <= 0) return
+    val tendered = tenderedFor(litres, koboPerLitre)
+    val coarse = precisionQuote(tendered, koboPerLitre, scale = 2)
+    val fine = precisionQuote(tendered, koboPerLitre, scale = 4)
+
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = "Models a pre-pay of ₦$tendered. At 2dp: ${coarse.litres} L for ₦${coarse.amount} " +
+            "— customer loses ₦${coarse.shortfall}. At 4dp: ${fine.litres} L for ₦${fine.amount} " +
+            "— loses ₦${fine.shortfall}. The button sends the 4dp pair; the question is whether " +
+            "the server takes it.",
+        style = MaterialTheme.typography.bodySmall,
+        color = TextTertiary,
+    )
+}
+
+@Composable
 private fun AmountLine(state: ApiProbeUiState) {
     when (val plan = state.amountPlan) {
         null -> Text(
@@ -380,9 +412,10 @@ private fun AmountLine(state: ApiProbeUiState) {
         )
 
         is AmountPlan.Fractional -> Text(
-            text = "${state.litres} L × ${state.config?.pricePerUnit} = ${plan.naira} — not a " +
-                "whole naira, so `amount: Long` cannot carry it. Use the decimal probe: this is " +
-                "#18c, and on this arithmetic every fill-up hits it.",
+            text = "${state.litres} L × ${state.config?.pricePerUnit} = ${plan.naira} — a " +
+                "fractional naira amount, which is the ordinary case for a metered fill-up rather " +
+                "than the exotic one. Sendable since #44 made `amount` a BigDecimal; before that " +
+                "this was the wall #18c ran into.",
             style = MaterialTheme.typography.bodySmall,
             color = PrimaryGold,
         )

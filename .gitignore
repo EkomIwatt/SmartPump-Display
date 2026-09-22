@@ -20,3 +20,11 @@ keystore.properties
 
 # Generated reports / exports (not source)
 /reports/
+
+# Kotlin build-tools session dir (generated; appears on any gradle run)
+.kotlin/
+
+# JVM crash dumps — committed by accident in ef17770 (10g review finding 8).
+# 7.6 MB of them, carrying local paths, the full command line and loaded modules.
+hs_err_pid*.log
+replay_pid*.log

@@ -3,7 +3,12 @@
 //
 // Contract (docs/phase7_blocker_resolution.md → Authentication):
 //   X-Signature = HMAC-SHA256(signingSecret, timestamp + "." + rawRequestBody), hex-encoded.
-//   timestamp   = ISO-8601 UTC, "yyyy-MM-dd'T'HH:mm:ss'Z'", within 5 min of server clock.
+//   timestamp   = ISO-8601 UTC, "yyyy-MM-dd'T'HH:mm:ss'Z'", within ~5 min of server clock.
+//
+// NOTE this is the SIGNING freshness window and has nothing to do with the QR expiry, which is
+// 20 minutes and is read off the server (TODO #43). Both were written as "5 min" and they are
+// not the same five minutes. This one's real size is still unmeasured: #15's probe proves only
+// that a signature ten minutes old is refused ("Request timestamp is not fresh").
 // The signed body MUST be the exact bytes sent — never re-serialize after signing.
 package app.balancee.smartpump.display.data.network
 

@@ -41,30 +41,38 @@ package app.balancee.smartpump.display.ui.customer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.balancee.smartpump.display.BuildConfig
+import app.balancee.smartpump.display.domain.config.DeviceConfigSync
 import app.balancee.smartpump.display.domain.hardware.PULSES_PER_LITRE
 import app.balancee.smartpump.display.domain.hardware.PulseSource
 import app.balancee.smartpump.display.domain.hardware.RelayController
 import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.domain.model.EventType
+import app.balancee.smartpump.display.domain.model.FailureCopy
 import app.balancee.smartpump.display.domain.model.FuelType
 import app.balancee.smartpump.display.domain.model.PaymentMethod
+import app.balancee.smartpump.display.domain.model.PaymentRequest
 import app.balancee.smartpump.display.domain.model.PaymentResult
 import app.balancee.smartpump.display.domain.model.PostFillIntent
 import app.balancee.smartpump.display.domain.model.PulseMessage
+import app.balancee.smartpump.display.domain.model.SaleBasis
 import app.balancee.smartpump.display.domain.model.Transaction
 import app.balancee.smartpump.display.domain.model.TransactionFlow
 import app.balancee.smartpump.display.domain.model.TransactionMode
 import app.balancee.smartpump.display.domain.model.TransactionState
+import app.balancee.smartpump.display.domain.model.toErrorState
 import app.balancee.smartpump.display.domain.payment.PaymentProcessor
 import app.balancee.smartpump.display.domain.repository.DeviceConfigRepository
 import app.balancee.smartpump.display.domain.repository.EventRepository
 import app.balancee.smartpump.display.domain.repository.PulseRepository
 import app.balancee.smartpump.display.domain.repository.TransactionRepository
+import app.balancee.smartpump.display.domain.sync.TransactionUploadScheduler
 import app.balancee.smartpump.display.domain.usecase.CanStartTransactionUseCase
 import app.balancee.smartpump.display.domain.usecase.ReconcilePulseGapUseCase
+import app.balancee.smartpump.display.domain.util.runCatchingCancellable
 import app.balancee.smartpump.display.ui.util.buildReceiptText
 import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -75,9 +83,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Duration
+import java.time.Instant
 import java.util.Locale
 import javax.inject.Inject
 
+/**
+ * Fallback only, since 10c. The real window is the `expiresAt` the server issues with each
+ * authorise — **20 minutes** on production, measured six times (TODO #43). This applies when a
+ * response carried no expiry at all, which no observed response has.
+ */
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
 private const val FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60
 private const val USSD_SMS_TIMEOUT_SECONDS = 5 * 60
@@ -116,12 +131,19 @@ data class CustomerUiState(
     val fillupDigitalExpiresInSeconds: Int = 0,
     val ussdExpiresInSeconds: Int = 0,
     val priceKoboPerLitre: Long = 0L,
+    /**
+     * A digital fill-up has been tapped and its QR is not back yet. The screen deliberately stays on
+     * the total for that round trip (review #5), and until this existed nothing on it said the tap
+     * had registered — measured at up to 3.2 s on the SM-T220.
+     */
+    val preparingQr: Boolean = false,
 )
 
 @HiltViewModel
 class CustomerViewModel @Inject constructor(
     private val canStartTransaction: CanStartTransactionUseCase,
     private val deviceConfigRepository: DeviceConfigRepository,
+    private val deviceConfigSync: DeviceConfigSync,
     private val events: EventRepository,
     private val paymentProcessor: PaymentProcessor,
     private val pulseSource: PulseSource,
@@ -129,6 +151,7 @@ class CustomerViewModel @Inject constructor(
     private val reconcilePulseGap: ReconcilePulseGapUseCase,
     private val relay: RelayController,
     private val transactions: TransactionRepository,
+    private val uploadScheduler: TransactionUploadScheduler,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CustomerUiState())
@@ -148,6 +171,49 @@ class CustomerViewModel @Inject constructor(
     private var expiryJob: Job? = null
     private var dispenseJob: Job? = null
     private var fillupWatchdogJob: Job? = null
+
+    /**
+     * The tank the current digital fill-up is being paid for — what a fall-back to cash collects
+     * against. Set by [startFillupDigitalExpiry], which both the fresh and the resumed paths go
+     * through, so neither can forget it.
+     *
+     * Needed because the fall-back deliberately settles on the **local** reference and the pump's
+     * own amount (see [startFillupDigitalExpiry]), and the live
+     * [TransactionState.FillupDigitalAwaitingPayment] carries the server's id and figure instead.
+     */
+    private var fillupDigitalSource: TransactionState.FillupTankFull? = null
+
+    /**
+     * The payment start that has been asked for and has not yet produced a first result — the one
+     * window in which the screen still shows the button that started it (review #5).
+     *
+     * **Two flows deliberately do not move their state until `Pending` arrives**: pre-pay, which
+     * holds `ModeSelect`, and fill-up, which holds `FillupTankFull`. That decision is right and is
+     * argued at [onFillupPayDigital] — a QR-shaped hole with a customer standing at it is worse
+     * than a second of the total they are already reading. What it costs is that the `as?` state
+     * check those handlers open with, which is mutual exclusion everywhere else in this class,
+     * guards nothing here: the state a second tap is checked against is the same one the first tap
+     * left in place. So the tap cancelled a `process` mid-`/authorise` and started another, and
+     * the server does not un-create a transaction because we stopped listening — two
+     * `PENDING_PAYMENT` for one tank, the first orphaned with a live checkout URL for a customer
+     * who may well scan it.
+     *
+     * A [Job] rather than a boolean because cancellation then clears it for free: a cancelled or
+     * completed job is not `isActive`, so no exit path has to remember to reset anything, and
+     * there is no window in which a stale flag can wedge the pump shut.
+     *
+     * **The check has to precede any `cancel`**, which is why it lives in the two handlers rather
+     * than in the two `start…` functions — see [authoriseInFlight].
+     */
+    private var authoriseJob: Job? = null
+
+    /**
+     * Whether an `/authorise` this pump has already sent is still outstanding. See [authoriseJob].
+     *
+     * Callers ignore the tap rather than reporting it: the customer is looking at the screen they
+     * tapped on and the QR is about to replace it, so there is nothing to say and nothing to fix.
+     */
+    private fun authoriseInFlight(): Boolean = authoriseJob?.isActive == true
     private var priceKoboPerLitre: Long = 0L
 
     /**
@@ -172,6 +238,24 @@ class CustomerViewModel @Inject constructor(
      */
     private val stateWriteChannel = Channel<TransactionState>(capacity = Channel.CONFLATED)
 
+    /**
+     * Completes once [bootResume] has dispatched whatever this tablet restored to (review #6).
+     *
+     * [syncPriceOnBoot] decides whether it may move the displayed price by asking what state the
+     * app is in. That question has no answer until the resume has dispatched one: `_ui.value.state`
+     * is `Idle` from construction, and `bootResume` reaches its first `setState` only after
+     * `reconcileGapOnResume`, which waits on the adapter for up to
+     * [ADAPTER_COUNT_TIMEOUT_MS]. A `/config` answering in a few hundred milliseconds therefore
+     * asked the guard its question before the guard could be right, got `Idle`, and moved the price
+     * under a pump that was about to restore a struck sale.
+     *
+     * **What is sequenced is applying the answer, not asking the server.** The fetch still goes out
+     * concurrently and overlaps the adapter wait, so the boot sequence — which holds the relay-open
+     * invariant and a possibly-live sale — still waits on nothing that a network can delay. That
+     * was the reason these were separate coroutines in the first place, and it is preserved.
+     */
+    private val bootResumed = CompletableDeferred<Unit>()
+
     init {
         // Serial writer coroutine — every setState() funnels its state in here.
         viewModelScope.launch {
@@ -184,16 +268,109 @@ class CustomerViewModel @Inject constructor(
             }
         }
         // Boot sequence: relay-open invariant, config seed, then state resume.
+        //
+        // **Nothing in here may escape**, and the reason is #R6's rather than this coroutine's own
+        // history: a bare `viewModelScope.launch` in a constructor turns any throw into an
+        // uncaught one on *every* boot, so a pump whose database has gone bad cannot open the app
+        // — and a forecourt tablet that cannot open the app cannot take cash either. The failure
+        // this guards is a Room read, which is exactly what `syncPriceOnBoot` beneath it guards;
+        // they are one defect in two coroutines and were found by one test.
         viewModelScope.launch {
-            // Spec invariant: relay must default OPEN on boot — assert it before re-deriving.
-            relay.stopFuelFlow()
-            seedDefaultConfigIfMissing()
-            deviceConfigRepository.getConfig()?.let { config ->
-                priceKoboPerLitre = config.koboPerLitre
-                _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
+            try {
+                // Spec invariant: relay must default OPEN on boot — assert it before re-deriving.
+                // Guarded separately and logged in its own words: a boot that cannot put the relay
+                // open is a safety event and should not read as a database problem. Crashing would
+                // not open it either, and the firmware's dead-man watchdog is the real backstop.
+                runCatchingCancellable { relay.stopFuelFlow() }.onFailure {
+                    android.util.Log.e("CustomerVM", "Could not assert the relay-open invariant on boot", it)
+                }
+                runCatchingCancellable {
+                    seedDefaultConfigIfMissing()
+                    deviceConfigRepository.getConfig()?.let { config ->
+                        priceKoboPerLitre = config.koboPerLitre
+                        _ui.update { it.copy(priceKoboPerLitre = priceKoboPerLitre) }
+                    }
+                    bootResume()
+                }.onFailure {
+                    // Idle with the relay open is the safe resting place, and it is where the
+                    // state already is: nothing below `setState` has run.
+                    android.util.Log.e("CustomerVM", "Boot resume failed; the pump stays Idle", it)
+                }
+            } finally {
+                // In a finally because a resume that threw must not strand the sync waiting on it:
+                // the idle screen would then hold a stale price with nothing on it to say why.
+                bootResumed.complete(Unit)
             }
-            bootResume()
         }
+        // Price sync (10c-bis), on its own coroutine on purpose: it is a network call, and the boot
+        // sequence above holds the relay-open invariant and a possibly-resumed live sale. Nothing
+        // that safety-critical waits on a server that may be unreachable. The dependency runs the
+        // other way — see [bootResumed].
+        viewModelScope.launch { syncPriceOnBoot() }
+        // The queue's catch-up (10f). A sale that completed while the forecourt had no internet,
+        // or while the tablet was off, is reported the next time the app opens — without this the
+        // only thing that ever asks is a *new* sale, so a pump that goes quiet keeps its records
+        // to itself. Costs nothing when the queue is empty.
+        uploadScheduler.requestUpload()
+    }
+
+    /**
+     * Pull the operator's current price down at start-up.
+     *
+     * Every transaction start already re-reads [DeviceConfig] through [canStartTransaction], so a
+     * price that lands here is picked up by the next sale without anything else observing it. What
+     * this adds is the **idle screen**, which would otherwise keep showing the boot-time figure
+     * until someone bought fuel.
+     *
+     * Applied to the display only when **no price has been struck yet**. A resumed dispense, or a
+     * sale already quoted, has its price and its litre target fixed; moving the figure under a
+     * customer mid-sale would make the screen disagree with the sale they are watching, which is
+     * worse than a stale idle price.
+     *
+     * **It is not enough to check for [TransactionState.Idle], which is what this did until the
+     * 10g gate (2026-09-19).** A tablet that restores to [TransactionState.ModeSelect] — a
+     * customer standing at the screen who has chosen nothing yet — returned early here, so the
+     * refreshed price reached the *database* and never reached *memory*. Everything downstream
+     * then quoted from a stale field: the amount screen's litre previews, and
+     * `PrepayAwaitingPayment.priceKoboPerLitre`, which is what the receipt and the completion
+     * screen read. Observed on production with the seed ₦870 on screen and ₦1,490 on the wire.
+     *
+     * The states listed here are the ones where nothing has been struck. Anything else keeps what
+     * it has, which is the original guard's intent stated precisely rather than by proxy.
+     */
+    private suspend fun syncPriceOnBoot() {
+        // Issued first and awaited second, so the round trip overlaps the resume instead of
+        // following it. Only the decision below waits. See [bootResumed].
+        //
+        // **Nothing here may throw** (re-review #R6). This runs on a bare `viewModelScope.launch`
+        // at construction, so an exception is an uncaught one on every single boot — a pump whose
+        // database has gone bad would not open the app at all, and a forecourt tablet that cannot
+        // open the app cannot take cash either. `refresh()` now honours its own never-throws
+        // contract; the read below is this function's own, and gets the same treatment.
+        deviceConfigSync.refresh()
+        bootResumed.await()
+        if (!priceMayMoveFreely(_ui.value.state)) return
+        val config = runCatchingCancellable { deviceConfigRepository.getConfig() }
+            .onFailure { android.util.Log.e("CustomerVM", "Could not re-read the synced price", it) }
+            .getOrNull()
+        config?.let {
+            priceKoboPerLitre = it.koboPerLitre
+            _ui.update { ui -> ui.copy(priceKoboPerLitre = priceKoboPerLitre) }
+        }
+    }
+
+    /**
+     * Whether the displayed price may still change without contradicting something a customer is
+     * looking at. True before a sale has been quoted, false from the moment one has.
+     *
+     * Kept as a named predicate rather than an inline `is` check because the cost of getting the
+     * list wrong is a customer charged at a price the screen never showed.
+     */
+    private fun priceMayMoveFreely(state: TransactionState): Boolean = when (state) {
+        is TransactionState.Idle,
+        is TransactionState.ModeSelect,
+        -> true
+        else -> false
     }
 
     // ---- Boot resume ---------------------------------------------------------------
@@ -226,7 +403,10 @@ class CustomerViewModel @Inject constructor(
 
             is TransactionState.PrepayAwaitingPayment -> {
                 setState(restored)
-                startExpiryCountdown()
+                // The server's window keeps running through a restart, so resume against the
+                // persisted deadline rather than granting a fresh one. Starting the clock again
+                // here would keep a QR on screen after the server had stopped honouring it.
+                startExpiryCountdown(restored.expiresAtEpochMs?.let(Instant::ofEpochMilli))
                 resumePrepayPaymentListener(restored)
             }
 
@@ -253,9 +433,11 @@ class CustomerViewModel @Inject constructor(
                     priceKoboPerLitre = derivedPriceKobo,
                     verifiedLitres = restored.verifiedLitres,
                     amountDueKobo = restored.amountDueKobo,
+                    startedAtEpochMs = restored.startedAtEpochMs,
                 )
-                startFillupDigitalExpiry(source)
-                startFillupDigitalPayment(source)
+                // Restored, not re-granted — the same rule pre-pay follows two branches above.
+                startFillupDigitalExpiry(source, restored.expiresAtEpochMs?.let(Instant::ofEpochMilli))
+                resumeFillupDigitalPayment(source, restored)
             }
 
             is TransactionState.FixedDispensing -> {
@@ -269,6 +451,12 @@ class CustomerViewModel @Inject constructor(
                             litres = litresFromBaseline(),
                             amountKobo = restored.amountKobo,
                             method = method,
+                            // A sale that finished across a restart is exactly the one the upload
+                            // must not lose, so the reference and the start time come off the
+                            // restored state rather than being re-derived (10f).
+                            paymentReference = restored.paymentReference,
+                            startedAtEpochMs = restored.startedAtEpochMs,
+                            priceKoboPerLitre = restored.priceKoboPerLitre,
                         )
                     )
                 } else {
@@ -287,6 +475,7 @@ class CustomerViewModel @Inject constructor(
                             litres = litresFromBaseline(),
                             amountKobo = restored.cashAmountKobo,
                             method = null,
+                            priceKoboPerLitre = restored.priceKoboPerLitre,
                         )
                     )
                 } else {
@@ -449,7 +638,14 @@ class CustomerViewModel @Inject constructor(
         TransactionFlow.FILLUP_DIGITAL -> PaymentMethod.BANK_QR_TRANSFER
     }
 
-    /** Returns the txn ref (BLC-NNNNN) embedded in the state, or null for stateless variants. */
+    /**
+     * Returns the transaction ref embedded in the state, or null for stateless variants.
+     *
+     * **Not always a `BLC-NNNNN`.** Cash and pre-authorise states carry the one
+     * [generateCashTxnId] minted; every state downstream of an `/authorise` carries the id the
+     * server issued instead. Callers use it to tie pulses to whatever sale is in flight, which
+     * holds either way — but do not read it as "the local reference".
+     */
     private fun txnRefFor(state: TransactionState): String? = when (state) {
         is TransactionState.PrepayAwaitingPayment -> state.txnId
         is TransactionState.UssdAwaitingSms -> state.txnId
@@ -536,8 +732,14 @@ class CustomerViewModel @Inject constructor(
                 val method = current.method ?: return
                 when (method) {
                     PaymentMethod.CASH_SEE_ATTENDANT -> onCancel()
+                    // Moves the state before it launches, so its own `ModeSelect` check already
+                    // stops a second tap. Only the digital branch holds `ModeSelect` open.
                     PaymentMethod.USSD -> startUssdFlow(amountKobo = amountKobo)
-                    else -> startPrepayPayment(amountKobo = amountKobo, method = method)
+                    // Review #5's other half. `startPrepayPayment` cancels before it starts, so
+                    // the check belongs here rather than inside it. See [authoriseJob].
+                    else -> if (!authoriseInFlight()) {
+                        startPrepayPayment(amountKobo = amountKobo, method = method)
+                    }
                 }
             }
 
@@ -576,6 +778,7 @@ class CustomerViewModel @Inject constructor(
                             txnId = txnId,
                             priceKoboPerLitre = priceKoboPerLitre,
                             litresSoFar = 0.0,
+                            startedAtEpochMs = System.currentTimeMillis(),
                         )
                     )
                     startFillupDispensing(txnId)
@@ -657,10 +860,16 @@ class CustomerViewModel @Inject constructor(
                 priceKoboPerLitre = current.priceKoboPerLitre,
                 verifiedLitres = verifiedLitres,
                 amountDueKobo = amountDueKobo,
+                startedAtEpochMs = current.startedAtEpochMs,
             )
         )
         dispenseJob?.cancel()
         dispenseJob = null
+        // The customer is reading the total now, which is the time to fetch the price a digital
+        // payment would need — rather than after they tap. Untracked on purpose: `onFillupPayDigital`
+        // cancels the in-flight jobs, and this is the one thing it wants to find still running.
+        // Harmless for a cash sale; it refreshes the stored price and nothing consumes it.
+        viewModelScope.launch { paymentProcessor.prepareToAuthorise() }
     }
 
     /**
@@ -711,6 +920,11 @@ class CustomerViewModel @Inject constructor(
                     amountKobo = current.amountKobo,
                     method = current.method ?: deriveMethodForFlow(current.flow),
                     litresTarget = current.litresAuthorised,
+                    // #47 confirmed the backend accepts a litres figure other than the authorised
+                    // one, so an OQ #22 early end is reported honestly rather than not at all.
+                    paymentReference = current.paymentReference,
+                    startedAtEpochMs = current.startedAtEpochMs,
+                    priceKoboPerLitre = current.priceKoboPerLitre,
                 )
                 is TransactionState.CashFixedDispensing -> TransactionState.Complete(
                     flow = TransactionFlow.CASH_FIXED,
@@ -719,6 +933,7 @@ class CustomerViewModel @Inject constructor(
                     amountKobo = current.cashAmountKobo,
                     method = null,
                     litresTarget = current.litresCutoff,
+                    priceKoboPerLitre = current.priceKoboPerLitre,
                 )
                 else -> return@launch
             }
@@ -737,62 +952,174 @@ class CustomerViewModel @Inject constructor(
         )
     }
 
+    /**
+     * Flow 3: the customer chose to pay digitally for fuel already in the tank.
+     *
+     * **The screen no longer moves until the processor has something payable to show.** It used to
+     * transition immediately, rendering a `nip://transfer?…` payload this app invented against the
+     * operator's virtual account — a QR no scanner resolves and no bank honours, which is the same
+     * defect 10c fixed for pre-pay and left standing here (OQ #6 retired the virtual account with
+     * the move to Paystack; only this call site kept it alive). Now the checkout URL comes off the
+     * processor's `Pending`, exactly as Flow 1's does, and a failure before then falls back to cash
+     * with the tank's figure intact.
+     *
+     * Holding on `FillupTankFull` for the round trip mirrors Flow 1, where the state does not
+     * advance until `Pending` arrives either. A QR-shaped hole with a customer standing at it is
+     * worse than a second of the total they are already reading.
+     */
     fun onFillupPayDigital() {
         val current = currentState() as? TransactionState.FillupTankFull ?: return
-        viewModelScope.launch {
-            val account = deviceConfig()?.virtualAccountNumber
-                ?: DEFAULT_VIRTUAL_ACCOUNT
-            val qrContent = buildNipTransferQr(
-                account = account,
-                amountKobo = current.amountDueKobo,
-                txnId = current.txnId,
-            )
-            cancelInFlightJobs()
-            setState(
-                TransactionState.FillupDigitalAwaitingPayment(
-                    txnId = current.txnId,
-                    verifiedLitres = current.verifiedLitres,
-                    amountDueKobo = current.amountDueKobo,
-                    qrContent = qrContent,
-                )
-            )
-            startFillupDigitalExpiry(current)
-            startFillupDigitalPayment(current)
-        }
+        // Before the cancel, not after: cancelling is what would hide the first authorise from
+        // this check and let a second one out behind it. See [authoriseJob].
+        if (authoriseInFlight()) return
+        cancelInFlightJobs()
+        startFillupDigitalPayment(current)
     }
 
     private fun startFillupDigitalPayment(source: TransactionState.FillupTankFull) {
         paymentJob?.cancel()
-        val amountKobo = source.amountDueKobo
+        _ui.update { it.copy(preparingQr = true) }
         paymentJob = viewModelScope.launch {
-            paymentProcessor.process(PaymentMethod.BANK_QR_TRANSFER, amountKobo).collect { result ->
+            paymentProcessor.process(fillupDigitalRequest(source)).collect { result ->
+                // The first result is what closes the window: every one of the three either moves
+                // the state or ends the flow, so the plain state check guards from here on.
+                authoriseJob = null
+                _ui.update { it.copy(preparingQr = false) }
                 when (result) {
-                    is PaymentResult.Pending -> Unit
-                    is PaymentResult.Success -> onFillupDigitalSuccess(source)
-                    is PaymentResult.Failed -> onFillupDigitalFailed(source, result.reason)
+                    is PaymentResult.Pending -> onFillupDigitalPending(source, result)
+                    is PaymentResult.Success -> onFillupDigitalSuccess(source, result)
+                    is PaymentResult.Failed -> onFillupDigitalFailed(source, result)
                 }
             }
         }
+        // And whenever the job ends without a first result — cancelled, or a flow that closed
+        // empty — so a greyed-out screen can never outlive the request it was waiting on.
+        paymentJob?.invokeOnCompletion { _ui.update { it.copy(preparingQr = false) } }
+        authoriseJob = paymentJob
     }
 
-    private suspend fun onFillupDigitalSuccess(source: TransactionState.FillupTankFull) {
+    /**
+     * Re-attach to a fill-up payment restored from disk. The other half of 10d's boot-resume trap:
+     * this path also called [PaymentProcessor.process], which against the real backend authorises a
+     * second sale for fuel that was already dispensed and may already have been paid for.
+     */
+    private fun resumeFillupDigitalPayment(
+        source: TransactionState.FillupTankFull,
+        restored: TransactionState.FillupDigitalAwaitingPayment,
+    ) {
+        paymentJob?.cancel()
+        paymentJob = viewModelScope.launch {
+            paymentProcessor
+                .resume(
+                    transactionRef = restored.txnId,
+                    request = fillupDigitalRequest(source),
+                    deadline = restored.expiresAtEpochMs?.let(Instant::ofEpochMilli),
+                )
+                .collect { result ->
+                    when (result) {
+                        is PaymentResult.Pending -> Unit
+                        is PaymentResult.Success -> onFillupDigitalSuccess(source, result)
+                        is PaymentResult.Failed -> onFillupDigitalFailed(source, result)
+                    }
+                }
+        }
+    }
+
+    private fun fillupDigitalRequest(source: TransactionState.FillupTankFull) = PaymentRequest(
+        method = PaymentMethod.BANK_QR_TRANSFER,
+        amountKobo = source.amountDueKobo,
+        // The tank is already full: this is the metered figure, not one derived from price.
+        expectedLitres = source.verifiedLitres,
+        basis = SaleBasis.Dispensed,
+    )
+
+    private fun onFillupDigitalPending(
+        source: TransactionState.FillupTankFull,
+        pending: PaymentResult.Pending,
+    ) {
+        if (currentState() !is TransactionState.FillupTankFull) return
+        setState(
+            TransactionState.FillupDigitalAwaitingPayment(
+                txnId = pending.transactionRef,
+                verifiedLitres = source.verifiedLitres,
+                // The processor's figure. The tank's litres are fixed, so a re-price moves the
+                // money — and the amount on screen has to be the one the checkout page charges.
+                amountDueKobo = pending.amountKobo,
+                qrContent = pending.checkoutUrl.orEmpty(),
+                expiresAtEpochMs = pending.expiresAt?.toEpochMilli(),
+                startedAtEpochMs = source.startedAtEpochMs,
+            )
+        )
+        startFillupDigitalExpiry(source, pending.expiresAt)
+    }
+
+    /**
+     * [success] is taken whole because of one field: `paymentReference`. It has arrived here since
+     * 10a and was discarded, and `POST /transactions/upload` cannot go out without it — so this
+     * flow's dispenses were unreportable and nothing said so (10f).
+     */
+    private suspend fun onFillupDigitalSuccess(
+        source: TransactionState.FillupTankFull,
+        success: PaymentResult.Success,
+    ) {
         if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
         expiryJob?.cancel()
         completeAndRecord(
             TransactionState.Complete(
                 flow = TransactionFlow.FILLUP_DIGITAL,
-                txnId = source.txnId,
+                // **The server's id, not the one this pump made up.** `source.txnId` is the
+                // `BLC-…` reference `generateCashTxnId()` minted at attendant-authorise, before
+                // any server transaction existed — and the upload quotes the record's id, so a
+                // fill-up recorded under it describes a sale the backend has never heard of.
+                //
+                // The 10g gate proved it on a real ₦149 sale (2026-09-19): the fuel flowed, the
+                // money was taken, and `/transactions/upload` was refused as terminal, leaving a
+                // paid transaction with no dispense against it. Flow 1 never had this because it
+                // has always taken the id from the payment result; this path had its own.
+                txnId = success.transactionRef,
                 litres = source.verifiedLitres,
-                amountKobo = source.amountDueKobo,
+                // **What was charged, not what was quoted at the nozzle.** `source.amountDueKobo`
+                // is computed at shutoff from the *device's* price; the processor then re-fetches
+                // `/config` and quotes against the server's. The two diverge on a mid-sale
+                // re-price — the case this code already logs as PRICE_CHANGED_MID_SALE, saying
+                // "Displayed X, charged Y" and then storing X — and at any price whose payable
+                // litre step is coarser than the measured figure. The record and the receipt must
+                // say what Paystack collected.
+                amountKobo = success.amountKobo,
                 method = PaymentMethod.BANK_QR_TRANSFER,
+                paymentReference = success.paymentReference,
+                startedAtEpochMs = source.startedAtEpochMs,
+                priceKoboPerLitre = strikePrice(success.amountKobo, source.verifiedLitres),
             )
         )
     }
 
-    private fun onFillupDigitalFailed(source: TransactionState.FillupTankFull, reason: String) {
-        if (currentState() !is TransactionState.FillupDigitalAwaitingPayment) return
+    private suspend fun onFillupDigitalFailed(
+        source: TransactionState.FillupTankFull,
+        failed: PaymentResult.Failed,
+    ) {
+        val awaiting = currentState() as? TransactionState.FillupDigitalAwaitingPayment ?: return
+        // First, and before anything that suspends: the countdown is the other writer of the row
+        // below, and cancelling it here is what keeps one abandonment from being logged twice.
         expiryJob?.cancel()
-        android.util.Log.w("CustomerVM", "Fill-up digital payment failed: $reason")
+        // **The poller's ending is the one that normally happens** (#R10). Both clocks run off the
+        // same `expiresAt`, and the processor's compares against the wall clock while
+        // [startFillupDigitalExpiry]'s counts one-second `delay`s — so a tablet that dozes hands
+        // the ending to the poller, which until now wrote nothing. The id and the amount come off
+        // the **live** state for #R4's reason: `source` carries the local `BLC-…` minted at
+        // attendant-authorise and the quote struck at shutoff, neither of which is what the still
+        // payable checkout page charges.
+        if (failed.windowElapsed) {
+            recordAbandonedPayment(failed.transactionRef ?: awaiting.txnId, awaiting.amountDueKobo)
+        }
+        // No Error state here: the fuel is already in the tank, so the flow falls back to cash
+        // rather than to a card the customer can only dismiss. The diagnostic half still has to go
+        // somewhere, and this is the one failure path with no attendant banner to put it on.
+        android.util.Log.w(
+            "CustomerVM",
+            "Fill-up digital payment failed: " +
+                (failed.failure.attendantDetail ?: failed.failure.customerMessage),
+        )
         setState(
             TransactionState.FillupAwaitingCashConfirm(
                 txnId = source.txnId,
@@ -802,19 +1129,100 @@ class CustomerViewModel @Inject constructor(
         )
     }
 
-    private fun startFillupDigitalExpiry(source: TransactionState.FillupTankFull) {
+    /**
+     * "Cancel · collect cash instead" on the fill-up QR (#R13). **The fuel is already in the tank**,
+     * so this is a change of payment method, never an end to the sale: it goes where its own label
+     * and the expiry fall-back both go — [TransactionState.FillupAwaitingCashConfirm] — and the only
+     * way out of that is the attendant's CASH RECEIVED.
+     *
+     * Until #R13 the button was wired to [onCancel], which dropped to Idle and recorded nothing:
+     * the litres left the pump with no transaction and no event. Seen on the SM-T220 on 2026-09-21,
+     * twice in one evening. Neither the design screen (no cancel on this screen at all) nor
+     * `state-machine.md` (Flow 3 leaves only on payment or expiry, to cash) has a route to Idle.
+     *
+     * The checkout page stays payable — the backend does not close it — so the abandonment is
+     * written down, worded as a cancel. That row is what lets someone answer a customer who later
+     * pays by card *and* has handed over cash (the fill-up half of #R8).
+     */
+    fun onFillupDigitalCancel() {
+        val awaiting = currentState() as? TransactionState.FillupDigitalAwaitingPayment ?: return
+        // Called from a tap, so neither of these is the coroutine we are running in (#R9).
+        paymentJob?.cancel()
         expiryJob?.cancel()
+        // The local reference and the pump's own amount, exactly as the expiry fall-back uses: what
+        // is owed in cash is this tank at this pump's price. Reconstructed from the live state only
+        // if the tank was somehow never stashed, which would still beat a dead button.
+        val tank = fillupDigitalSource
+        setState(
+            TransactionState.FillupAwaitingCashConfirm(
+                txnId = tank?.txnId ?: awaiting.txnId,
+                verifiedLitres = tank?.verifiedLitres ?: awaiting.verifiedLitres,
+                amountDueKobo = tank?.amountDueKobo ?: awaiting.amountDueKobo,
+            )
+        )
+        _ui.update { it.copy(fillupDigitalExpiresInSeconds = 0) }
+        // After the transition and on its own coroutine: nothing waits on the row, so a slow or
+        // failed write cannot hold the attendant's screen back. The id and amount are the server's,
+        // for #R4's reason — they are what the still-live checkout page will charge.
+        viewModelScope.launch {
+            recordAbandonedPayment(awaiting.txnId, awaiting.amountDueKobo, cancelledAtPump = true)
+        }
+    }
+
+    /**
+     * @param serverExpiry the deadline `/authorise` returned. **Null is a fallback, not a
+     *   default.** Until the 10g review this method ignored the server entirely and always gave
+     *   five minutes, while the processor polled to the real twenty — so a customer who scanned at
+     *   5:30 had the sale cancelled under them and the attendant asked for cash on a tank that was
+     *   about to be paid for by card. That is TODO #43, fixed for pre-pay in `startExpiryCountdown`
+     *   and left standing here.
+     */
+    private fun startFillupDigitalExpiry(
+        source: TransactionState.FillupTankFull,
+        serverExpiry: Instant? = null,
+    ) {
+        expiryJob?.cancel()
+        fillupDigitalSource = source
         expiryJob = viewModelScope.launch {
-            var remaining = FILLUP_DIGITAL_EXPIRY_SECONDS
+            var remaining = serverExpiry
+                ?.let { Duration.between(Instant.now(), it).seconds.toInt() }
+                ?.coerceAtLeast(1)
+                ?: FILLUP_DIGITAL_EXPIRY_SECONDS
             _ui.update { it.copy(fillupDigitalExpiresInSeconds = remaining) }
             while (remaining > 0 && currentState() is TransactionState.FillupDigitalAwaitingPayment) {
                 delay(1_000L)
                 remaining -= 1
                 _ui.update { it.copy(fillupDigitalExpiresInSeconds = remaining) }
             }
-            if (remaining <= 0 && currentState() is TransactionState.FillupDigitalAwaitingPayment) {
+            // **Read the live state, not [source].** `source` is the FillupTankFull this sale
+            // started from, and its `txnId` is the local `BLC-…` reference minted at
+            // attendant-authorise — an id no `/authorise` ever issued. The abandonment row exists
+            // so that a customer who pays after the pump stops watching can be answered, and an
+            // id the backend has never heard of answers nothing. The state the countdown is
+            // watching carries the server's id, put there by [onFillupDigitalPending], which is
+            // exactly what the pre-pay twin in [startExpiryCountdown] reads.
+            //
+            // This is the third appearance of one defect: `ed77e00` fixed it for `Complete.txnId`
+            // in this same flow after the 10g gate caught it on a real sale, and left the expiry
+            // path standing.
+            val abandoned = currentState() as? TransactionState.FillupDigitalAwaitingPayment
+            if (remaining <= 0 && abandoned != null) {
                 paymentJob?.cancel()
+                // The fall-back to cash is visible to an attendant, unlike the pre-pay one — but
+                // the checkout page is just as live, so a customer who pays digitally a moment
+                // later can be asked for cash as well. The log is what makes that answerable.
+                //
+                // `abandoned.amountDueKobo` for the same reason: it is the processor's figure,
+                // which is what the still-live checkout page will charge. `source.amountDueKobo`
+                // is the device-priced quote struck at shutoff, and the two diverge on a mid-sale
+                // re-price and at any payable litre step coarser than the metered figure.
+                recordAbandonedPayment(abandoned.txnId, abandoned.amountDueKobo)
                 setState(
+                    // The cash fall-back keeps **`source`** on purpose, and the asymmetry is the
+                    // point. What is owed in cash is the tank's litres at the pump's own price —
+                    // the same figure Flow 2 collects for the same tank — and the record it
+                    // settles into is a cash sale, which nothing authorised and nothing uploads.
+                    // The server's id belongs to a transaction that was never paid.
                     TransactionState.FillupAwaitingCashConfirm(
                         txnId = source.txnId,
                         verifiedLitres = source.verifiedLitres,
@@ -824,10 +1232,6 @@ class CustomerViewModel @Inject constructor(
             }
         }
     }
-
-    // NIP transfer amounts are in naira (major units) with 2 dp, derived losslessly from kobo.
-    private fun buildNipTransferQr(account: String, amountKobo: Long, txnId: String): String =
-        "nip://transfer?account=$account&amount=${"%.2f".format(amountKobo / 100.0)}&ref=$txnId"
 
     fun onAttendantCashReceived() {
         val current = currentState() as? TransactionState.FillupAwaitingCashConfirm ?: return
@@ -839,6 +1243,9 @@ class CustomerViewModel @Inject constructor(
                     litres = current.verifiedLitres,
                     amountKobo = current.amountDueKobo,
                     method = null,
+                    // FillupAwaitingCashConfirm carries no price of its own, so it is recovered
+                    // from the two figures locked together at tank-full.
+                    priceKoboPerLitre = strikePrice(current.amountDueKobo, current.verifiedLitres),
                 )
             )
         }
@@ -894,7 +1301,9 @@ class CustomerViewModel @Inject constructor(
                     // The attendant typed this amount, so the actionable number is theirs: it goes
                     // to the panel, not onto the customer card (OQ #17).
                     TransactionState.Error(
-                        message = "Amount is too small — please see attendant.",
+                        // Shared with the processor's own below-minimum refusal: one condition,
+                        // one sentence, which is the defect OQ #17 started from.
+                        message = FailureCopy.AMOUNT_TOO_SMALL,
                         recoverable = true,
                         attendantDetail = "Below the smallest dispensable step — the minimum at " +
                             "this price is ${formatNaira(priceKoboPerLitre / 100)} for 0.01 L.",
@@ -945,6 +1354,7 @@ class CustomerViewModel @Inject constructor(
                                         litres = litresCutoff,
                                         amountKobo = cashAmountKobo,
                                         method = null,
+                                        priceKoboPerLitre = current.priceKoboPerLitre,
                                     )
                                 )
                                 return@collect
@@ -1002,48 +1412,64 @@ class CustomerViewModel @Inject constructor(
     private fun startUssdSmsListener(amountKobo: Long, txnId: String) {
         paymentJob?.cancel()
         paymentJob = viewModelScope.launch {
-            paymentProcessor.process(PaymentMethod.USSD, amountKobo).collect { result ->
+            val request = PaymentRequest(
+                method = PaymentMethod.USSD,
+                amountKobo = amountKobo,
+                expectedLitres = litresFor(amountKobo),
+                basis = SaleBasis.Tender,
+            )
+            paymentProcessor.process(request).collect { result ->
                 when (result) {
                     is PaymentResult.Pending -> Unit
-                    is PaymentResult.Success -> onUssdSmsConfirmed(amountKobo, txnId)
-                    is PaymentResult.Failed -> onUssdFailed(result.reason)
+                    is PaymentResult.Success -> onUssdSmsConfirmed(amountKobo, txnId, result)
+                    is PaymentResult.Failed -> onUssdFailed(result.failure)
                 }
             }
         }
     }
 
-    private suspend fun onUssdSmsConfirmed(amountKobo: Long, txnId: String) {
+    /** [success] is taken for its `paymentReference` — see [onFillupDigitalSuccess]. */
+    private suspend fun onUssdSmsConfirmed(
+        amountKobo: Long,
+        txnId: String,
+        success: PaymentResult.Success,
+    ) {
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
-        val litresAuthorised = deviceConfig()?.litresCutoff(amountKobo)
-            ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
+        val litresAuthorised = litresFor(amountKobo)
         pulseBaseline = 0
         recoveredLitres = 0.0
         setState(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.USSD_OFFLINE,
-                txnId = txnId,
+                // The server's id, not `generateUssdRef`/`generateCashTxnId`'s local one. This is
+                // the same defect `ed77e00` fixed for Flow 3 and it was left standing here: the
+                // row carries a real `paymentReference`, so it *is* uploadable, and the upload
+                // quotes `record.id` — an id `/authorise` never issued. TRANSACTION_NOT_FOUND is
+                // terminal, so the dispense would be dropped permanently.
+                txnId = success.transactionRef,
                 priceKoboPerLitre = priceKoboPerLitre,
                 amountKobo = amountKobo,
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
                 method = PaymentMethod.USSD,
+                paymentReference = success.paymentReference,
+                startedAtEpochMs = System.currentTimeMillis(),
             )
         )
         startDispensing(litresAuthorised, PaymentMethod.USSD)
     }
 
-    private fun onUssdFailed(reason: String) {
+    private fun onUssdFailed(failure: FailureCopy) {
         if (currentState() !is TransactionState.UssdAwaitingSms) return
         expiryJob?.cancel()
         setState(
-            // The reason comes from the bank SMS parser and means nothing to a customer standing
-            // at the pump; it is exactly what an attendant needs. Split per OQ #17.
-            TransactionState.Error(
-                message = "Payment was not completed.",
-                recoverable = true,
-                attendantDetail = "USSD payment failed — $reason.",
-            )
+            // The split arrives already decided (10e). All this path adds is which payment method
+            // it was, because the attendant's next move differs: a USSD failure is a bank's SMS
+            // that did not arrive, not a QR nobody scanned.
+            failure.toErrorState().let {
+                it.copy(attendantDetail = it.attendantDetail?.let { d -> "USSD — $d" })
+            }
         )
     }
 
@@ -1071,34 +1497,61 @@ class CustomerViewModel @Inject constructor(
     private fun startPrepayPayment(amountKobo: Long, method: PaymentMethod) {
         cancelInFlightJobs()
         paymentJob = viewModelScope.launch {
-            paymentProcessor.process(method, amountKobo).collect { result ->
+            val request = PaymentRequest(
+                method = method,
+                amountKobo = amountKobo,
+                expectedLitres = litresFor(amountKobo),
+                basis = SaleBasis.Tender,
+            )
+            paymentProcessor.process(request).collect { result ->
+                // See the same line in `startFillupDigitalPayment`: the first result moves the
+                // state or ends the flow, and the ordinary state check takes over from there.
+                authoriseJob = null
                 when (result) {
                     is PaymentResult.Pending -> onPaymentPending(amountKobo, method, result)
-                    is PaymentResult.Success -> onPaymentSuccess(amountKobo, method, result)
+                    is PaymentResult.Success -> onPaymentSuccess(result)
                     is PaymentResult.Failed -> onPaymentFailed(result)
                 }
             }
         }
+        authoriseJob = paymentJob
     }
 
     /**
-     * Restart the prepay payment listener for a state restored from disk. The original
-     * Pending event is gone — we go straight back into a fresh [paymentProcessor.process]
-     * call carrying the same amount + method and treat its Success as the resumed webhook.
-     * The transactionRef on the resumed state stays the in-memory one the customer is
-     * looking at; the new Pending event arrives with a fresh backend ref that we ignore.
+     * Re-attach to a prepay payment restored from disk — **without starting a second one**.
+     *
+     * This used to call `process` again. Against the mock that was free, which is why it survived
+     * this long; against the real backend it POSTs a second `/authorise` and creates a second sale
+     * for a customer who may already have paid for the first. The id is ours and it was persisted,
+     * so `resume` asks about the sale that exists (Phase 10d).
+     *
+     * The amount and litres come off the restored state because they are the **authorised** figures
+     * — what the checkout page quoted, not what the customer tendered — and nothing is re-priced on
+     * this path.
      */
     private fun resumePrepayPaymentListener(restored: TransactionState.PrepayAwaitingPayment) {
         paymentJob?.cancel()
         val amountKobo = restored.amountKobo
         paymentJob = viewModelScope.launch {
-            paymentProcessor.process(restored.method, amountKobo).collect { result ->
-                when (result) {
-                    is PaymentResult.Pending -> Unit
-                    is PaymentResult.Success -> onPaymentSuccess(amountKobo, restored.method, result)
-                    is PaymentResult.Failed -> onPaymentFailed(result)
+            val request = PaymentRequest(
+                method = restored.method,
+                amountKobo = amountKobo,
+                expectedLitres = restored.litresAuthorised ?: litresFor(amountKobo),
+                basis = SaleBasis.Tender,
+            )
+            paymentProcessor
+                .resume(
+                    transactionRef = restored.txnId,
+                    request = request,
+                    deadline = restored.expiresAtEpochMs?.let(Instant::ofEpochMilli),
+                )
+                .collect { result ->
+                    when (result) {
+                        is PaymentResult.Pending -> Unit
+                        is PaymentResult.Success -> onPaymentSuccess(result)
+                        is PaymentResult.Failed -> onPaymentFailed(result)
+                    }
                 }
-            }
         }
     }
 
@@ -1110,23 +1563,43 @@ class CustomerViewModel @Inject constructor(
         setState(
             TransactionState.PrepayAwaitingPayment(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
-                amountKobo = amountKobo,
+                // The processor's figure, not the tendered [amountKobo] the caller asked for. The
+                // two differ whenever the tender is not an exact number of payable litres, and the
+                // one on screen has to be the one the checkout page will charge (10d).
+                amountKobo = pending.amountKobo,
                 method = method,
                 txnId = pending.transactionRef,
-                priceKoboPerLitre = priceKoboPerLitre,
+                // Derived from the quote, not read from this class's field. The quote's amount
+                // and litres were struck together against the price the processor fetched, so
+                // their ratio *is* that price; the field is a display copy that can be stale.
+                // 10g caught it stale — ₦870 on the state, ₦1,490 on the wire — which would
+                // have put the wrong price on the receipt and the completion screen (#37).
+                priceKoboPerLitre = pending.strikePriceKoboPerLitre() ?: priceKoboPerLitre,
+                checkoutUrl = pending.checkoutUrl,
+                expiresAtEpochMs = pending.expiresAt?.toEpochMilli(),
+                litresAuthorised = pending.litres,
             )
         )
-        startExpiryCountdown()
+        startExpiryCountdown(pending.expiresAt)
     }
 
-    private suspend fun onPaymentSuccess(
-        amountKobo: Long,
-        method: PaymentMethod,
-        success: PaymentResult.Success,
-    ) {
+    /**
+     * [success] is now the only source: its amount, litres and method are what the server
+     * authorised, and the caller's own copies were the pre-quote request. Passing those in
+     * alongside is how the two came apart in the first place.
+     */
+    private suspend fun onPaymentSuccess(success: PaymentResult.Success) {
+        val method = success.method
         expiryJob?.cancel()
-        val litresAuthorised = deviceConfig()?.litresCutoff(success.amountKobo)
-            ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
+        // **10d answers the question 10c left here.** The server's own figure wins when there is
+        // one: re-deriving litres from the amount gives a DIFFERENT number, because the quote lands
+        // on a payable litre step while litresCutoff floors to 2 dp — at ₦1,490 a ₦5,000 tender
+        // authorises 3.355 L and re-derivation gives 3.35, stopping the pump 5 ml short of what was
+        // paid for on the same figure 10f will reconcile against the server's record. The two
+        // fallbacks below are for processors that authorise nothing.
+        val litresAuthorised = success.litresAuthorised
+            ?: deviceConfig()?.litresCutoff(success.amountKobo)
+            ?: ((success.amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
 
         pulseBaseline = 0
         recoveredLitres = 0.0
@@ -1134,39 +1607,158 @@ class CustomerViewModel @Inject constructor(
             TransactionState.FixedDispensing(
                 flow = TransactionFlow.FIXED_PREPAY_DIGITAL,
                 txnId = success.transactionRef,
-                priceKoboPerLitre = priceKoboPerLitre,
-                amountKobo = amountKobo,
+                // Derived from what the server settled, not from this class's display field.
+                // Carrying the price onto Complete (review finding 1) only helps if the state it
+                // is carried from holds the struck price — and this is where Flow 1's comes from,
+                // so reading the field here would leave the receipt exactly as wrong as before.
+                priceKoboPerLitre = strikePrice(success.amountKobo, litresAuthorised)
+                    ?: priceKoboPerLitre,
+                // What was collected, not what was asked for — this is the figure the audit row and
+                // the receipt carry.
+                amountKobo = success.amountKobo,
                 litresAuthorised = litresAuthorised,
                 litresSoFar = 0.0,
                 method = method,
+                // The reference the upload quotes. Received since 10a, kept since 10f.
+                paymentReference = success.paymentReference,
+                startedAtEpochMs = System.currentTimeMillis(),
             )
         )
         startDispensing(litresAuthorised, method)
     }
 
-    private fun onPaymentFailed(failed: PaymentResult.Failed) {
-        cancelInFlightJobs()
-        setState(
-            TransactionState.Error(
-                message = "Payment was not completed.",
-                recoverable = true,
-                attendantDetail = "Payment failed — ${failed.reason}.",
-            )
-        )
+    /**
+     * The customer-facing half of 10e. Both lines and the recoverable flag are the processor's —
+     * it is the only thing that knows whether the server refused the sale, declined the card, or
+     * simply has not seen the money land yet, and until 10e all three read "Payment was not
+     * completed." to the customer and "Payment failed — …" to the attendant.
+     */
+    private suspend fun onPaymentFailed(failed: PaymentResult.Failed) {
+        val awaiting = currentState() as? TransactionState.PrepayAwaitingPayment
+        // **Not [cancelInFlightJobs]**: this runs inside `paymentJob`'s collect, and cancelling the
+        // job you are standing in is #R9 — the write below would throw at its first suspension and
+        // the `setState` after it would never run. `paymentJob` is ending on its own. The others
+        // are cancelled first because `expiryJob` is the row's other writer (see #R10).
+        expiryJob?.cancel()
+        dispenseJob?.cancel()
+        fillupWatchdogJob?.cancel()
+        // The window elapsing is an abandonment; a decline is not. Until #R10 only
+        // [startExpiryCountdown] wrote this row, and it is not normally the clock that gets there
+        // first — so on a real tablet the row was never written at all. The amount is the live
+        // state's, which is the tender the server authorised and what the checkout page will take.
+        if (failed.windowElapsed && awaiting != null) {
+            recordAbandonedPayment(failed.transactionRef ?: awaiting.txnId, awaiting.amountKobo)
+        }
+        setState(failed.failure.toErrorState())
     }
 
-    private fun startExpiryCountdown() {
+    /**
+     * TODO **#43**. [serverExpiry] is the `expiresAt` the server issued with the authorise, and it is
+     * what the countdown runs on whenever there is one — measured at **twenty minutes** on
+     * production against the five this app assumed. The constant is the fallback for a response that
+     * carried no expiry, not the default.
+     *
+     * Clamped to at least one second: a server expiry already in the past (a long restart, a clock
+     * well behind) would otherwise run the countdown negative rather than ending the sale.
+     */
+    /**
+     * The price this quote was struck at, in kobo per litre, or null when it cannot be derived.
+     *
+     * `amountKobo` and `litres` come out of `SaleQuote` together, so their ratio is the price the
+     * server will check the sale against — which is the only price a receipt should ever show.
+     * Mirrors what [bootResume] already does for a restored fill-up.
+     */
+    /**
+     * The price a settled sale was struck at: the amount actually charged over the litres it
+     * bought. Null when there are no litres to divide by.
+     */
+    private fun strikePrice(amountKobo: Long, litres: Double): Long? =
+        if (litres > 0) Math.round(amountKobo / litres) else null
+
+    private fun PaymentResult.Pending.strikePriceKoboPerLitre(): Long? =
+        if (litres > 0) Math.round(amountKobo / litres) else null
+
+    /**
+     * Note that a digital payment window closed unpaid, and that the app has stopped watching.
+     *
+     * See [EventType.PAYMENT_ABANDONED]. The backend does not move the transaction off
+     * `PENDING_PAYMENT` when its `expiresAt` passes, so this is not "the sale is over" — it is
+     * "we are no longer looking", which is a different and more useful thing to have written down.
+     *
+     * **Never throws**, for the reason argued at
+     * `BalanceePaymentProcessor.recordPriceRaceIfAny`: every caller writes this row and then moves
+     * the state, so a Room failure here would take the `setState` with it and strand the pump on a
+     * dead QR screen — a countdown at zero, the relay shut, and no way back to Idle but a restart.
+     * Losing the row costs an answer to one customer; losing the transition costs the pump.
+     *
+     * **Four callers, two clocks** (#R10). The two expiry countdowns own the ending when the server
+     * issued no `expiresAt`; the two payment-failure handlers own it when it did, because the
+     * processor's poll deadline compares against the wall clock and a countdown of one-second
+     * `delay`s does not. Whichever fires cancels the other, so the row is written once — and if the
+     * two ever overlap by an instant, two truthful rows are a better failure than none, which is
+     * what the tablet showed on 2026-09-20.
+     */
+    private suspend fun recordAbandonedPayment(
+        txnId: String,
+        amountKobo: Long,
+        /**
+         * Said in the row, because "timed out" and "cancelled" send whoever reads it to different
+         * people: a window that ran out means nobody acted, a cancel means someone at the pump did.
+         */
+        cancelledAtPump: Boolean = false,
+    ) {
+        val detail = if (cancelledAtPump) {
+            "Payment cancelled at the pump for ${formatNaira(amountKobo)}; cash was asked for " +
+                "instead. The checkout link may still be payable."
+        } else {
+            "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
+                "The pump stopped watching; the checkout link may still be payable."
+        }
+        // [runCatchingCancellable], not `runCatching`, and the difference is load-bearing here:
+        // `expiryJob` is cancelled the instant a payment succeeds, and this coroutine may be
+        // suspended inside the write when that happens. A swallowed cancellation would let the
+        // `setState` after this call run anyway — wiping a sale that had just been paid for.
+        runCatchingCancellable {
+            events.record(
+                type = EventType.PAYMENT_ABANDONED,
+                transactionRef = txnId,
+                detail = detail,
+            )
+        }.onFailure {
+            android.util.Log.e("CustomerVM", "Could not record abandonment of $txnId: $detail", it)
+        }
+    }
+
+    private fun startExpiryCountdown(serverExpiry: Instant? = null) {
         expiryJob?.cancel()
+        val window = serverExpiry
+            ?.let { Duration.between(Instant.now(), it).seconds.toInt() }
+            ?.coerceAtLeast(1)
+            ?: PREPAY_EXPIRY_SECONDS
         expiryJob = viewModelScope.launch {
-            var remaining = PREPAY_EXPIRY_SECONDS
+            var remaining = window
             _ui.update { it.copy(prepayExpiresInSeconds = remaining) }
             while (remaining > 0 && currentState() is TransactionState.PrepayAwaitingPayment) {
                 delay(1_000L)
                 remaining -= 1
                 _ui.update { it.copy(prepayExpiresInSeconds = remaining) }
             }
-            if (remaining <= 0 && currentState() is TransactionState.PrepayAwaitingPayment) {
-                cancelInFlightJobs()
+            val abandoned = currentState() as? TransactionState.PrepayAwaitingPayment
+            if (remaining <= 0 && abandoned != null) {
+                // **Not [cancelInFlightJobs], which cancels `expiryJob` — this coroutine** (#R9).
+                // Once this job is cancelled the next suspension point throws, and the very next
+                // call is a suspending Room write: neither the abandonment row nor the
+                // `setState` below survived it. The pump was left on a dead QR at zero with a
+                // checkout URL the backend still honours and nothing written down to answer the
+                // customer who paid it — the one thing `PAYMENT_ABANDONED` exists to prevent.
+                //
+                // The fill-up twin in [startFillupDigitalExpiry] never had this: it cancels the
+                // payment job and leaves its own alone. The jobs are named individually here for
+                // the same reason — `expiryJob` is ending on its own and must not be told to.
+                paymentJob?.cancel()
+                dispenseJob?.cancel()
+                fillupWatchdogJob?.cancel()
+                recordAbandonedPayment(abandoned.txnId, abandoned.amountKobo)
                 setState(TransactionState.Idle)
             }
         }
@@ -1194,6 +1786,9 @@ class CustomerViewModel @Inject constructor(
                                         litres = litresAuthorised,
                                         amountKobo = current.amountKobo,
                                         method = method,
+                                        paymentReference = current.paymentReference,
+                                        startedAtEpochMs = current.startedAtEpochMs,
+                                        priceKoboPerLitre = current.priceKoboPerLitre,
                                     )
                                 )
                                 return@collect
@@ -1230,6 +1825,20 @@ class CustomerViewModel @Inject constructor(
     // ---- Cancel / dismiss ----------------------------------------------------------
 
     fun onCancel() {
+        // **Fuel in the tank never leaves without a record** (#R13), and that is decided here rather
+        // than by which buttons a screen happens to show. A fill-up past shutoff can be paid for,
+        // or its payment method changed — never cancelled. A genuine drive-off has no exit yet:
+        // that is a question for the boss (TODO #R14), not a reason to let it vanish.
+        when (currentState()) {
+            is TransactionState.FillupDigitalAwaitingPayment -> {
+                onFillupDigitalCancel()
+                return
+            }
+            is TransactionState.FillupTankFull,
+            is TransactionState.FillupAwaitingCashConfirm,
+            -> return
+            else -> Unit
+        }
         cancelInFlightJobs()
         viewModelScope.launch { relay.stopFuelFlow() }
         resetToIdle(clearPulses = true)
@@ -1272,7 +1881,9 @@ class CustomerViewModel @Inject constructor(
         paymentMethod = method,
         litresDispensed = litres,
         amountKobo = amountKobo,
-        priceKoboPerLitre = priceKoboPerLitre,
+        // The struck price, same rule as toAuditRecord. This is the receipt a customer is handed
+        // when the saved row cannot be read back, so it is the last place that should be guessing.
+        priceKoboPerLitre = priceKoboPerLitre ?: this@CustomerViewModel.priceKoboPerLitre,
         transactionRef = txnId,
         attendantId = attendantId,
     )
@@ -1292,11 +1903,19 @@ class CustomerViewModel @Inject constructor(
 
     private suspend fun completeAndRecord(complete: TransactionState.Complete) {
         setState(complete)
+        val record = complete.toAuditRecord(priceKoboPerLitre)
         try {
-            transactions.saveTransaction(complete.toAuditRecord(priceKoboPerLitre))
+            transactions.saveTransaction(record)
         } catch (t: Throwable) {
             android.util.Log.e("CustomerVM", "Failed to persist transaction ${complete.txnId}", t)
+            // Nothing to upload: the row the job reads does not exist. Asking anyway would send
+            // the queue looking for a record that was never written.
+            return
         }
+        // Only a sale the backend can accept. A cash sale has no paymentReference and is outside
+        // the upload path, not behind in it (10f) — and this is deliberately not awaited, because
+        // the customer already has their fuel and the screen has to move on.
+        if (record.isUploadable) uploadScheduler.requestUpload()
     }
 
     private fun TransactionState.Complete.toAuditRecord(priceKoboPerLitre: Long): Transaction =
@@ -1306,13 +1925,19 @@ class CustomerViewModel @Inject constructor(
             paymentMethod = method,
             litresDispensed = litres,
             amountKobo = amountKobo,
-            priceKoboPerLitre = priceKoboPerLitre,
+            // The sale's own struck price wins; the parameter is only the fallback for rows
+            // persisted before Complete carried one. See Complete.priceKoboPerLitre.
+            priceKoboPerLitre = this.priceKoboPerLitre ?: priceKoboPerLitre,
             transactionRef = txnId,
             attendantId = attendantId,
             attendantNote = litresTarget?.let { target ->
                 String.format(Locale.UK, "Ended by attendant at %.2f of %.2f L", litres, target)
             },
             recoveredLitres = recoveredLitres,
+            // 10f. Null on a cash sale, which nothing authorised and which therefore has nothing
+            // to upload — `Transaction.isUploadable` is the one place that reads it that way.
+            paymentReference = paymentReference,
+            startedAt = startedAtEpochMs,
         )
 
     private fun cancelInFlightJobs() {
@@ -1355,8 +1980,22 @@ class CustomerViewModel @Inject constructor(
 
     private suspend fun deviceConfig(): DeviceConfig? = deviceConfigRepository.getConfig()
 
+    /**
+     * Litres a fixed amount buys. Extracted in Phase 10a because this number now has two consumers
+     * that must not disagree: the cutoff the pump enforces, and the `expectedLitres` sent to
+     * `/authorise`. The server checks `amount == expectedLitres x pricePerUnit` **exactly**, so if
+     * the figure we quote it were derived any differently from the figure we stop at, the sale would
+     * either be refused outright or authorise a different quantity from the one dispensed.
+     *
+     * The expression is unchanged from the two places it was duplicated in: floored to 2dp by
+     * [DeviceConfig.litresCutoff] so the pump never gives away more than was paid for, with a
+     * price-only fallback for the (guard-blocked) case of no config at all.
+     */
+    private suspend fun litresFor(amountKobo: Long): Double =
+        deviceConfig()?.litresCutoff(amountKobo)
+            ?: ((amountKobo.toDouble() / priceKoboPerLitre).coerceAtLeast(0.0))
+
     private companion object {
         const val DEFAULT_KOBO_PER_LITRE = 87_000L
-        const val DEFAULT_VIRTUAL_ACCOUNT = "0123456789"
     }
 }

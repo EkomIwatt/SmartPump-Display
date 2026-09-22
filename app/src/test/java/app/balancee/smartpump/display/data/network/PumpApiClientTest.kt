@@ -29,6 +29,7 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.math.BigDecimal
 
 class PumpApiClientTest {
 
@@ -52,7 +53,7 @@ class PumpApiClientTest {
         override suspend fun clear() { creds = null }
     }
 
-    private val authoriseReq = AuthoriseRequest("P1", "T1", 500000, 5.75, FuelType.PETROL)
+    private val authoriseReq = AuthoriseRequest("P1", "T1", BigDecimal("500000"), 5.75, FuelType.PETROL)
     private val uploadReq = UploadTransactionRequest(
         "P1", "T1", "PR1", 5.75, "2026-07-03T12:00:00Z", "2026-07-03T12:03:00Z",
     )

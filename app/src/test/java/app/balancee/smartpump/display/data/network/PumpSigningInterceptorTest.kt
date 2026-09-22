@@ -26,6 +26,7 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.math.BigDecimal
 
 class PumpSigningInterceptorTest {
 
@@ -79,7 +80,7 @@ class PumpSigningInterceptorTest {
         ))
 
         service.authorise(
-            AuthoriseRequest("P1", "T1", 500000, 5.75, FuelType.PETROL)
+            AuthoriseRequest("P1", "T1", BigDecimal("500000"), 5.75, FuelType.PETROL)
         )
 
         val recorded = server.takeRequest()

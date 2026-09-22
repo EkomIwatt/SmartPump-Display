@@ -1,0 +1,85 @@
+# SmartPump API capture
+# server:     https://api.balancee.app/
+# written:    2026-09-19T18:42:49.286052Z
+# responses:  20 (newest first)
+# NOTE: bodies are verbatim. Build fixtures from these bytes, not from a restatement of them (TODO #11).
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:42:28.811020Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:39:02.047785Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:38:51.630166Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:38:41.089186Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:38:30.618492Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:38:20.194098Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:38:09.754155Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:37:59.245139Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:37:48.697339Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:37:38.263676Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:37:27.834597Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:37:17.424384Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:37:06.976120Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:36:56.431274Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:36:45.882802Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:36:35.339116Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:36:24.785991Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:36:14.343692Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:36:03.798680Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}
+
+---- GET /api/pump/transactions/64bada69-93d7-461e-aaee-f2e517206d3d → 200
+---- at 2026-09-19T18:35:53.262207Z
+{"status":true,"message":"Pump transaction","data":{"status":"PENDING_PAYMENT","transactionId":"64bada69-93d7-461e-aaee-f2e517206d3d","paymentReference":"BPM-ae742d8e63b644e6bb53e9518e9d0152","authorizationUrl":"https://checkout.paystack.com/2z1b3tfguhs9h0q","expiresAt":"2026-09-19T18:39:12.046Z"}}

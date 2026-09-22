@@ -27,6 +27,7 @@ import app.balancee.smartpump.display.data.network.ProbeClockOffset
 import app.balancee.smartpump.display.data.network.ProbeResponseRecorder
 import app.balancee.smartpump.display.data.network.PumpApiClient
 import app.balancee.smartpump.display.data.network.dto.AuthoriseRequest
+import app.balancee.smartpump.display.data.network.dto.nairaForSale
 import app.balancee.smartpump.display.data.network.dto.AuthoriseResponse
 import app.balancee.smartpump.display.data.network.dto.PumpConfigResponse
 import app.balancee.smartpump.display.data.network.dto.TransactionStatusResponse
@@ -48,6 +49,8 @@ import java.io.File
 import java.time.Clock
 import java.time.Duration
 import java.time.format.DateTimeFormatter
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.UUID
 import javax.inject.Inject
 import kotlin.math.abs
@@ -71,6 +74,20 @@ enum class AuthoriseVariant {
 
     /** A decimal amount, which our Long-typed DTO cannot express. Sent as raw JSON (#18c). */
     Decimal,
+
+    /**
+     * Four decimal places of litres, and the 4dp amount that is their exact product.
+     *
+     * **The question this exists to answer** (raised in 10b, decides 10c): a pre-pay customer hands
+     * over a round sum, and litres quoted at 2dp cannot spend all of it — ₦5,000 at ₦1,490/L buys
+     * 3.35 L, worth ₦4,991.50, and the server's exact check refuses the ₦5,000 that was actually
+     * tendered. Quoting finer litres shrinks that shortfall from ₦14.90 at worst to under a kobo,
+     * **if** the server accepts more than the one decimal place we have observed it take.
+     *
+     * Nothing about this is inferable from the Reference, and guessing it wrong means either giving
+     * away fuel or refusing sales. So it is measured.
+     */
+    Precision,
 }
 
 /**
@@ -82,9 +99,53 @@ enum class AuthoriseVariant {
  * ₦1490 × 2.35 L = ₦3,501.50. If `amount` must be a whole number, that sale cannot be authorised at
  * all: a rounded 3501 is not off by fifty kobo, it is **rejected**.
  */
+/**
+ * What a pre-pay sale looks like when litres are quoted to [scale] decimal places.
+ *
+ * This is the whole 10b finding expressed as arithmetic. The customer tenders a round sum; the pump
+ * can only promise litres to some finite precision; and the server accepts the sale only if the
+ * amount is **exactly** the product. So the amount that can be charged is the product, and whatever
+ * the tendered sum exceeds it by is [shortfall] — fuel the customer paid for and does not get.
+ *
+ * `RoundingMode.DOWN` on the litres, never UP: the floor is what stops the pump giving away more
+ * fuel than was paid for, and that rule outranks tidiness.
+ */
+data class PrecisionQuote(
+    val litres: BigDecimal,
+    val amount: BigDecimal,
+    /** Tendered minus chargeable. Always >= 0, and always the customer's loss. */
+    val shortfall: BigDecimal,
+)
+
+internal fun precisionQuote(
+    tenderedNaira: BigDecimal,
+    koboPerLitre: Long,
+    scale: Int,
+): PrecisionQuote {
+    val price = BigDecimal.valueOf(koboPerLitre, 2)
+    val litres = tenderedNaira.divide(price, scale, RoundingMode.DOWN)
+    val amount = litres.multiply(price)
+    return PrecisionQuote(litres = litres, amount = amount, shortfall = tenderedNaira.subtract(amount))
+}
+
+/** The round sum a customer would plausibly hand over for [litres] — the next whole naira up. */
+internal fun tenderedFor(litres: Double, koboPerLitre: Long): BigDecimal =
+    nairaForSale(litres, koboPerLitre).setScale(0, RoundingMode.CEILING)
+
 sealed interface AmountPlan {
     data class Exact(val naira: Long) : AmountPlan
     data class Fractional(val naira: Double) : AmountPlan
+
+    /**
+     * What actually goes on the wire. Both branches are now sendable — `amount` is a `BigDecimal`
+     * since TODO #44 — so the distinction survives only to *tell the operator* which case a litre
+     * figure lands on, which is still worth seeing on a probe screen. It is no longer a gate.
+     */
+    val wireAmount: BigDecimal
+        get() = when (this) {
+            is Exact -> BigDecimal.valueOf(naira)
+            is Fractional -> BigDecimal.valueOf(naira)
+        }
 }
 
 internal fun amountFor(litres: Double, pricePerUnit: Long): AmountPlan {
@@ -203,38 +264,48 @@ class ApiProbeViewModel @Inject constructor(
         val transactionId = "probe-${UUID.randomUUID()}"
 
         val result = when (variant) {
-            AuthoriseVariant.Happy -> when (plan) {
-                is AmountPlan.Exact -> client.authorise(
-                    AuthoriseRequest(
-                        pumpId = config.pumpId,
-                        transactionId = transactionId,
-                        amount = plan.naira,
-                        expectedLitres = litres,
-                        fuelType = config.fuelType,
-                    ),
-                )
-                // Not a failure to report as an error: it is the answer to #18c, arrived at before
-                // sending anything. These litres cannot be expressed in whole naira, so the happy
-                // path IS the decimal case.
-                is AmountPlan.Fractional -> return@probe fractionalSummary(plan, litres, config)
-            }
+            // Both branches send now. Until #44 this refused on a fractional amount, because
+            // `amount` was a Long and the sale genuinely could not be expressed — that refusal is
+            // how #18c was first answered, and it is kept in the log rather than in the code.
+            AuthoriseVariant.Happy -> client.authorise(
+                AuthoriseRequest(
+                    pumpId = config.pumpId,
+                    transactionId = transactionId,
+                    amount = nairaForSale(litres, config.pricePerUnit * 100),
+                    expectedLitres = litres,
+                    fuelType = config.fuelType,
+                ),
+            )
 
-            AuthoriseVariant.Mismatch -> {
-                val base = when (plan) {
-                    is AmountPlan.Exact -> plan.naira
-                    is AmountPlan.Fractional -> Math.round(plan.naira)
-                }
+            AuthoriseVariant.Mismatch -> client.authorise(
+                AuthoriseRequest(
+                    pumpId = config.pumpId,
+                    transactionId = transactionId,
+                    // Deliberately one naira off the exact product, so the server's own check is
+                    // what refuses it rather than anything of ours.
+                    amount = nairaForSale(litres, config.pricePerUnit * 100).add(BigDecimal.ONE),
+                    expectedLitres = litres,
+                    fuelType = config.fuelType,
+                ),
+            )
+
+            AuthoriseVariant.Precision -> {
+                val tendered = tenderedFor(litres, config.pricePerUnit * 100)
+                val fine = precisionQuote(tendered, config.pricePerUnit * 100, scale = 4)
                 client.authorise(
                     AuthoriseRequest(
                         pumpId = config.pumpId,
                         transactionId = transactionId,
-                        amount = base + 1,
-                        expectedLitres = litres,
+                        amount = fine.amount,
+                        expectedLitres = fine.litres.toDouble(),
                         fuelType = config.fuelType,
                     ),
                 )
             }
 
+            // Kept on authoriseRaw even though the typed client can now carry a decimal: this probe
+            // exists to ask what the SERVER does with a body we would never build, and routing it
+            // through the DTO would only ever re-test our own serializer.
             AuthoriseVariant.Decimal -> client.authoriseRaw(
                 JsonObject(
                     mapOf(
@@ -267,13 +338,18 @@ class ApiProbeViewModel @Inject constructor(
         val state = _ui.value
         val authorised = state.lastAuthorise ?: return@probe notReadySummary("an /authorise")
         val litres = state.litresValue ?: return@probe notReadySummary("a litres figure")
+        // #46 made this nullable and the compiler found this call site, which is the point: the
+        // endpoint demands a paymentReference and only /authorise issues one. Sending an empty
+        // string would trade a clear "nothing was sent" for an opaque server refusal.
+        val reference = authorised.paymentReference
+            ?: return@probe notReadySummary("an /authorise that returned a paymentReference")
         val now = clock.instant()
 
         client.uploadTransaction(
             UploadTransactionRequest(
                 pumpId = state.config?.pumpId ?: state.pumpId.orEmpty(),
                 transactionId = authorised.transactionId,
-                paymentReference = authorised.paymentReference,
+                paymentReference = reference,
                 actualLitresDispensed = litres,
                 startedAt = ISO.format(now.minusSeconds(UPLOAD_WINDOW_SECONDS)),
                 completedAt = ISO.format(now),
@@ -362,21 +438,6 @@ private fun notReadySummary(missing: String): ProbeSummary = ProbeSummary(
     detail = "This probe needs $missing first. Nothing left the device.",
 )
 
-private fun fractionalSummary(
-    plan: AmountPlan.Fractional,
-    litres: Double,
-    config: PumpConfigResponse,
-): ProbeSummary = ProbeSummary(
-    tone = ProbeTone.Caution,
-    headline = "Cannot be expressed in whole naira — #18c, answered by arithmetic",
-    detail = "$litres L x ${config.pricePerUnit} = ${plan.naira}, which `amount: Long` cannot " +
-        "carry. The server checks amount == expectedLitres x pricePerUnit exactly, so a rounded " +
-        "figure is refused rather than accepted a few kobo out.\n\nNothing was sent. Use the " +
-        "decimal probe to find out whether the server takes a fractional amount — if it does not, " +
-        "every fill-up whose litres do not land on a whole naira is unauthorisable, and station " +
-        "pricing has to be constrained to make that impossible.",
-)
-
 internal fun ApiResult<PumpConfigResponse>.toConfigSummary(): ProbeSummary = when (this) {
     is ApiResult.Success -> ProbeSummary(
         tone = ProbeTone.Success,
@@ -443,6 +504,8 @@ internal fun ApiResult<AuthoriseResponse>.toAuthoriseSummary(
             AuthoriseVariant.Happy -> "200 OK — ${data.status}"
             AuthoriseVariant.Mismatch -> "ACCEPTED a deliberately wrong amount"
             AuthoriseVariant.Decimal -> "ACCEPTED a decimal amount — #18c answered: yes"
+            AuthoriseVariant.Precision ->
+                "ACCEPTED 4dp litres — pre-pay can quote finely, shortfall under a kobo"
         },
         detail = "transaction: ${data.transactionId}\nreference: ${data.paymentReference}\n" +
             "expires: ${data.expiresAt}\nauthorizationUrl: ${data.authorizationUrl}\n\n" +
@@ -457,10 +520,29 @@ internal fun ApiResult<AuthoriseResponse>.toAuthoriseSummary(
                     "A fractional amount is accepted, so fill-ups are authorisable without " +
                         "constraining station prices to whole naira. Change amount to a decimal " +
                         "type before the payment flows are built (#8)."
+                AuthoriseVariant.Precision ->
+                    "Four decimal places of litres are accepted and the exact check passed on the " +
+                        "4dp product. 10c should quote pre-pay litres at 4dp: the customer's " +
+                        "shortfall drops from up to 0.01 x price (about 15 naira at this price) to " +
+                        "under one kobo. Nothing here changes what the pump physically stops at."
             },
     )
 
     is ApiResult.Failure -> when {
+        // A refusal here is NOT the hoped-for outcome, it is the other half of the answer: 4dp is
+        // rejected, so 10c must quote pre-pay litres at 2dp and accept the shortfall (or re-price).
+        // Reported as a caution rather than a success precisely so it does not read as a passing test.
+        variant == AuthoriseVariant.Precision && error is ApiError.Business -> ProbeSummary(
+            tone = ProbeTone.Caution,
+            headline = "REFUSED 4dp litres — pre-pay must quote at 2dp",
+            detail = "message: ${(error as ApiError.Business).message ?: "(none)"}\n" +
+                "code: ${(error as ApiError.Business).code ?: "(absent)"}\n\n" +
+                "The server will not take four decimal places. 10c therefore quotes pre-pay litres " +
+                "at 2dp and the customer's shortfall is up to 0.01 x price. Worth trying 3dp before " +
+                "settling — and worth telling the backend, because this is the difference between " +
+                "spending a customer's money and keeping a bit of it.",
+        )
+
         // The refusal we were hoping for. Its `code` is the whole question behind #18f.
         variant != AuthoriseVariant.Happy && error is ApiError.Business -> ProbeSummary(
             tone = ProbeTone.Success,

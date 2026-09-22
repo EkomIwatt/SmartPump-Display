@@ -32,6 +32,11 @@ data class OperatorConfigUiState(
     val nairaPerLitre: String = "",
     val stationName: String = "",
     val pumpLabel: String = "",
+    /**
+     * When the stored price last changed — an operator save, or a sync from the backend (10c-bis).
+     * Null on a pump that has never been configured.
+     */
+    val priceUpdatedAtMillis: Long? = null,
     /** Which fields the transaction guard currently rejects, for inline highlighting. */
     val missing: Set<CanStartTransactionUseCase.Missing> = emptySet(),
     val saveError: String? = null,
@@ -82,6 +87,7 @@ class OperatorConfigViewModel @Inject constructor(
                     nairaPerLitre = config?.let { c -> "%.2f".format(c.koboPerLitre / 100.0) } ?: "",
                     stationName = config?.stationName.orEmpty(),
                     pumpLabel = config?.pumpLabel.orEmpty(),
+                    priceUpdatedAtMillis = config?.updatedAt,
                 )
             }
             refreshMissing()
@@ -129,7 +135,8 @@ class OperatorConfigViewModel @Inject constructor(
                     ),
                 )
                 _ui.update {
-                    it.copy(saveError = null, savedAtMillis = System.currentTimeMillis())
+                    val now = System.currentTimeMillis()
+                    it.copy(saveError = null, savedAtMillis = now, priceUpdatedAtMillis = now)
                 }
                 refreshMissing()
             } catch (t: Throwable) {

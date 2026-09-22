@@ -1,8 +1,11 @@
 // Wire DTOs for the Balancee Pump API (docs/phase7_blocker_resolution.md → endpoints).
 //
 // These are the transport shape only — kept separate from domain models; mapping happens at the
-// repository boundary. Several fields are PROVISIONAL pending the sandbox / backend finalising the
-// schema (flagged inline): notably the money UNIT on `amount` and the exact `/config` payload.
+// repository boundary. These were PROVISIONAL for a year; they are not any more. The #32 gate
+// (2026-09-16/17) drove the whole lifecycle against production, and the money unit, the decimal
+// question, the `/config` payload and the status set are all settled **by observation** — captures
+// in `docs/api-probes/2026-09-16-prod-config/` and `…-prod-gate/`. Where the wire and the Reference
+// PDF disagreed, the wire won. Anything still marked open below is genuinely open.
 //
 // @SerialName is set explicitly on every field so a rename on the Kotlin side never silently breaks
 // the wire contract. Json is configured with ignoreUnknownKeys, so extra server fields are safe.
@@ -13,6 +16,7 @@ package app.balancee.smartpump.display.data.network.dto
 import app.balancee.smartpump.display.domain.model.FuelType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.math.BigDecimal
 
 // ---- Activation: POST /api/pump/activate (public, @Unsigned) --------------------------------
 
@@ -46,46 +50,78 @@ data class AuthoriseRequest(
     @SerialName("pumpId") val pumpId: String,
     // Locally generated, doubles as the idempotency key.
     @SerialName("transactionId") val transactionId: String,
-    // UNIT: NAIRA (decided 2026-08-04). The Reference never states a unit, but its worked example
-    // — amount 7000 / expectedLitres 10 → ₦700/L — only reads sensibly as naira (as kobo it would be
-    // ₦7/L). The app carries money as kobo (Long) internally, so the repository mapper owns the ÷100
-    // and is the single place to flip this if the backend ever says otherwise.
+    // UNIT: NAIRA (decided 2026-08-04, and corroborated by every gate capture). The app carries
+    // money as kobo internally; [nairaFromKobo] / [nairaForSale] own the conversion.
     //
     // Failure is loud, not silent: the server enforces `amount == expectedLitres ×
-    // stationPricePerUnit` exactly and returns 400 "Amount mismatch", so a wrong unit breaks
+    // stationPricePerUnit` exactly and returns 400 AMOUNT_MISMATCH, so a wrong unit breaks
     // /authorise before money moves or fuel flows — it cannot mischarge a customer 100×.
     //
-    // STILL OPEN: does `amount` accept decimals? The example is integer naira. A fill-up of 38.1 L
-    // at ₦870.50/L is ₦33,166.05, which integer-naira cannot express — and because the server check
-    // is exact, a rounded 33166 is REJECTED rather than merely off-by-a-naira. If they confirm
-    // integer-only, station pricing is constrained to whole naira per litre (a business call).
-    @SerialName("amount") val amount: Long,
+    // DECIMALS: ANSWERED 2026-09-16 at the #32 gate — accepted, and the exact check passes on one
+    // (`amount 3501.5` for 2.35 L at ₦1490). TODO #44 is why this is no longer a `Long`: at any
+    // price, most metered litre figures produce a fractional naira amount, so an integer type could
+    // not express a fill-up at all. See [NairaAmountSerializer] for the wire form, and note that
+    // BigDecimal rather than Double is deliberate — the server's check is an equality.
+    @SerialName("amount")
+    @Serializable(with = NairaAmountSerializer::class)
+    val amount: BigDecimal,
     @SerialName("expectedLitres") val expectedLitres: Double,
     @SerialName("fuelType") val fuelType: FuelType,
 )
 
+/**
+ * **One transaction, one shape.** `/authorise`, `GET /transactions/{id}` and
+ * `/transactions/upload` all return the **same object** — verified byte-for-byte across the #32
+ * gate captures, where they differ only in `status` and the envelope's `message`:
+ *
+ * ```
+ * authorise → {"status":"PENDING_PAYMENT","transactionId":…,"paymentReference":"BPM-…",
+ *              "authorizationUrl":"https://checkout.paystack.com/…","expiresAt":…}
+ * poll      → {"status":"PAID",           … same five fields, same values …}
+ * upload    → {"status":"DISPENSED",      … same five fields, same values …}
+ * ```
+ *
+ * TODO **#46**. Three separate types had been modelled, two of them carrying only three fields — so
+ * `authorizationUrl` and `expiresAt` **parsed away silently** under `ignoreUnknownKeys` on every
+ * poll and every upload. The one that mattered is `expiresAt` on a poll: **#43** requires the expiry
+ * countdown to read the server's value rather than a constant, and the poll is exactly where a
+ * running screen would refresh it.
+ *
+ * Kept as one class with three aliases rather than three classes: an alias cannot drift, and a
+ * fourth endpoint returning this shape needs no fourth type.
+ *
+ * **Why these are nullable when all five were observed on all three responses.** Only `status` and
+ * `transactionId` identify the transaction; the rest describe a payment that a future endpoint (a
+ * cash sale, a refund) may legitimately not have. Failing a poll to deserialize would strand a
+ * customer who has already paid, which is a worse outcome than a null the caller must handle — the
+ * opposite trade from `PumpConfigResponse`, where a silent default became a wrong price on every
+ * litre. The two consumers that must not accept null (`authorizationUrl` on an authorise, and
+ * `paymentReference` before an upload) check for it where it matters.
+ */
 @Serializable
-data class AuthoriseResponse(
-    // Expected "PENDING_PAYMENT" on success. Kept as String until the full status set is confirmed.
+data class PumpTransactionResponse(
+    /** Observed set: `PENDING_PAYMENT` → `PAID` → `DISPENSED` (**#18d**, closed at the gate). */
     @SerialName("status") val status: String,
+    /** The id **we** generated and sent, echoed back unchanged. */
     @SerialName("transactionId") val transactionId: String,
-    @SerialName("paymentReference") val paymentReference: String,
-    // Paystack checkout URL — rendered as the on-screen QR.
-    @SerialName("authorizationUrl") val authorizationUrl: String,
-    // ISO-8601; drives the 5-min QR-expiry / poll window.
-    @SerialName("expiresAt") val expiresAt: String,
+    /** The server's own reference (`BPM-…`). `/transactions/upload` requires it. */
+    @SerialName("paymentReference") val paymentReference: String? = null,
+    /** Paystack checkout URL — rendered as the on-screen QR, and the only thing a customer can pay. */
+    @SerialName("authorizationUrl") val authorizationUrl: String? = null,
+    /**
+     * ISO-8601. **Twenty minutes** from the authorise, measured six times across two sittings
+     * (**#43**) — against three places in the app that said five. Read it; never assume it.
+     */
+    @SerialName("expiresAt") val expiresAt: String? = null,
 )
+
+/** The three names the endpoints are described by. All one shape — see [PumpTransactionResponse]. */
+typealias AuthoriseResponse = PumpTransactionResponse
 
 // ---- Payment status: GET /api/pump/transactions/{id} (signed) -------------------------------
 
-/** Polled every ~10s during the PENDING_PAYMENT window as the fallback to the PAID push. */
-@Serializable
-data class TransactionStatusResponse(
-    // e.g. "PENDING_PAYMENT" → "PAID"/"DISPENSED". String until the set is confirmed.
-    @SerialName("status") val status: String,
-    @SerialName("transactionId") val transactionId: String,
-    @SerialName("paymentReference") val paymentReference: String? = null,
-)
+/** Polled during the PENDING_PAYMENT window. The correctness guarantee; push is freshness only. */
+typealias TransactionStatusResponse = PumpTransactionResponse
 
 // ---- Config: GET /api/pump/config (signed) --------------------------------------------------
 
@@ -141,10 +177,9 @@ data class UploadTransactionRequest(
     @SerialName("completedAt") val completedAt: String, // ISO-8601
 )
 
-@Serializable
-data class UploadTransactionResponse(
-    // Expected "DISPENSED".
-    @SerialName("status") val status: String,
-    @SerialName("transactionId") val transactionId: String,
-    @SerialName("paymentReference") val paymentReference: String,
-)
+/**
+ * A `200` here means **accepted**, not **stored** — **#48**. A second upload carrying corrected
+ * litres returns `200 Transaction recorded` and changes nothing; first write wins. Nothing in this
+ * response echoes `actualLitresDispensed`, so the app cannot read its own record back at all.
+ */
+typealias UploadTransactionResponse = PumpTransactionResponse

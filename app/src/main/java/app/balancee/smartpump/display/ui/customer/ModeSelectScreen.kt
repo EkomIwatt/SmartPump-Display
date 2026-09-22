@@ -93,16 +93,16 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 private val PRESET_AMOUNTS_NAIRA: List<Int> = listOf(2_000, 5_000, 10_000, 20_000, 50_000)
-private const val CUSTOM_MIN_NAIRA = 200
-private const val CUSTOM_MAX_NAIRA = 200_000
+internal const val CUSTOM_MIN_NAIRA = 200
+internal const val CUSTOM_MAX_NAIRA = 200_000
 
 private val PRESET_LITRES: List<Int> = listOf(5, 10, 20, 30, 50)
-private const val CUSTOM_MIN_LITRES = 1
-private const val CUSTOM_MAX_LITRES = 200
+internal const val CUSTOM_MIN_LITRES = 1
+internal const val CUSTOM_MAX_LITRES = 200
 
 /** How the customer is entering the pre-pay amount. Local UI state only — both paths
  *  commit naira into [TransactionState.ModeSelect.amountNaira]. */
-private enum class AmountEntryMode { AMOUNT, LITRES }
+internal enum class AmountEntryMode { AMOUNT, LITRES }
 
 /**
  * Methods offered in the PAY WITH section. The CASH option is informational — confirming
@@ -117,7 +117,17 @@ private enum class AmountEntryMode { AMOUNT, LITRES }
 private val PRE_PAY_METHODS: List<PaymentMethod> = listOf(
     PaymentMethod.BALANCEE_APP,
     PaymentMethod.BANK_QR_TRANSFER,
-    PaymentMethod.USSD,
+    // USSD removed for V1 (2026-09-20), the same way NFC was: the enum, the state, the flow and
+    // docs/flows.md all stay, so Flow 5 is deferred rather than cut (OPEN_QUESTIONS #9–#12).
+    //
+    // It had to come off the screen because it was **live**. `startUssdSmsListener` calls
+    // `paymentProcessor.process`, which on debugProd and release is the real one — so tapping this
+    // tile created a genuine Paystack transaction, then waited for a confirmation SMS on a pump SIM
+    // that is not provisioned (#10), timed out, and left the sale behind. The 10g gate established
+    // that the backend does **not** expire a transaction on its own, so what it left behind was a
+    // PENDING_PAYMENT with a live checkout URL and nothing watching it.
+    //
+    // Re-add this line when Flow 5 is scheduled, with the pump SIM and the SMS parser in place.
     PaymentMethod.CASH_SEE_ATTENDANT,
 )
 
@@ -136,38 +146,27 @@ fun ModeSelectScreen(
 ) {
     // Local-only state — not persisted. If the pump reboots mid-selection, resume lands on
     // plain ModeSelect and the customer re-enters; the toggle defaults back to "By amount".
-    var entryMode by remember { mutableStateOf(AmountEntryMode.AMOUNT) }
     var customKeypadOpen by remember { mutableStateOf(false) }
-    // The custom value as typed — a string so it can hold a decimal point mid-entry.
-    var customTyped by remember { mutableStateOf("") }
+    // Typed text and what it commits, together — see CustomAmountEntry for why they are one
+    // value rather than two. 10g found what happens when a deletion moves only one of them.
+    var entry by remember { mutableStateOf(CustomAmountEntry()) }
     // Which litre value is selected (preset only) — drives the litre-tile highlight + the
     // live preview when the keypad is closed. amountNaira remains the single committed value.
     var selectedLitres by remember { mutableStateOf<Int?>(null) }
 
-    val customTypedValue: Double? = customTyped.toDoubleOrNull()
-    val customValid = when (entryMode) {
-        AmountEntryMode.AMOUNT ->
-            customTypedValue != null && customTypedValue >= CUSTOM_MIN_NAIRA && customTypedValue <= CUSTOM_MAX_NAIRA
-        AmountEntryMode.LITRES ->
-            customTypedValue != null && customTypedValue >= CUSTOM_MIN_LITRES && customTypedValue <= CUSTOM_MAX_LITRES
-    }
+    val entryMode = entry.mode
+    val customTyped = entry.typed
+    val customValid = entry.valid
     // The custom entry is "ok" when the keypad is closed, or open with a valid value. Used
     // to gate the bottom CONFIRM and the PAY WITH reveal so a mid-typed invalid value can't
     // be confirmed (no keypad ✓ to commit a discrete value any more — commit is live).
     val customEntryOk = !customKeypadOpen || customValid
 
-    // Live commit: whenever the typed value is valid, push the equivalent naira into the
-    // state so the preview, the PAY WITH section and CONFIRM stay in lockstep with the keys.
-    fun commitCustom(typed: String) {
-        val v = typed.toDoubleOrNull() ?: return
-        when (entryMode) {
-            AmountEntryMode.AMOUNT ->
-                if (v >= CUSTOM_MIN_NAIRA && v <= CUSTOM_MAX_NAIRA) onAmountTileTap(v.roundToInt())
-            AmountEntryMode.LITRES ->
-                if (v >= CUSTOM_MIN_LITRES && v <= CUSTOM_MAX_LITRES) {
-                    onAmountTileTap((v * priceKoboPerLitre / 100.0).roundToInt())
-                }
-        }
+    // Apply an edit and push what it commits. Every edit goes through here, deletions
+    // included — CustomAmountEntry has no path that commits one number while showing another.
+    fun applyEntry(next: CustomAmountEntry) {
+        entry = next
+        next.committedNaira?.let(onAmountTileTap)
     }
 
     Column(
@@ -200,7 +199,7 @@ fun ModeSelectScreen(
                 selectedMode = state.mode,
                 onModeTileTap = { mode ->
                     customKeypadOpen = false
-                    customTyped = ""
+                    entry = entry.cleared()
                     selectedLitres = null
                     onModeTileTap(mode)
                 },
@@ -217,48 +216,33 @@ fun ModeSelectScreen(
                     customValid = customValid,
                     onEntryModeChange = { newMode ->
                         if (newMode != entryMode) {
-                            entryMode = newMode
                             customKeypadOpen = false
-                            customTyped = ""
+                            entry = entry.cleared(newMode)
                             selectedLitres = null
                         }
                     },
                     onAmountPresetTap = { naira ->
                         customKeypadOpen = false
-                        customTyped = ""
+                        entry = entry.cleared()
                         selectedLitres = null
                         onAmountTileTap(naira)
                     },
                     onLitrePresetTap = { litres ->
                         customKeypadOpen = false
-                        customTyped = ""
+                        entry = entry.cleared()
                         selectedLitres = litres
                         onAmountTileTap(litresToNaira(litres, priceKoboPerLitre))
                     },
                     onCustomTap = {
                         customKeypadOpen = true
-                        customTyped = ""
+                        entry = entry.cleared()
                         selectedLitres = null
                     },
-                    onCustomDigit = { digit ->
-                        val next = appendDigit(customTyped, digit)
-                        if (next != customTyped) {
-                            customTyped = next
-                            commitCustom(next)
-                        }
-                    },
-                    onCustomDecimal = {
-                        val next = appendDecimal(customTyped)
-                        if (next != customTyped) {
-                            customTyped = next
-                            commitCustom(next)
-                        }
-                    },
-                    onCustomBackspace = {
-                        // Don't re-commit on delete — amountNaira keeps its last valid value
-                        // but CONFIRM/PAY WITH are gated by customEntryOk until it's valid again.
-                        if (customTyped.isNotEmpty()) customTyped = customTyped.dropLast(1)
-                    },
+                    onCustomDigit = { digit -> applyEntry(entry.digit(digit, priceKoboPerLitre)) },
+                    onCustomDecimal = { applyEntry(entry.decimal(priceKoboPerLitre)) },
+                    // Re-commits, unlike the version this replaced. A delete that left the old
+                    // commitment standing is what charged a ₦200 customer ₦2,007.03 (10g).
+                    onCustomBackspace = { applyEntry(entry.backspace(priceKoboPerLitre)) },
                 )
 
                 if (state.amountKobo != null && customEntryOk) {

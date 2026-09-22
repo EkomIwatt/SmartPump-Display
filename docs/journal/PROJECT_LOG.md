@@ -1,6 +1,363 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-15, later (OQ #22 built; signing cutover decided)
+## Current status — 2026-09-21, late (**#R12 observed fixed on the tablet; a question asked there found #R13, now fixed too**)
+
+**#R12's fix is observed on the device:** a digital fill-up cancelled at its QR on the `c963e81` build
+left `pulse_state` reading Idle, stamped at the tap. Steps 1 and 2 of the merge gate closed.
+
+**Then the user asked the right question at the tablet** — *"if I cancel a fill-up digital payment,
+don't I need to confirm cash received?"* Yes: the fuel is already in the tank. **#R13:** the QR's
+"Cancel · collect cash instead" was wired to the generic cancel and dropped to Idle recording nothing,
+and the customer-facing cash-confirm screen had a Cancel that did the same. Neither exists in the
+design or in `state-machine.md`. Fixed in `2389d36`: the QR cancel goes to cash collection, the
+customer's Cancel is gone, and the view model refuses to drop a fill-up past shutoff whatever a
+screen shows. **#R14** — how an attendant closes out a genuine drive-off — needs a fourth attendant
+action the design does not have, so it is boarded for the boss beside #R11.
+
+**Branch state:** **57 commits**, **516 JVM tests / 48 classes** and **25 instrumented tests on the
+SM-T220** green, lint and both variants clean. **Still NOT merged.** Left: one device check of #R13,
+then the merge on an explicit go.
+
+---
+
+## Previous status — 2026-09-21, evening (**step 1 passed on the device; the check of it found #R12, now fixed; one re-check, then merge**)
+
+**Every smoke-test run passed on the SM-T220** — cash fill-ups, a digital fill-up to its QR and
+cancelled, kill-mid-dispense resumed, and a pre-pay expiry whose `PAYMENT_ABANDONED` row was written
+by the poller exactly one poll after the last (#R10's fix, on the path that really fires).
+
+**Then the check found the next defect.** Reading the database to confirm the runs, the persisted
+state still claimed a live digital fill-up QR that the screen, and logcat, showed had been cancelled
+at 18:50:33. **#R12:** `pulse_state` has two writers on separate coroutines and every write was a
+read-then-REPLACE of the whole row. `resetToIdle` fires the Idle and the pulse clear together; the
+pulse clear read first, wrote last, and put the cancelled sale back into the row boot resume
+trusts. A restart would have resurrected it — and a cancelled *dispense* the same way. Fixed in
+`c963e81` with column-scoped UPDATEs; an instrumented test on the tablet loses on **iteration 0**
+against the old code and survives 500 racing iterations against the new.
+
+**A correction worth keeping:** logcat does work on this tablet on a mock build
+(`adb logcat --pid`). Only the Arduino bench run takes the port. That, plus `adb run-as` on the
+database, is how both #R10 and #R12 were found — neither was findable from the screen.
+
+**Branch state:** `feature/phase-10-payments`, **55 commits**, **510 JVM tests / 48 classes** and
+**25 instrumented tests on the SM-T220** green, lint and both variants clean. **Still NOT merged.**
+Left: install `c963e81`, cancel one digital fill-up at its QR, confirm `pulse_state` says Idle.
+Then merge.
+
+---
+
+## Previous status — 2026-09-21 (**the tablet found what no review could: the abandonment row had never once been written**)
+
+**One evening, two findings, and the second one only a device could produce.** The scoped review
+(merge-gate step 2) found the six round-3 fixes sound and one blocking defect in their sibling:
+**#R9**, the pre-pay expiry cancelling its own coroutine (`802c1dc`). Then `debugProd` went on the
+SM-T220, a pre-pay QR was left to expire, and the screen said *"This pump stopped waiting for the
+payment"* — which is not what the fixed code does. The app's database held **zero**
+`PAYMENT_ABANDONED` rows. None, ever, on either digital flow, including the 10g gate that introduced
+the row. **#R10**, fixed in `aa395e4`.
+
+**Two clocks, one deadline.** Both digital flows arm a ViewModel countdown *and* the processor's poll
+deadline off the same `expiresAt`. The countdown records the abandonment; the poller emits `Failed`,
+and the handler cancels the countdown. The countdown counts one-second `delay`s while the poller
+compares against the wall clock — so any doze hands the ending to the poller, which wrote nothing.
+**Every fix from #R4 through #R9 was maintaining a row that production never wrote.** The marker
+`PaymentResult.Failed.windowElapsed` now names that ending, because the copy cannot tell it from a
+declined card, and both failure handlers record on it.
+
+**#R9's shape was in `onPaymentFailed` as well** — `cancelInFlightJobs()` called from inside
+`paymentJob` — and it had got away with it only because `setState` does not suspend. Adding a
+suspending write there would have re-created #R9 exactly; found by asking the sibling question before
+writing the line rather than after.
+
+**One product question is now boarded, not decided: #R11.** A timed-out pre-pay lands on an error
+card with no auto-dismiss, so an unattended pump stays there until someone taps "Start over". The
+copy is doing real work — it tells a customer who may have paid to see the attendant — so this is a
+forecourt decision, not a code one.
+
+**Branch state:** `feature/phase-10-payments`, **53 commits**, **510 tests / 48 classes** green,
+`lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged.** The rest
+of merge-gate step 1 — cash fill-up, digital-to-QR-and-cancel, kill-mid-dispense, and the pre-pay
+expiry re-run — has not been done.
+
+---
+
+## Previous status — 2026-09-20, late (**the scoped review is done; its one finding is fixed, and the tablet is the last thing between this branch and `main`**)
+
+**Merge-gate step 2 is complete.** The review scoped to this round's six fixes found the six sound —
+each guard was checked for what runs after it fires — and found one blocking defect in their
+**sibling**: #R9, fixed in `802c1dc`. Branch `feature/phase-10-payments` is **52 commits**, **505
+tests / 48 classes** green, `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean.
+**Still NOT merged.**
+
+**#R9: the pre-pay expiry cancelled its own coroutine.** `startExpiryCountdown` runs inside
+`expiryJob` and called `cancelInFlightJobs()`, which cancels `expiryJob`. The next line is a
+suspending Room write, so the coroutine died there — **neither the `PAYMENT_ABANDONED` row nor the
+return to Idle ever happened on a real device**. Every abandoned pre-pay left the pump on a dead QR
+at zero seconds, polling stopped, with a checkout URL the backend still honours and nothing written
+down to answer the customer who pays it. That row exists for exactly one scenario and this was it.
+
+**It was introduced by a fix — the third on this branch.** `8e0a15c`, the 10g fix that added the
+audit write, inserted a suspension point between a self-cancel and a transition. The fill-up twin
+never had it, because it cancels the payment job and leaves its own alone. Same lesson as #R4 and
+#R5 one more time: **a defect fixed in one flow, left standing in its sibling.**
+
+**The harness was the other half, and is the more useful half.** `FakeEventRepository` returned
+without ever suspending, so nothing in 505 tests could observe a cancellation arriving at an audit
+write — the exact class of defect #R5 was about. One `yield()` makes three pre-pay tests fail
+against the pre-fix file, **including #R5's own**. A fake that cannot suspend cannot test a
+coroutine.
+
+**What is left is step 1: the tablet.** Nothing below it is a defect — #R3 and #R8 are boarded
+judgment calls, #50/#51/#52 improvements. See `TODO.md`.
+
+---
+
+## Previous status — 2026-09-20, end of day (**all six blocking review findings are closed; the branch is ready for its merge gate**)
+
+**Phase 10 is done, reviewed twice, and every blocking finding is fixed.** `feature/phase-10-payments`
+is **50 commits**, pushed (`5b2731b`), **505 JVM tests / 48 classes** green, `lintDebug`,
+`assembleDebugProd` and `compileDebugRealHwKotlin` clean. **Still NOT merged.**
+
+**Round 3 closed #R4, #R5 and #R6** — one wrong id, and two unguarded Room writes that escaped into
+`viewModelScope`. The worst of them meant a pump whose database had gone bad **could not open the
+app at all**, which on a forecourt also stops it taking cash.
+
+**The honest note about this branch, which the next session should carry:** the defects these
+reviews keep finding are in code written for this branch, by this assistant, days or hours earlier.
+Two of them were introduced *by earlier fixes* — `202144e` widened the surface #R6 then flagged, and
+#R5's own guard used `runCatching`, which swallows the `CancellationException` that unwinds a
+cancelled job, so a payment succeeding mid-write could have let the following `setState(Idle)` wipe
+a sale just paid for. That second one existed for about six hours and never left the branch. **The
+rate that matters is not findings per review; it is defects introduced per fix, and it is not
+zero.**
+
+**What is left is not a defect.** #R3 and #R8 are boarded judgment calls; #50, #51 and #52 are
+improvements. The next thing is the **merge gate** — see `TODO.md`, which now carries the plan
+rather than a list.
+
+---
+
+## Previous status — 2026-09-20 (**the 10g gate passed on real money, and then a review found five more**)
+
+**Phase 10 is built, gated and reviewed, and it has not merged.** The tablet sitting is done: three
+real paid sales against `SN-TEST-001` on production, **₦548.32** of the user's own money, seven of
+eight runbook steps passed and the eighth answered in the negative. Then a high-effort review of the
+branch found **eight** further findings, all verified, five of them blocking — and three of those
+were in code written the same evening.
+
+**The gate earned its keep twice over.** Sitting 1 was stopped before payment: a customer typing
+**₦200** was about to be charged **₦2,007.03**, because the keypad committed every digit and a
+*deletion* did not, and the validity gate meant to catch that never fires when one valid number is
+backspaced into another. It had shipped since May. Alongside it, the app was quoting the ₦870 debug
+seed while the server charged ₦1,490 — the sync wrote the database and never reached the screen,
+because its guard asked for `Idle` and the tablet had restored to `ModeSelect`.
+
+**Sitting 2 passed. Sitting 3 failed, which is why Flow 3 was worth running at all.** The fill-up
+recorded the local `BLC-…` reference minted at attendant-authorise instead of the id `/authorise`
+issued, so `POST /transactions/upload` was refused as terminal: **fuel sold, money taken, and a paid
+transaction on production with no dispense against it** — the single outcome 10f exists to prevent.
+
+**The backend does not expire a transaction.** Three minutes and sixteen seconds past its own
+`expiresAt`, `GET /transactions/{id}` still answered 200 / `PENDING_PAYMENT` with a live Paystack
+URL. `expiresAt` is reported, not enforced. Since the app stops polling on its own clock, a customer
+can pay after the pump has stopped watching. `PAYMENT_ABANDONED` now records the id so that is at
+least answerable; the polling policy is deliberately unchanged until the backend answers.
+
+**The same wrong sentence was written three times.** Two copy rows told an attendant *"nothing was
+charged"* — one on expiry, one on `TRANSACTION_NOT_FOUND`, the latter firing on a sale the customer
+had just paid ₦149 for. Both now say what is actually known, which is that we do not know.
+
+**The review's lesson is narrower and sharper: a defect fixed in one flow was left standing in its
+siblings.** The local-id bug was right in Flow 1, wrong in Flow 3, wrong in USSD. The stale-price
+bug had four readers and the first fix closed one. Neither was caught by the tests written for those
+fixes.
+
+**USSD came off the customer's screen** (user's decision, 2026-09-20). Flow 5 is deferred, not cut —
+but the tile was live, and tapping it called the real processor, created a genuine Paystack
+transaction, and waited for an SMS on a SIM that is not provisioned. Handled exactly as NFC was.
+
+**Branch state:** `feature/phase-10-payments`, **47 commits**, working tree clean, JVM
+**491 tests / 48 classes** green, `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin`
+clean. (Run `lintDebug` and `assembleDebugProd` in **separate** invocations — together they race on
+generated Hilt sources.) **Not merged.** Review #1's eight findings are all closed (#7 `202144e`,
+#5 `c015bcf`, #6 `28d8c03`). **A re-review of the whole branch then found eight more**, and its
+first was the worst defect this branch has produced: a code-less 401 — the observed clock-skew
+failure — was classified TERMINAL, so a tablet whose clock drifted overnight wrote `uploadError`
+on every queued dispense, which `getPendingSync` filters and nothing clears. **Fuel sold, money
+taken, and the station's record of it destroyed permanently by putting the clock right too late.**
+Fixed in the shared taxonomy (`e26246e`), which fixed the poll's half of it for free. **Five of
+the re-review's findings remain open** — see TODO #R4/#R5/#R6 and the two boarded judgment calls.
+
+---
+
+## Previous status — 2026-09-19, latest (**10f is done** — a dispense finally reaches the backend, and the record survives a power cut)
+
+**The upload job exists, and the record it uploads exists for the first time.** 10f opened by
+finding that `PaymentResult.Success` has carried the server's `paymentReference` since 10a and
+**every call site dropped it** — `/transactions/upload` requires one and only `/authorise` issues
+one, so every digital dispense this app had ever completed was unreportable and nothing said so.
+Schema v5 keeps it, along with when fuel started flowing and why a record was refused.
+
+**`TransactionUploader` holds every decision and has no Android in it**; the worker answers
+WorkManager's one question and has no `Result.failure()` branch, because the only thing allowed to
+abandon a dispense is the uploader — by marking the row, with a reason, in the log a person reads.
+
+**`RETRY_LATER` is doing the job 10e built it for.** `PAYMENT_NOT_CONFIRMED` waits instead of
+discarding the record of fuel a customer has already taken. `NotActivated` departs from the shared
+taxonomy on purpose: credentials are a device state, not a verdict on a sale.
+
+**#48 is closed on our side** — `syncedAt` is written only on a 200 and nothing re-sends after it.
+The backend half of it stays open with #18.
+
+**Branch state:** `feature/phase-10-payments`, working tree clean, JVM **432 tests / 45 classes**
+green, `compileDebugRealHwKotlin`, `lintDebug` and `assembleDebugProd` clean. (Run `lintDebug` and
+`assembleDebugProd` in **separate** invocations — together they race on generated Hilt sources and
+lint dies with an internal error that is not a code defect.) **Next is 10g, the tablet gate against
+production** — now the only thing between phase 10 and a merge. Four new migration tests and the
+worker's real scheduling have not run on a device yet and go with it.
+
+---
+
+## Previous status — 2026-09-19, later (**10e is done**; a failure now says two different things to two different people)
+
+**Both halves of 10e have landed, and #14 and #15's mapping half close with them.** A failure no
+longer reaches the screen as one invented sentence plus the server's raw prose. `FailureCopy` carries
+the customer's plain line, the attendant's diagnostic line and the recoverable flag out of the data
+layer together, and `ApiError.toFailureCopy()` decides all three — keyed on the server's `code`, and
+on the 401 where there is none.
+
+**Never on a string nobody has seen.** The Reference quotes `"Amount mismatch for PETROL…"`;
+production returns something else entirely for that same `AMOUNT_MISMATCH`. The one Reference string
+comparable against the wire had already been reworded, so three Catalogue A rows are **parked**
+pending one observation of their code, and everything unrecognised takes the catalogue's last row —
+the server's own words, verbatim, plus the status and the code.
+
+**The one exception found on the way: the clock-skew 401.** It shares a codeless 401 with a rejected
+API key, so the drafted credentials line would have told an attendant to re-activate a pump whose
+clock was simply wrong. It is matched on its message, which was observed twice on production at the
+#32 gate — and a rewording degrades safely to the credentials line.
+
+**Branch state:** `feature/phase-10-payments`, working tree clean, JVM **409 tests / 43 classes**
+green, `compileDebugRealHwKotlin`, `lintDebug` and `assembleDebugProd` clean. (Run `lintDebug` and
+`assembleDebugProd` in **separate** invocations — together they race on generated Hilt sources and
+lint dies with an internal error that is not a code defect.) **Next is 10f, the upload job.**
+
+---
+
+## Previous status — 2026-09-19, later still (10e's taxonomy half; **the branch is finally pushed**)
+
+**`feature/phase-10-payments` is on `origin` for the first time.** It had never been pushed at all —
+no remote branch, twenty commits of 10a–10d existing only on one laptop. That was a bigger exposure
+than anything on the board, and it is closed.
+
+**#45 is done** (`6162027`). `RetryPolicy` is `RETRY_NOW` / `RETRY_LATER` / `TERMINAL`, keyed on the
+server's `code`. `PAYMENT_NOT_CONFIRMED` is the one refusal that becomes a success on its own, and
+an upload job reading it as final would drop the record permanently — the single outcome 10f exists
+to prevent. `RETRY_LATER` is **not** retried in-flight, because a second and a half of backoff will
+not outlast a payment confirming. It also retired the duplication 10d created an hour earlier:
+`isPollTerminal` had its own private code constant and now defers to the shared taxonomy for the
+question the two genuinely share.
+
+**10e's copy half is deliberately not started.** Per the authority order the strict design screens
+govern copy, so wiring `ERROR_COPY_DRAFT.md` Catalogue A is a reading-and-wording pass that wants
+fresh eyes rather than the tail of a long build session. **That is where the next session opens.**
+
+**Branch state:** `feature/phase-10-payments`, **21 commits, pushed**, working tree clean, JVM
+**388 tests / 42 classes** green, `compileDebugRealHwKotlin`, `lintDebug` and `assembleDebugProd`
+clean. (Run `lintDebug` and `assembleDebugProd` in **separate** invocations — together they race on
+generated Hilt sources and lint dies with an internal error that is not a code defect.)
+
+---
+
+## Previous status — 2026-09-19, later (10d: a digital sale can now complete, and a restart cannot sell twice)
+
+**A digital sale works end to end in code for the first time.** The QR goes up, the poll watches
+`GET /transactions/{id}` on a 10 s cadence, and `PAID` starts the fuel. `BalanceePaymentProcessor`
+is **bound** — per build type, not unconditionally: `MOCK_PAYMENTS` mirrors `MOCK_HARDWARE`, so
+`debug` and `debugRealHw` keep the simulator and only `debugProd` and `release` charge real cards.
+
+**The boot-resume trap is closed on both digital flows**, not just the pre-pay one the board named.
+`resume(ref, request, deadline)` is a separate method from `process`, so the wrong call is
+impossible rather than discouraged, and the deadline is restored rather than re-granted.
+
+**Three money defects surfaced on the way and are fixed.** Flow 3's QR still could not be paid (10c
+fixed pre-pay only, and the state class had been documented as carrying a checkout URL it never
+did). The pre-pay screen printed the round tender beside a checkout page charging the quote. And
+the pump was stopping 5 ml short of what was paid for on every pre-pay sale, because the quote's
+payable litre step and `DeviceConfig.litresCutoff` disagree.
+
+**Branch state:** `feature/phase-10-payments`, **19 commits, local only, working tree clean**, JVM
+**378 tests / 41 classes** green, `compileDebugRealHwKotlin` + `lintDebug` + `assembleDebugProd`
+clean. Not pushed. **Next is 10e** — error mapping, where #45's *retry later, not now* outcome has
+to exist before 10f's upload job can be trusted not to drop a record.
+
+---
+
+## Previous status — 2026-09-19 (10c-bis: the displayed price and the charged price are finally the same number)
+
+**The divergence is closed.** Nothing in this app had ever written the server's price into
+`DeviceConfig` — `PumpConfigResponse` had three consumers and none of them stored anything, while
+the only writers of `DeviceConfig` were two settings screens and a debug-build seed. The price the
+customer read and the price `/authorise` was checked against were unrelated numbers, agreeing only
+because someone had typed one to match the other. `PumpConfigSync` now stores what the
+fetch-before-authorise already read, and the boot path fetches too. **#18(a) / 7b's second half is
+done**, and `BOSS_CONFIRMATIONS_DRAFT.md` item 1 — the ask marked *highest* — is retired in code.
+
+**All three 10c-bis calls went the recommended way:** build it before 10d; the server wins and the
+operator's typed price becomes the pre-activation / offline fallback; the residual seconds-wide
+fill-up race proceeds at the server's price and is logged rather than refused.
+
+**Two new event types, and the fuel-log card is now the Pump log.** `PRICE_SYNCED` is the operator's
+only evidence the screen's price changed with nobody at the pump; `PRICE_CHANGED_MID_SALE` records
+what a fill-up customer watched beside what they were charged. Both written only when something
+actually moved.
+
+**Two follow-ups were declined on purpose rather than folded in:** the two station names
+(`DeviceConfig.stationName` vs `StationIdentity.displayName`, plus a third on `/config`), and the
+backend ask that would let a fill-up be charged at the price it was struck at. Both on the board.
+
+**Branch state:** `feature/phase-10-payments`, **14 commits, local only, working tree clean**, JVM
+**357 tests / 40 classes** green, `compileDebugRealHwKotlin` + `lintDebug` clean. Not pushed.
+**Next is 10d** — PAID detection by poll, carrying the boot-resume trap that would otherwise
+authorise a second sale for a customer who has already paid.
+
+---
+
+## Previous status — 2026-09-17 (the gate's docs debt paid; Phase 10 planned and started)
+
+**`main` is pushed** — `origin/main` = `84d6f49`, carrying the whole gate. The docs the gate made
+stale are corrected: `V1_BLOCKERS.md` §4 no longer claims the API line is blocked on the backend,
+and TODO #8 no longer claims to be blocked by #3/#4/#6. All three were stale — #3 and #4 shipped in
+July, and the gate answered #6's blocking items by observation rather than by reply.
+
+**Phase 10 (payment feature flows, #8) is planned and underway** on `feature/phase-10-payments`.
+Seven sub-deliverables, 10a–10g, ending in a tablet gate against production. **Poll-only by design,
+not by omission:** push has no server side (no device-token endpoint exists) and no client side (no
+Firebase in the project), and OQ #8 already rules push a freshness optimisation with the poll
+carrying the correctness guarantee.
+
+**10a, 10b and 10c are done** (`70ad358`, `4a87877`, `ea6037b`, `96b5241`, `ef17770`). JVM **341
+tests / 39 classes** green; `compileDebugRealHwKotlin` and `lintDebug` clean.
+
+**The QR can be paid now.** It encoded a payload this app invented, so the artefact looked right and
+could not take money. That, **#43** (the expiry is the server's, 20 minutes, not a 5-minute constant)
+and **#46** (three DTOs were three partial views of one object) are all closed.
+
+**The processor is built but NOT bound in DI** — the terminal result needs the poll, which is 10d.
+
+**Next session starts with a decision, not with code (10c-bis).** Answering "what happens if the price
+changes mid-fill-up" found the question rested on a false premise: **nothing ever writes the server's
+price into `DeviceConfig`**, so the displayed price and the authorised price are unrelated numbers
+and always have been. That is #18(a) / 7b's second half, marked BLOCKED since 2026-09-03 because the
+`/config` shape was unknown — it has been known since 2026-09-16 and 10c already parses it, so the
+block is stale. Proposed as 10c-bis before 10d; detail on the board.
+
+**Branch state at close:** `feature/phase-10-payments`, **10 commits, local only, working tree clean**,
+JVM 341 tests / 39 classes green, `compileDebugRealHwKotlin` + `lintDebug` clean. Not pushed.
+
+---
+
+## Previous status — 2026-09-15, later (OQ #22 built; signing cutover decided)
 
 **The last open decision holding up written code is settled and built.** OQ #22 went with Option 1:
 an attendant "End sale early" button that ends a fixed sale which will not reach its target. Checking
@@ -1527,6 +1884,189 @@ authorise steps wait on the Paystack question in `BOSS_CONFIRMATIONS_DRAFT.md` i
 
 ---
 
+### Phase 10c — the QR stops being decorative
+**Date:** 2026-09-17 / 18
+**Status:** done
+**Commit(s):** `96b5241`, `ef17770` on `feature/phase-10-payments`
+
+**Summary (plain language):**
+Until today the payment screen drew a QR code containing something this app made up. It looked
+entirely correct — right size, right position, scannable — and no phone could have paid it. It now
+contains the Paystack page the server actually issues, and when there is no page to show it says so
+rather than drawing a barcode that leads nowhere. A customer standing in front of a QR that cannot
+work is worse off than one told plainly that something is wrong.
+
+The clock was wrong too, in the expensive direction. The screen gave a customer five minutes to pay
+and then cancelled the sale; the server honours it for twenty. So the pump was abandoning sales that
+were still perfectly good, fifteen minutes early, with the customer standing there. It now uses the
+deadline the server sends, and a sale interrupted by a restart picks up the same deadline rather than
+being handed a fresh one.
+
+Underneath, the thing that decides how much to charge was rebuilt so it cannot produce an amount the
+payment system is unable to collect. **The first version of that was wrong and was caught before it
+ran**: it worked at today's price and would have failed at a price ending in 50 kobo, producing
+amounts with a fraction of a kobo in them.
+
+**Technical notes:**
+- **#46 closed.** One `PumpTransactionResponse` behind three typealiases, verified byte-for-byte
+  across the gate captures rather than on the TODO's say-so. `authorizationUrl` and `expiresAt` had
+  been discarded silently by `ignoreUnknownKeys` on every poll and every upload. Making the payment
+  fields nullable immediately found a real call site — the probe's upload was passing a
+  `paymentReference` that is provably optional, where an empty string would have bought an opaque
+  server refusal in place of a clear "nothing was sent".
+- **`SaleQuote`, and the bug in its first draft.** Three constraints meet: the server's check is an
+  equality, Paystack collects whole kobo, and litres always floor. Quoting litres as `n/10_000`, the
+  kobo amount is integral exactly when `10_000 / gcd(price, 10_000)` divides `n` — so the litre step
+  is **derived from the price**: 0.001 L at ₦1,490, 0.01 L at ₦1,491, 0.02 L at ₦870.50, 0.0002 L at
+  ₦1,250. The draft used a plain decimal scale and fell back to 2dp when none divided, which at
+  ₦870.50 gives 3.35 L × 87,050 = **291,617.5 kobo**. Invariants are now asserted across five prices
+  and six tenders, because a rule that holds at today's price can fail one naira away.
+- **#43 closed.** `TransactionState.PrepayAwaitingPayment` carries `expiresAtEpochMs`, boot resume
+  restores it, and a deadline already past ends the sale instead of counting backwards.
+  `PumpRequestSigner`'s five minutes is **disambiguated rather than changed**: it is the signing
+  freshness window, a different five minutes, and still unmeasured — #15's probe proves only that
+  ten is too old.
+- **`SaleBasis`** was added to `PaymentRequest`. A processor that re-prices against `/config` has to
+  know which end of the sale is nailed down. There is no option to price against the device's own
+  figure: the server checks against **its** price, so a stale one is refused every time.
+- **Not bound in DI, deliberately.** `awaitCancellation()` after the Pending rather than completing
+  the flow — a flow that ended there would look to a collector like a payment that had resolved.
+- **Tested through a real `PumpApiClient`** over a hand-written fake `PumpApiService`, so the
+  envelope unwrapping and error mapping are exercised rather than stubbed past.
+- Verified: JVM **341 tests / 39 classes** green (was 324 / 37); `compileDebugRealHwKotlin` and
+  `lintDebug` clean.
+
+**A consequence named rather than hidden — needs a policy before the field.**
+For a `Dispensed` sale the fuel is already in the tank, so a price change between the nozzle clicking
+off and the QR appearing changes what is owed — and the customer watched the old figure climb on the
+display. The processor cannot avoid it (the server checks against its own price; anything else is a
+refused sale). Options are refuse, warn the attendant, or have the backend honour the struck price.
+Rare, not a blocker, and not something to discover on a forecourt.
+
+**Next:**
+**10d** — PAID by poll, and the boot-resume trap: `CustomerViewModel` currently restarts a
+`process()` call after a restart, which against a real server would **authorise a second sale for a
+customer who has already paid**. The id is ours, so the fix is to resume the poll; it needs tests
+written at it first. 10d also flips the DI binding.
+
+---
+
+### Phase 10b — money stops being an integer, and the wire form is the captured bytes
+**Date:** 2026-09-17
+**Status:** done
+**Commit(s):** `4a87877` on `feature/phase-10-payments`
+
+**Summary (plain language):**
+The app could only tell the server whole naira. Almost no real sale is a whole number of naira — at
+₦1,490 a litre, 2.35 litres is ₦3,501.50 — and the server does not accept "close enough": it checks
+that the money matches the fuel exactly, so a rounded figure is refused outright rather than accepted
+fifty kobo out. Every fill-up would have hit this, because a customer stops when the tank is full,
+not on a tidy number.
+
+So money now goes out as a proper decimal. The awkward part was making sure it goes out looking
+*exactly* like the figure the server already accepted from us, because the app signs the message it
+sends and any difference in how the number is written is a different message.
+
+One thing this turned up that is not a technical problem but a business one, and it needs a decision.
+When a customer pre-pays ₦5,000, the pump rounds *down* the litres it will give them — 3.35 litres,
+which at that price is ₦4,991.50 of fuel. Those two figures are not the same, and the server will
+refuse the sale if we quote it the ₦5,000 the customer actually handed over. Either the customer is
+charged for the fuel they get, or the pump gives them the extra hundredth of a litre. It is written
+down as a test so it cannot be forgotten, and the next piece has to answer it.
+
+**Technical notes:**
+- **`BigDecimal`, not `Double`** — confirmed by the user. The server's check is an **equality**,
+  which is the exact circumstance under which binary floating point rots: 1490 × 2.3 is
+  3426.9999999999995 in a `Double`, a value that fails the check while reading as correct in every
+  log and on every screen. There is a test asserting that drift, for contrast.
+- **`NairaAmountSerializer` emits a bare JSON number, in plain notation, with trailing zeros
+  stripped.** All three properties are load-bearing, and each has a test:
+  - *bare* — the signature is computed over these exact bytes, so `"3501.5"` is a different request
+    from `3501.5`, not a cosmetic variation;
+  - *plain notation* — `stripTrailingZeros()` alone renders 3500.00 as `3.5E+3`, which is valid JSON
+    and absurd in a payment;
+  - *stripped* — so a whole amount goes out as `2980`, matching every integer amount in the
+    Reference and in the gate captures, rather than `2980.00`.
+- **`nairaFromKobo(kobo)`** sets the scale rather than dividing, so no rounding mode is involved and
+  none is needed. **`nairaForSale(litres, koboPerLitre)`** computes the server's own check the way
+  the server computes it, and is what an `/authorise` body should be built from.
+- **Fixtures are the captured bytes**, not invented ones: `docs/api-probes/2026-09-16-prod-gate/`.
+- **A now-false refusal removed from the probe.** Its happy path used to *refuse to send* a
+  fractional amount, which is how #18c was first answered — correct then, wrong now. `AmountPlan`
+  survives as a **label** telling the operator which case a litre figure lands on, which is still
+  worth seeing, but it no longer gates what can be sent. `authoriseRaw` is kept with its comment
+  corrected: it exists to ask what the **server** does with a body we would never build, so routing
+  it through the DTO would only re-test our own serializer.
+- **The finding, and why it is 10c's:** pre-pay quotes litres floored to 2dp
+  (`DeviceConfig.litresCutoff`), so at ₦1490/L a ₦5,000 pre-pay is 3.35 L — `nairaForSale` = ₦4,991.50
+  against `nairaFromKobo` = ₦5,000.00. The exact check refuses that sale. **This bites at a
+  whole-naira price**, which makes it a different and more common problem than the sub-naira
+  precision question #44 originally anticipated. Test:
+  `pre-pay amount and the exact product disagree when the price does not divide evenly`.
+- Verified: JVM **306 tests / 35 classes** green (was 297 / 34), 9 new; `compileDebugRealHwKotlin`
+  and `lintDebug` clean. No bench gate — nothing device-specific.
+
+**Next:**
+**10c** — `/config` → `/authorise` → a QR that can actually be paid, carrying **#43** (read
+`expiresAt`, do not assume 5 minutes) and **#46** (one response type behind the three names). It must
+also answer the pre-pay amount question above, and the `success.amountKobo` question 10a left at its
+call site.
+
+---
+
+### Phase 10a — the payment seam grows the fields the real backend needs
+**Date:** 2026-09-17
+**Status:** done
+**Commit(s):** `70ad358` on `feature/phase-10-payments`
+
+**Summary (plain language):**
+Groundwork, and deliberately nothing more. The part of the app that starts a payment could only be
+told two things — how the customer is paying and how much — and the real Balanceeè system needs to be
+told a third: how much fuel that money buys. It also hands back three things the app had nowhere to
+put, the most important being the web address the customer's QR code has to point at.
+
+So this widens the connection between the two halves without plugging the real one in yet. Everything
+still runs on the pretend payment system, every existing test passes untouched, and the app behaves
+exactly as it did this morning. The point of doing it separately is that the next piece — the real
+thing — is easier to check when its changes are not tangled up with this renaming.
+
+One detail worth recording because it is a money question rather than a plumbing one: the amount of
+fuel the app promises the server is now guaranteed to be the same figure the pump actually stops at.
+The server checks that the money and the litres match **exactly**, so if those two numbers were
+worked out separately they would eventually disagree, and a customer standing at the pump would have
+their sale refused for no reason they could see.
+
+**Technical notes:**
+- **`PaymentRequest(method, amountKobo, expectedLitres)`** replaces the two positional arguments.
+  **`pumpId` and `fuelType` are deliberately absent** — they are properties of the *device*, not of
+  the sale (credentials and `DeviceConfig` respectively), so 10c's processor sources them itself
+  rather than four screens each remembering facts about the pump they run on.
+- **`PaymentResult.Pending` gains `checkoutUrl`, `expiresAt`, `paymentReference`**; `Success` gains
+  `paymentReference`, without which 10f's upload cannot quote one. All nullable: USSD has no
+  checkout URL, and a mock has no real ones.
+- **`litresFor(amountKobo)` extracted in `CustomerViewModel`.** Two consumers that must not
+  disagree: the cutoff the pump enforces, and the `expectedLitres` quoted to `/authorise`. Tested
+  directly — `prepay expectedLitres equals the cutoff the pump will enforce` asserts the quoted
+  figure against `FixedDispensing.litresAuthorised` rather than against a literal.
+- **The fill-up case is the one that is not derived from the amount.** The tank is already full, so
+  `expectedLitres` is the metered figure; deriving it back out of the money would reintroduce exactly
+  the rounding the exact check refuses.
+- **The mock now carries production's measured 20-minute expiry** (**#43**), not the 5 minutes the
+  app assumed in three places, and its checkout URL is on a `.invalid` host — a mock QR scanned by
+  accident on a forecourt must fail rather than open a real checkout page.
+- **Left open on purpose, with a comment at the site:** `onPaymentSuccess` derives litres from
+  `success.amountKobo` while its fallback uses the requested `amountKobo`. Identical under the mock;
+  with a real backend one of them has been round-tripped. **10c/10d decides which is authoritative**
+  — folding them together now would have buried the question inside a refactor.
+- Verified: JVM **297 tests / 34 classes** green (was 287 / 32), 10 new across two new classes;
+  `compileDebugRealHwKotlin` and `lintDebug` clean. No bench gate — nothing here is device-specific.
+
+**Next:**
+**10b** — `AuthoriseRequest.amount` stops being a `Long`. `BigDecimal` confirmed by the user
+2026-09-17; fixtures are the gate's captured bytes (3501.5 for 2.35 L at ₦1490).
+
+---
+
 ### The gate — all seven steps, ending with a real paid transaction
 **Date:** 2026-09-16 / 17
 **Status:** done
@@ -1575,3 +2115,755 @@ in our logs says it went through. Two short questions have gone to the backend a
 **Next:**
 Everything left on the API line is ours: **#43–#48**, all of which belong with the payment flows
 (**#8**). The branch is thirteen commits, green, and unmerged.
+
+---
+
+### Phase 10c-bis — the price on the screen is the price the sale is charged at
+**Date:** 2026-09-19
+**Status:** done
+**Commit(s):** `f739b02` — on branch `feature/phase-10-payments`, not yet merged or pushed
+
+**Summary (plain language):**
+The pump was showing one price and charging another, and nothing in the app connected the two. The
+figure the customer read off the screen was whatever an attendant last typed into the settings
+screen; the figure the sale was actually charged at came from Balanceè's own records, fetched fresh
+every time. They matched today only because somebody had typed 1490 to match what the office
+happened to be holding — the day the office changed its price, the screen would have carried on
+saying the old one, indefinitely, with nobody at the pump any the wiser.
+
+The pump now fetches the price from Balanceè when it starts up and again before every payment, and
+keeps what it fetches. That means a price change is made once in the office and every pump picks it
+up on its own — which is exactly the thing the boss had been told would need someone driving to each
+pump to retype it. The attendant's price field stays, because a pump that has not been activated yet,
+or one that cannot reach the internet, still has to be able to sell; it is now labelled as the
+fallback it is, and the settings screen shows when the price last changed.
+
+Two things now get written into the pump's log. When Balanceè's price replaces the one on the
+device, the log says so, with both figures — otherwise the price on the screen changes and nobody
+can explain why. And in the one case the fix cannot cover — a fill-up that ends in the same few
+seconds a price change lands, where the fuel is already in the customer's tank — the sale goes
+through at Balanceè's price, because that is the only amount Balanceè will accept, and the log
+records what the customer watched alongside what they were charged. A customer querying their
+receipt is otherwise disputing a number nobody can reconstruct.
+
+**Technical notes:**
+- **The finding, restated precisely.** `PumpConfigResponse` had exactly three consumers
+  (`PumpApiClient`, `PumpApiService`, `BalanceePaymentProcessor`) and none stored anything; the only
+  writers of `DeviceConfig` were `OperatorConfigViewModel`, `DebugViewModel` and the VM's
+  debug-build seed. Not a race — a permanent divergence. It is **#18(a) / 7b's second half**, marked
+  BLOCKED since 2026-09-03 because the `/config` shape was unknown; it has been known since
+  2026-09-16 and 10c already parsed it, so the block was stale.
+- **`data/config/PumpConfigSync`** wraps `client.config()` and writes through to `DeviceConfig`
+  before returning. Both callers get the sync as a side effect of what they already did: the
+  processor's fetch-before-authorise (the OQ #8 correctness guarantee) and a new boot call. It
+  returns `SyncedConfig`, which carries the **displaced** price — a caller cannot recover it
+  afterwards, and it is what makes "the price moved during this sale" answerable at all.
+- **Layering:** the boot caller only needs "refresh what you know", so it takes a narrow
+  `domain/config/DeviceConfigSync` interface (bound in `NetworkModule`), keeping `CustomerViewModel`
+  importing only `domain.*` as it does today. The processor takes the concrete class, because it
+  needs the response it just stored.
+- **Only `koboPerLitre` and `fuelType` are taken.** `pumpLabel` and `virtualAccountNumber` survive a
+  sync untouched. `stationName` is deliberately **not** taken though `/config` carries one:
+  `ReceiptText.kt:67` prints `DeviceConfig.stationName` while `CustomerStateHost.kt:108,126,143`
+  shows `StationIdentity.displayName`. That duplication predates this work and is now on the board;
+  resolving it by way of a price sync would have silently changed what receipts say.
+- **No write when nothing moved**, so `updatedAt` keeps meaning *when the price changed* rather than
+  *when we last had signal* — the operator screen renders it.
+- **`EventType.PRICE_SYNCED`** on an actual change only. A first sync is not a change: logging one
+  would put a "price changed" row in every pump's log the day it is activated, which teaches an
+  operator to ignore the row.
+- **`EventType.PRICE_CHANGED_MID_SALE`** for `SaleBasis.Dispensed` only, recorded after the
+  authorise succeeds so the log never carries a discrepancy for a sale that never happened. The
+  detail carries both prices and both amounts. `SaleBasis.Tender` is excluded on purpose — a pre-pay
+  customer is buying a sum, not a volume, so a re-price simply buys them fewer litres.
+- **Honouring the struck price is not available to us**: the server's check is an equality against
+  its own `pricePerUnit`, so any other amount is a refused sale. Added to the **#18** asks; not
+  waited on.
+- **The operator's fuel-log card is now the Pump log**, one chronological list with a headline per
+  event kind. A price row rendered by the fuel wording read "Amount unknown" in `WarningRed`, which
+  means lost fuel — the opposite of what happened.
+- **Boot sync runs on its own coroutine**, not in the boot sequence that asserts the relay-open
+  invariant and resumes a live sale; nothing safety-critical waits on a server that may be
+  unreachable. The fetched price is applied to the display only when the pump is `Idle` — a resumed
+  dispense has already struck its price and its litre target.
+- Verified: JVM **357 tests / 40 classes** green (was 341 / 39), including 11 new in
+  `PumpConfigSyncTest` and 4 in `BalanceePaymentProcessorTest`; `compileDebugRealHwKotlin` and
+  `lintDebug` clean.
+
+**Next:**
+**10d — PAID detection by poll.** ~10 s poll over `GET /transactions/{id}` across the
+`PENDING_PAYMENT` window, terminating on `PAID`, on `expiresAt`, or on cancel — and with it the
+boot-resume trap: `CustomerViewModel:1095` restarts `process()` after a restart, which against a
+real server would authorise a **second** sale for a customer who has already paid for the first.
+`BalanceePaymentProcessor` stays unbound in DI until that poll exists.
+
+---
+
+### Phase 10d — payment confirmed by polling, and a restart that stops selling twice
+**Date:** 2026-09-19
+**Status:** done
+**Commit(s):** `42064e1` (poll + resume), `b347188` (Flow 3's QR), `8aa2879` (DI per build type) —
+on branch `feature/phase-10-payments`, not yet merged or pushed
+
+**Summary (plain language):**
+Until today the app could put a payment QR on screen but had no way of learning that anyone had
+paid it. It now asks Balanceè every ten seconds, until the payment lands or the server's own
+twenty-minute window runs out, and starts the fuel the moment the answer comes back "paid". That is
+the last missing piece of a digital sale.
+
+The other half is what happens when the tablet restarts mid-payment — a power cut, a crash. The app
+used to *start the sale again*: a brand-new payment, for a customer standing at the pump who may
+already have paid for the first one. It never showed up in testing because the practice payment
+system we develop against is happy to be asked twice. Against the real one it would have charged
+somebody twice. The app now asks about the sale it already has, and cannot create a second.
+
+Three more things turned up while doing it, all of them the sort that only surface when you follow
+the money end to end. The fill-up QR still could not be paid — last month's fix covered the pre-pay
+screen and left this one showing a code no bank will open. The pre-pay screen was printing the
+customer's round ₦5,000 beside a checkout page that would actually charge ₦4,998.95. And the pump
+was about to stop five millilitres short of what each customer had paid for, on every single sale,
+because two parts of the app worked the amount out differently.
+
+Finally, the real payment system is now switched on — but only in the builds that should have it.
+The everyday development build keeps the simulator, so nobody demonstrates the app and charges a
+card by accident.
+
+**Technical notes:**
+- **The poll.** `BalanceePaymentProcessor.process` no longer ends in `awaitCancellation()`; it polls
+  `GET /transactions/{id}` on a 10 s cadence (OQ #8) until terminal or `expiresAt`.
+- **What ends the poll early is deliberately a short list** — `PAID`, `DISPENSED`,
+  `TRANSACTION_NOT_FOUND` and `NotActivated`. An unrecognised status, an `ApiError.Serialization`, a
+  500 and a dropped connection all keep polling. The asymmetry is the point: giving up on a status
+  nobody has observed refuses fuel to someone who has paid, on a guess about a word, whereas riding
+  to the deadline costs a wait the server's own window bounds — and the VM's countdown cancels the
+  flow at that same moment anyway. `DISPENSED` counts as paid: a sale that completed and uploaded
+  before a restart is a paid sale.
+- **`PaymentProcessor.resume(ref, request, deadline)` is a separate method, not a flag on
+  `process`.** Calling `process` again is precisely what a resumed sale must not do, so the seam
+  makes the wrong call impossible rather than discouraged. It skips `/config` and `/authorise`
+  entirely — re-pricing would be wrong even if it were free, because the customer may already have
+  paid the figure they were quoted.
+- **The trap was on BOTH digital flows.** The board named `resumePrepayPaymentListener`; reading the
+  code found `startFillupDigitalPayment` was called from the boot-resume branch too, where it is
+  worse — the fuel is already in the customer's tank.
+- **The deadline is restored, not re-granted.** `PrepayAwaitingPayment.expiresAtEpochMs` and
+  `FillupDigitalAwaitingPayment.expiresAtEpochMs` are handed to `resume`; the server's window kept
+  running while the app was down.
+- **`PaymentResult.Pending` gains `amountKobo` and `litres`, both required.** They are the quote's,
+  not the request's. At ₦1,490/L a ₦5,000 tender authorises ₦4,998.95 (`SaleQuote`), and the QR
+  screen was printing the ₦5,000. Required rather than defaulted because a processor that does not
+  answer this is showing someone the wrong price.
+- **`PaymentResult.Success` gains `litresAuthorised`, and it answers the question 10c left in a
+  comment.** `onPaymentSuccess` re-derived litres via `DeviceConfig.litresCutoff`, which floors to
+  2 dp, while the quote lands on a payable litre step: 3.355 authorised, 3.35 derived. The pump
+  stopped 5 ml short of what was paid for on every pre-pay sale, on the same figure 10f will
+  reconcile against the server's record. Persisted on the state so a resume keeps it.
+- **Flow 3's QR (`b347188`).** `onFillupPayDigital()` built `nip://transfer?account=…` from the
+  operator's virtual account — well-formed, resolvable by no scanner, honoured by no bank. OQ #6
+  retired the virtual account when payments moved to Paystack and this was its last caller; the
+  state class had been *documented* as carrying a checkout URL since 10c, which it never did. The
+  screen now holds on `FillupTankFull` until `Pending` arrives (mirroring Flow 1) rather than
+  transitioning into an empty QR, blank content renders the reference instead of a QR of nothing,
+  and `buildNipTransferQr` / `DEFAULT_VIRTUAL_ACCOUNT` are gone.
+- **The DI flip is per build type (`8aa2879`).** A one-line unconditional bind would have made every
+  debug build charge real cards. New `MOCK_PAYMENTS` buildConfigField mirroring `MOCK_HARDWARE`,
+  branched in `PaymentModule` with a `Provider` so the unselected implementation is never
+  constructed: mock on `debug` / `debugRealHw` (dev backend, no activated pump, and the debug
+  screen's auto-approve and force-resolve only exist on the mock), real on `debugProd` / `release`.
+  The debug screen states in red that the controls are inert when they are.
+- **Verified on the real-payments graph specifically:** `assembleDebugProd` builds, so Hilt resolves
+  `BalanceePaymentProcessor` and its injected `Clock` — `lintDebug` alone would not have caught a
+  missing binding on the path only production builds take.
+- Verified: JVM **378 tests / 41 classes** green (was 357 / 40), including 11 new poll/resume tests
+  on the processor and a new `CustomerViewModelPaymentResumeTest`; `compileDebugRealHwKotlin`,
+  `lintDebug` and `assembleDebugProd` clean.
+
+**Next:**
+**10e — error mapping** (#14's mapping half, #45). `PAYMENT_NOT_CONFIRMED` is a 409 that parses as
+`ApiError.Business`, which `ApiResult.kt:52` makes non-retryable — and an upload job treating it as
+final drops the record permanently, which is the one thing the upload job exists to prevent. The
+taxonomy needs a third outcome: *retry later, not now*, keyed on `code` and never on prose. Then
+10f (the upload job) and 10g (the tablet gate against production).
+
+---
+
+### Phase 10e — a failure finally says two different things to two different people
+**Date:** 2026-09-19
+**Status:** done (both halves)
+**Commit(s):** `6162027` (taxonomy half), `1365cb8` (copy half)
+
+**Summary (plain language):**
+Until now, every way a sale could fail told the customer the same sentence — "Payment was not
+completed." — and handed the attendant whatever raw text the server happened to send. That is wrong
+in both directions. A customer standing at the pump cannot act on "request timestamp is not fresh",
+and an attendant cannot act on a sentence that does not say what to do. Now each failure carries two
+lines: one plain one for the screen the customer is looking at, and one for the attendant behind the
+PIN that names the actual fix — open Pump settings and re-check the price, turn on automatic date
+and time, wait because the payment has not landed yet. The screen already showed retryable failures
+in gold and dead ends in red; it now has real answers to put in each.
+
+The second half, done first, was about a word: the app could previously say only *retry* or *give
+up* about a failure, and there was a third thing the server says — **not yet**. A payment the
+backend has not seen confirmed reads exactly like a refusal and is not one. Anything treating it as
+final would throw away a record of fuel that was genuinely dispensed, which is the one outcome the
+upload job coming next exists to prevent.
+
+**Technical notes:**
+- **The taxonomy half (#45, `6162027`).** `RetryPolicy` is `RETRY_NOW` / `RETRY_LATER` / `TERMINAL`,
+  keyed on the server's `code` and never on its prose. `RETRY_LATER` is deliberately **not** retried
+  in-flight — a second and a half of backoff will not outlast a payment confirming — so
+  `isRetryable` survives as `retryPolicy == RETRY_NOW` and nothing that used to back off stopped.
+  `PumpErrorCodes` collects the four codes observed at the #32 gate. It also retired the duplicate
+  `BalanceePaymentProcessor.isPollTerminal` had created an hour earlier in 10d.
+- **`FailureCopy(customerMessage, attendantDetail, recoverable)`** is the unit the split travels in.
+  `PaymentResult.Failed` carries it instead of a single `reason` string, which is what forced the
+  ViewModel to invent the customer's sentence at the call site; `toErrorState()` renders it.
+  `BalanceePaymentProcessor.describe()` — the 10d placeholder that put the server's own prose on a
+  customer-facing display — is gone.
+- **Matching is on `code`, and on the 401 where there is no code.** The Reference PDF quotes
+  `"Amount mismatch for PETROL…"`; production actually returns *"The sale amount does not match the
+  current station price for this fuel type…"* for that same `AMOUNT_MISMATCH`. The one Reference
+  string this project has been able to compare against the wire **had already been reworded**, so a
+  table keyed on the other eleven would mostly not fire and would fail silently the day it stopped.
+  Five rows are keyed; three (out of stock, invalid station price, fuel type not sold here) are
+  **parked pending one observation of their code**, the same rule `PumpErrorCodes.NOT_YET` follows.
+- **Catalogue A's last row is the one that had to exist.** Anything unrecognised shows the attendant
+  the server's own sentence verbatim, plus the HTTP status and the code, rather than being swallowed
+  into a sentence that says nothing. Terminal, because the app cannot tell a temporary refusal from
+  a permanent one without being told.
+- **Found on the way: the clock-skew 401 shares a bucket with a rejected API key.** Both are 401s
+  with **no code**, so the drafted credentials line ("it may need re-activating") would have sent an
+  attendant to the one screen that cannot fix a wrong clock. It is matched on the message — the one
+  prose match in the mapper, and it earns the exception by having been observed twice on production
+  at the #32 gate rather than quoted from the PDF. A rewording costs the match and degrades to the
+  credentials line: still terminal, still pointing at a person. **This closes #15's mapping half**;
+  the enforcement half (the app cannot set its own clock) stays open.
+- **Two departures from the approved draft, both recorded in `ERROR_COPY_DRAFT.md`.**
+  `PAYMENT_NOT_CONFIRMED` becomes `recoverable` against the table's `no` — that row predates #45,
+  and a *not yet* painted red tells an attendant a sale is dead when it is seconds from confirming.
+  And `recoverable` is authored per row rather than derived from `RetryPolicy`: the two answer
+  different questions, since an amount mismatch is terminal to a retry loop and recoverable to an
+  attendant who fixes the price.
+- **The tests pin the properties, not the prose.** Rows will be reworded; two invariants must not
+  break — no server string ever reaches the customer line, across every `ApiError` shape, and every
+  code in `PumpErrorCodes.NOT_YET` is `RETRY_LATER` *and* never shown as a dead end.
+- **Design-authority flag stands.** There is still no error screen in `docs/Strict design screens/`,
+  so every word here is invention a reviewer can overrule; the flag at the top of
+  `ERROR_COPY_DRAFT.md` now records what was wired and on what date.
+- Verified: JVM **409 tests / 43 classes** green (was 388 / 42); `compileDebugRealHwKotlin`,
+  `lintDebug` and `assembleDebugProd` clean, the last two in separate invocations.
+
+**Next:**
+**10f — the upload job.** `workmanager`, a `TransactionUploadWorker`, and the thing that finally
+sets `syncedAt`. It rests directly on this phase: `RETRY_LATER` is what stops it discarding a
+dispense the backend has not yet seen payment for. Carries **#48** (upload once, never re-send a
+superseded figure — a corrected upload returns `200 Transaction recorded` and changes nothing, so a
+wrong figure sticks while every log in the app says it went through). Then **10g**, the tablet gate
+against production.
+
+---
+
+### Phase 10f — the dispense finally reaches the backend
+**Date:** 2026-09-19
+**Status:** done (JVM-verified; the instrumented half rides with 10g)
+**Commit(s):** `ed88f17` (the record), `84b20a1` (the uploader), `75f7de1` (WorkManager + the wiring)
+
+**Summary (plain language):**
+Until now the app counted the fuel, took the money, and kept the result to itself. Balanceè's own
+records had no idea a sale had happened unless someone was watching the payment page. This phase
+adds the job that reports each dispense to the backend — and, crucially, one that keeps trying. A
+forecourt with no internet is normal, not an error, so the record sits safely on the tablet and goes
+out when the link comes back, including after a power cut, without anyone reopening the app.
+
+The first thing the work turned up was that the app could not have reported a sale even if it had
+tried. The backend requires a payment reference with every dispense, it is issued once when the sale
+is authorised, and the app had been throwing it away at every point it arrived — for months. So the
+phase started by fixing the record, and only then built the thing that sends it.
+
+The second thing worth saying in plain language: this job will never quietly decide a sale did not
+happen. If Balanceè refuses a record for a reason that will not change, the sale stays in the pump's
+log marked as *not recorded*, in red, with the litres and the reason — because at that point the
+station has sold fuel that the backend's books do not know about, and that needs a person.
+
+**Technical notes:**
+- **The defect that reframed the phase (`ed88f17`).** `PaymentResult.Success.paymentReference` has
+  existed since 10a; `onPaymentSuccess`, `onFillupDigitalSuccess` and `onUssdSmsConfirmed` all
+  discarded it, the last two by rebuilding `Complete` from the source state and ignoring the result
+  entirely. Both now take the `PaymentResult` whole.
+- **Schema v5** adds `transactions.paymentReference`, `.startedAt` and `.uploadError`. All three
+  nullable with no default, because a pre-10f sale has none of them and a default would invent
+  history. `getPendingSync` filters on all three, and each condition excludes something different
+  that would otherwise sit in the queue forever: already sent (**#48**), a cash sale with no
+  reference to quote, and one the server has refused for good.
+- **The two fields are carried on the states, not in the ViewModel.** A power cut mid-dispense is
+  the one moment the upload most needs them. `FixedDispensing` and `Complete` carry both;
+  `FillupDispensing` → `FillupTankFull` → `FillupDigitalAwaitingPayment` carry the start time along
+  the fill-up chain. `CashFixedDispensing` gets neither — cash has nothing to upload.
+- **`TransactionUploader` (`84b20a1`) is a plain class.** WorkManager decides *when*; everything
+  that can be wrong lives where a JVM test can put it through a server that says no six different
+  ways. 16 tests, refusal fixtures taken from the #32 gate captures.
+- **`RETRY_LATER` is what this phase rests on.** `PAYMENT_NOT_CONFIRMED` is a 409 that parses as a
+  considered refusal and is not one; read as final it discards the record of fuel a customer has
+  already taken. A test drives it through refusing twice and then confirming.
+- **`NotActivated` deliberately departs from the shared taxonomy.** Terminal for a customer at a
+  screen, wrong here — credentials are a property of the device, and condemning the queue over one
+  would throw away a day of real dispenses that a re-activation fixes.
+- **A terminal refusal closes a record but never silently**: the row keeps its place, stops being
+  offered, carries the attendant-facing sentence 10e already wrote for that failure, and writes a
+  red `DISPENSE_UPLOAD_FAILED` entry to the pump log with the litres as the headline. Transient
+  failures write no event — one per attempt would bury the ones that matter.
+- **The run continues past a failure.** One record the server refuses must not hold the rest of the
+  day behind it, and the run is only `RETRY` if something transient happened.
+- **`TransactionUploadWorker` (`75f7de1`) has no `Result.failure()` branch.** `failure()` means give
+  up for good, and the only thing allowed to abandon a dispense is the uploader. An unexpected throw
+  takes the same answer: come back, conclude nothing.
+- **Enqueued under one name with `KEEP`, not `REPLACE`.** A busy pump enqueues a request per sale;
+  `REPLACE` would cancel the run in flight and reset its backoff every time, so a forecourt on a bad
+  link would restart the queue forever and never finish reporting anything. Constrained on
+  `CONNECTED`, backed off 30 s doubling.
+- **Hilt owns WorkManager's configuration**, because the worker needs the repository, the API client
+  and the credential store. The manifest removes WorkManager's default initializer to match —
+  leaving both is how an app works in debug and cannot instantiate its worker in the field.
+  `assembleDebugProd` is what proves the graph resolves on the build that charges real cards.
+- **Two test-fake defects fixed, both of the kind that let a real defect through.**
+  `FakeTransactionRepository.getPendingSync` returned everything and mirrored none of the DAO's
+  filter; `FakePaymentProcessor.succeed` defaulted the payment reference to null, so tests passed
+  against records the upload could never use.
+- **Incidental finding:** `PumpApiClient.uploadTransaction` already wraps the call in
+  `retryingApiCall`, so a single blip is absorbed three attempts deep and never reaches the job.
+  A fake that failed only the first call was testing nothing; failures are now keyed by transaction
+  id, and the absorption has its own test.
+- Verified: JVM **432 tests / 45 classes** green (was 388 / 42 at the start of the day);
+  `compileDebugRealHwKotlin`, `lintDebug` and `assembleDebugProd` clean.
+
+**Not yet proven on a device:**
+The four new v4→v5 migration tests and the worker's real scheduling (constraint, backoff, survival
+across a reboot) both need the tablet. They ride with 10g rather than being claimed here.
+
+**Next:**
+**10g — the gate.** A real small sale end to end through the customer UI on the tablet against
+production and `SN-TEST-001`, QR scanned with a phone, sized like the #32 sitting. It now also has
+to show the dispense arriving in the dashboard's Transactions view (**#49**), which is the only way
+the figure can be read back at all — the API cannot return it (**#46**). Nothing merges until it
+passes.
+
+---
+
+### Phase 10h — two rounds of review, and the defect that destroyed records
+**Date:** 2026-09-20
+**Status:** done (for this run — 5 of the re-review's 8 findings remain open and are boarded)
+**Commit(s):** `202144e`, `c015bcf`, `28d8c03`, `e26246e`, plus four board commits; branch pushed at `94cff8f`
+
+**Summary (plain language):**
+No new features today. The whole day went on finding and fixing faults in what was already built —
+first the three left over from yesterday's review, then a second review of the entire branch, which
+found eight more. The worst of those would have quietly destroyed the station's records: if the
+tablet's clock drifted overnight, every completed sale waiting to be reported to Balanceè was marked
+"never send this" permanently, and putting the clock right did not bring them back. Fuel sold, money
+taken, and no record of it — which is the exact outcome the reporting job exists to prevent. That is
+fixed, along with three others: a pump crashing when the station had no price set, a customer being
+charged twice by tapping "pay" twice, and the price on screen moving during start-up. The branch is
+pushed and still not merged; five smaller findings are written down and waiting.
+
+**Technical notes:**
+- **Review #1's last three, all fixed in more places than the review named.**
+  - **#7 (`202144e`)** — `/config` returning `pricePerUnit: 0` reached `litreStepMicrosFor`, whose
+    `require` throws out of a `flow { }` on `viewModelScope`: process death at the pump. Screened at
+    the boundary instead — `SyncedConfig.hasUsablePrice`. **The quieter half mattered more:** the 0
+    was also being written through, wiping the last known good price and stopping **cash** sales,
+    which consult no backend at all. New `PRICE_SYNC_REJECTED` event, logged once per rejected
+    figure per app run (`/config` is fetched before every authorise).
+  - **#5 (`c015bcf`)** — pre-pay and fill-up both hold their state for the whole authorise round
+    trip, deliberately, so the `as?` state check that is mutual exclusion everywhere else guards
+    nothing. A second tap cancelled a `process` mid-request and started another; the server does not
+    un-create a transaction because we stopped listening. `authoriseJob` is a `Job` rather than a
+    flag so cancellation reopens the gate for free — the failure mode of a guard like this is a pump
+    that will not sell, and two tests cover exactly that. The review named the fill-up; pre-pay had
+    it too.
+  - **#6 (`28d8c03`)** — `syncPriceOnBoot` asked "may I move the price?" before `bootResume` had
+    dispatched an answer. **The decision now waits on `bootResumed`; the fetch does not**, so the
+    boot coroutine holding the relay-open invariant still waits on nothing a network can delay.
+    A test asserts the overlap so a later tidy-up cannot serialise it.
+- **The re-review (`/code-review high main`, whole branch) found 8; verified before acting, 7 held.**
+- **R1 + R2 (`e26246e`) were one defect with two consumers.** The observed clock-skew 401 carries no
+  `code`, so `safeApiCall` made it `Business(code = null)`, which the taxonomy called TERMINAL.
+  `TransactionUploader` then wrote `uploadError`; `getPendingSync` filters `uploadError IS NULL` and
+  **no query anywhere clears it**. The poll gave up on the same error, so NTP correcting a clock
+  mid-payment showed a failure to a customer whose money was landing.
+  - The proof it was wrong rather than merely strict was internal: `unauthorisedCopy` has always
+    told an attendant this same 401 is `recoverable` and how to fix it.
+  - `NOT_A_VERDICT` = {401, 408, 429}, consulted **before** the no-code rule. 403 deliberately
+    excluded — a considered refusal to serve this caller. An envelope failure on a 2xx has no status
+    and stays terminal, so unclassifiable refusals do not become infinite retries.
+  - **The review proposed a second list of final codes for the poll; not needed.** `isPollTerminal`
+    already defers to `retryPolicy`, so the one change fixed both and #45's "one place" holds.
+- **Every fix was checked against the pre-fix file**, by restoring it from git and re-running: 5/8
+  double-tap assertions fail without #5, 2 fail without #6 — including the one that previously
+  *passed* — and all 8 new taxonomy assertions fail without R1, across three test classes.
+- **Two test fakes were themselves defective, and that is the recurring lesson.**
+  `FakePaymentProcessor` emitted `Pending` on the same tick, so no test could sit in the window the
+  double-tap lives in; `FakePulseSource.awaitAdapterCount` answered instantly, so every boot test ran
+  the resume *before* the sync — the opposite of production, and why #6's test asserted a guarantee
+  the code did not make. `holdAuthorise()` and `holdAdapterCount()` open those windows.
+- **Raised, not fixed:** **#50** (three screens read `uiState.priceKoboPerLitre` while holding a
+  struck figure — `priceMayMoveFreely` is a guard doing a type's job) and **#51** (the R1 fix means a
+  genuinely deauthorised pump retries forever with nothing in the log; `NotActivated` has had this
+  shape since 10f, so the fix widened it rather than creating it).
+- Verified: JVM **491 tests / 48 classes** green (was 459 at the start of the day);
+  `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin` clean. Branch **pushed** —
+  `origin/feature/phase-10-payments` = `94cff8f`.
+
+**The pattern worth carrying out of this run:**
+In **five consecutive rounds** a defect was fixed in one flow and left standing in a sibling. It has
+now cost: the local-id bug (Flow 1 right, Flow 3 wrong, USSD wrong), the stale-price bug (four
+readers, one fixed), #7 (crash fixed, write-through missed), #5 (fill-up named, pre-pay silent), and
+R4 below (`ed77e00` fixed `Complete.txnId` in Flow 3 and left the expiry path alone). **Checking the
+siblings is not diligence on this branch; it is the single highest-yield step there is.**
+
+**Next:**
+**#R4** — the fill-up abandon event logs the local `BLC-NNNNN` rather than the id `/authorise`
+issued, which is `ed77e00`'s defect in the same flow's other method. Then **#R5**/**#R6**, two
+unguarded Room writes that escape into `viewModelScope` (one of them introduced by `202144e` the
+same morning). **#R3** and **#R8** are boarded as judgment calls. Then weigh a third review pass
+against the fact that both rounds so far found defects in code written that same day — and only
+then merge.
+
+---
+
+### Phase 10h (round 3) — the last three review findings, and a defect a fix created
+**Date:** 2026-09-20
+**Status:** done
+**Commit(s):** `f5bf58c` (#R4), `99b3c9d` (#R5), `5b2731b` (#R6 + the cancellation correction)
+
+**Summary (plain language):**
+Three more problems found by the second review are now fixed, which closes every one that was
+holding up the merge. The first meant that when a customer walked away from a fill-up QR without
+paying, the pump wrote down a reference number the bank's system had never issued — so if that
+customer later paid anyway, nobody could match the payment to the sale. The other two were the same
+kind of problem in two places: the app wrote a line to its own log *before* doing something
+important, and if that write failed — a full tablet, a damaged database — the important thing never
+happened. In one case the customer never got a QR code for fuel they had already taken. In the
+other, **the app could not start at all**, which on a forecourt also stops the pump taking cash.
+
+There is one thing worth saying plainly. While fixing the second of these in the morning, we
+introduced a new fault of our own, and found it in the afternoon while fixing the third. It never
+left the working branch, and it is now covered by a test — but it is the second time this week that
+a fix has created a problem, and that is the reason the plan ends with a verification gate rather
+than with a merge.
+
+**Technical notes:**
+- **#R4 (`f5bf58c`)** — `startFillupDigitalExpiry` recorded `PAYMENT_ABANDONED` against the
+  `FillupTankFull` it was launched from, whose `txnId` is the local `BLC-…` minted at
+  attendant-authorise. The live `FillupDigitalAwaitingPayment` carries the server's id (put there by
+  `onFillupDigitalPending`), which is what the pre-pay twin has always read. The amount had the same
+  shape — the shutoff quote rather than what the still-live checkout page charges. **The cash
+  fall-back deliberately still reads `source`** (tank litres at the pump's own price = what Flow 2
+  collects for the same tank; the row it settles into is a cash sale nothing authorised), and a test
+  pins that asymmetry so it is not "fixed" later. `txnRefFor`'s KDoc claimed every state carries a
+  `BLC-NNNNN` — untrue since 10g downstream of an `/authorise` — and was corrected, because a
+  sentence like that is how this defect kept coming back. **Third appearance of one defect**:
+  `ed77e00` fixed it for `Complete.txnId` in this same flow.
+- **#R5 (`99b3c9d`)** — `recordPriceRaceIfAny` runs *after* `/authorise` returns, so the sale exists
+  on the server and its checkout page is payable; a Room throw there went through `flow { }` into
+  the collector's `viewModelScope`. Guarded inside the method so the guarantee belongs to the
+  method; the detail sentence goes to `Log.e` because `previousKoboPerLitre` is gone from the device
+  the moment the sync overwrote it. **Sibling fixed with it:** `recordAbandonedPayment`, whose row
+  is written *before* the `setState` that ends the sale — a failure stranded the pump on a dead QR
+  screen. Checked and left: `TransactionUploader`'s write is already contained by the worker's
+  catch-and-retry; `PumpConfigSync`'s two are #R6.
+- **#R6 (`5b2731b`)** — `DeviceConfigSync.refresh` has always documented "failure must never be an
+  exception"; `client.config()` honoured it, `writeThrough` touched Room five times unguarded, and
+  review #7's fix added the fifth. Three distinctions now in the code: a failure to *store* is not a
+  failure to *fetch* (the response still prices the sale); **an unreadable database is not an empty
+  one** (`saveConfig` replaces the row, so a read that threw must not be treated as "nothing
+  stored", or the operator's fields are wiped — the adapter's unknown-is-not-zero rule); and a row
+  that was not written did not happen (`PRICE_SYNCED` only if the config write succeeded,
+  `lastRejectedPrice` marked only on success so one full-disk moment cannot permanently silence the
+  no-price warning).
+- **The sibling #R6's own test exposed:** the `init` boot coroutine is the same bare launch in the
+  same constructor, with `seedDefaultConfigIfMissing()`, `getConfig()` and `bootResume()` all
+  unguarded. Contained. The relay-open assert is guarded **separately** and logged in its own words:
+  a boot that cannot open the relay is a safety event, not a database problem, crashing would not
+  open it either, and the firmware dead-man watchdog is the real backstop.
+- **`domain/util/runCatchingCancellable`** — `runCatching` catches the `CancellationException` the
+  coroutine machinery throws to unwind a cancelled job. `expiryJob` is cancelled the instant a
+  payment succeeds and the expiry coroutine may be suspended inside the Room write at that moment,
+  so the absorbed cancellation would have let the following `setState(Idle)` wipe a paid sale.
+  Rethrow-then-catch is `safeApiCall`'s shape. Converted the three sites where an absorbed
+  cancellation changes control flow on a money path; the ~20 inert ones are **#52**, deliberately
+  not swept in.
+- **Test discipline worth keeping:** every fix's assertions were re-run against the pre-fix file and
+  confirmed to fail. That caught a test that was passing for the wrong reason — the boot test
+  "passed" pre-fix while leaking an uncaught exception into the *next* test, which is a test proving
+  nothing. It was rewritten until it failed in its own name.
+- **Behaviour change to re-examine on a device:** a `bootResume()` that throws now leaves the pump
+  at Idle with the relay open and a line in the log, where it previously crashed. Idle-and-safe
+  beats a crash loop, but it means a partially-restored sale now fails *quietly*. Listed as step 1
+  of the merge gate for that reason.
+- Verified: JVM **505 tests / 48 classes** green (491 at the start of the round); `lintDebug`,
+  `assembleDebugProd` and `compileDebugRealHwKotlin` clean, run in separate invocations. Branch
+  pushed — `origin/feature/phase-10-payments` = `5b2731b`, 50 commits.
+
+**Next:**
+The **merge gate**, which is four steps and is written out in `TODO.md`: a tablet smoke test (the
+`init` boot path changed, and the 10g gate ran against a build that no longer exists), a review pass
+**scoped to this round's six fixes** rather than to the whole branch again, then merge, then the
+improvements (#R3, #R8, #50, #51, #52) as small branches off `main`.
+
+
+---
+
+### Phase 10h (round 4) — the scoped review, and the expiry that cancelled itself
+**Date:** 2026-09-20
+**Status:** done
+**Commit(s):** `802c1dc` (fix + harness); this board/log update
+
+**Summary (plain language):**
+Before merging, we re-read only the six fixes made in the last round — the newest code, which is
+where this branch's defects have kept coming from. The six were sound. What the pass found instead
+was in the half of the code those fixes did not touch: when a customer takes a pre-pay QR code and
+never pays, the pump was supposed to give up, write a line in the log saying so, and go back to its
+idle screen. On a real tablet it did neither. It sat on a dead QR code with the clock at zero, while
+the payment link stayed live — so a customer could still pay it, and nothing at the pump would know
+or have a record to check against. That is fixed, and the test harness that hid it is fixed with it.
+
+**Technical notes:**
+- **#R9 (`802c1dc`)** — `startExpiryCountdown` runs *inside* `expiryJob`, and on expiry called
+  `cancelInFlightJobs()`, which cancels `expiryJob`. In a cancelled coroutine the next suspension
+  point throws; the next call was `recordAbandonedPayment`, and `EventDao.insert` is a suspend Room
+  DAO. So the write threw, `setState(TransactionState.Idle)` after it never ran, and the
+  `CancellationException` unwound silently because the job was already cancelling. The three other
+  jobs are now cancelled by name and `expiryJob` is left alone — it is ending anyway.
+- **Introduced by `8e0a15c`**, the 10g fix that added the abandonment row: it inserted a suspension
+  point between a self-cancel and a transition. Third defect on this branch created by a fix, and
+  the question that catches all three is one question — *what runs after this, and is the coroutine
+  still alive to run it?*
+- **The pre-pay half of a pair, again.** #R4 and #R5 both landed on `startFillupDigitalExpiry`; the
+  twin's `cancelInFlightJobs()` was never questioned because its tests passed. Every other
+  `cancelInFlightJobs()` / `expiryJob.cancel()` call site was checked for the same shape: this was
+  the only self-cancel. `onPaymentFailed` cancels its own `paymentJob` too, but `setState` does not
+  suspend, so it survives — noted, not changed.
+- **`FakeEventRepository.record` now `yield()`s first.** It returned without ever suspending, so no
+  test in the suite could see a cancellation arrive at an audit write. Sequenced deliberately:
+  harness first, then confirm three pre-pay tests fail — `an abandoned prepay is recorded with the
+  transaction id it abandoned`, `prepay expiry auto-cancels an unpaid transaction back to Idle`, and
+  #R5's own `a prepay still returns to Idle when the abandonment row cannot be written` — then the
+  fix, then green. The fill-up twin's three passed throughout, which is what located the defect.
+- **Checked and left alone:** `PumpConfigSync`'s never-throws contract holds (all five Room touches
+  guarded, the read-failure early return correctly declines to write rather than wiping the
+  operator's fields, and its new tests were confirmed to fail against the pre-fix file);
+  `runCatchingCancellable`'s non-local return through `getOrElse` is sound; review #5's
+  `authoriseJob = paymentJob` assigned after `launch` cannot wedge the pump shut, because a
+  completed job is not `isActive`.
+- **One wording defect, not fixed:** the boot guard logs *"Boot resume failed; the pump stays
+  Idle"*, but `FixedDispensing`, `Complete` and `FillupDigitalAwaitingPayment` all `setState` before
+  later steps that can fail, and the guard does not cover throws inside the jobs `bootResume`
+  spawns. The sentence is narrower than the code. Left for whoever does step 1, since the tablet is
+  where that path gets exercised.
+- Verified: JVM **505 tests / 48 classes** green; `lintDebug`, `assembleDebugProd` and
+  `compileDebugRealHwKotlin` clean, in separate invocations.
+
+**Next:**
+Merge-gate **step 1, the tablet smoke test** — now with one more thing to watch: let a pre-pay QR
+expire unpaid and confirm the screen returns to Idle on its own and the operator log shows the
+abandonment row. Then merge, then the improvements (#R3, #R8, #50, #51, #52) as small branches off
+`main`.
+
+
+---
+
+### Phase 10h (round 5) — the row that was never written
+**Date:** 2026-09-21
+**Status:** done
+**Commit(s):** `aa395e4` (fix + tests); this board/log update. Follows `802c1dc` (#R9) the same night.
+
+**Summary (plain language):**
+When a customer takes a QR code and never pays, the pump is supposed to give up and write a line in
+its own log saying so — so that if the customer comes back saying they paid, someone can check.
+We put the app on the tablet, left a QR to expire, and then read the tablet's database: **that line
+had never been written. Not once, in the whole life of the app.** Two separate timers were racing to
+end the sale, and the one that wins on a real tablet was the one that wrote nothing — so every fix
+we have made to that line over the past week was maintaining a record that never existed. The line
+is now written by whichever timer actually ends the sale.
+
+**Technical notes:**
+- **#R10 (`aa395e4`).** Both digital flows arm two clocks off the same `expiresAt`: the ViewModel's
+  `expiryJob` countdown (which calls `recordAbandonedPayment`) and `BalanceePaymentProcessor`'s poll
+  deadline (which emits `Failed`, whose handler cancels the countdown). The countdown accumulates
+  one-second `delay`s; the poller compares `clock.instant()` against the deadline. Both are deferred
+  while the tablet sleeps, but on waking the poller fires immediately and the countdown still owes
+  its remaining ticks — so the poller ends the sale, and it wrote no row.
+- **The marker, not the copy.** `PaymentResult.Failed.windowElapsed` is new, because the caller has
+  to write `PAYMENT_ABANDONED` for that ending and no other, and an elapsed window and a declined
+  card both arrive as a recoverable `Failed` with a "see the attendant" line. Only the processor
+  knows which it produced. The countdowns keep their own writes for the one case the poller cannot
+  end: a server that issued no `expiresAt` leaves it polling with no deadline at all.
+- **Double-write considered and accepted.** Each ending cancels the other, and the handlers cancel
+  the countdown before the suspending write, so the overlap is an instant wide. Two truthful rows
+  are a better failure than the none we had.
+- **#R4's rule held to.** The id and the amount come off the **live** awaiting-payment state, not
+  the `FillupTankFull` the flow started from: `source` carries the local `BLC-…` and the quote
+  struck at the nozzle, neither of which is what the still-payable checkout page charges.
+- **#R9's sibling, caught before it bit.** `onPaymentFailed` also called `cancelInFlightJobs()` from
+  inside `paymentJob`. It survived only because `setState` does not suspend — adding the abandonment
+  write in front of it would have reproduced #R9 exactly. Named cancels now, `paymentJob` left to
+  end on its own.
+- **Evidence.** `adb run-as` on the debuggable `debugProd` build reads the app's own database, which
+  is a better witness than a screen on a tablet whose logcat is unusable: `events` held two rows,
+  both from 09-19, and `pulse_state` held the persisted `error` state with the poll-deadline copy,
+  timestamped 23:24:40. Worth remembering as a technique for the parallel run — though **#40 still
+  stands**, because a release build is not debuggable and `run-as` will not work on it.
+- **Deliberately unchanged:** the screens. Pre-pay keeps the 10g "stopped waiting" error, the
+  fill-up keeps its cash fall-back. Both were argued when that copy was written and neither was what
+  was broken. **USSD still records nothing** — Flow 5 is deferred and off the customer's screen.
+- **Boarded, not decided: #R11** — that error card has no auto-dismiss, so an unattended pump waits
+  for a tap. A product question for the boss.
+- Verified against the pre-fix files first: all three new behavioural tests fail without the change,
+  and the two that assert unchanged behaviour (a refusal is not an abandonment) pass either way. JVM
+  **510 tests / 48 classes** green; `lintDebug`, `assembleDebugProd` and `compileDebugRealHwKotlin`
+  clean, in separate invocations.
+
+**Next:**
+The rest of merge-gate step 1 on the tablet: a cash fill-up end to end, a digital sale to the QR then
+cancel, kill-mid-dispense-and-reopen, and the pre-pay expiry again — this time the row is the
+assertion, not the screen. Then merge.
+
+
+---
+
+### Phase 10h (round 6) — the smoke test passes, and the check of it finds a lost update
+**Date:** 2026-09-21
+**Status:** done
+**Commit(s):** `c963e81` (fix + instrumented test); this board/log update
+
+**Summary (plain language):**
+Every step of the tablet smoke test passed. But when we read the tablet's database afterwards to
+confirm it, the database disagreed with the screen: the screen was idle, and the database still said
+a customer was looking at a QR code — one the attendant had already cancelled. The pump keeps that
+record so it can pick up where it left off after a power cut, which means a power cut at the wrong
+moment would have brought a cancelled sale back to life. Two parts of the app were writing that one
+record at the same moment, and the slower one was putting back an out-of-date copy. Each part now
+writes only its own piece of the record, so the order they land in no longer matters.
+
+**Technical notes:**
+- **#R12 (`c963e81`).** `pulse_state` is one row with two owners — the state writer (every
+  `setState`) and the pulse writer (every N pulses, and the clear in `resetToIdle`) — on separate
+  coroutines. Every repository write read the row and REPLACEd the whole entity with its own fields
+  changed. A read landing before the other writer's write means the REPLACE puts back a stale copy.
+- **The evidence.** Logcat (`--pid`): `/authorise` at 18:50:28, one status poll at 18:50:29, a tap
+  at 18:50:33, then no poll ever again — the sale was cancelled. The row: `pulseCount 0`,
+  `adapterCount null`, `updatedAt` 18:50:33, state JSON still `fillup_digital_awaiting_payment` —
+  exactly `savePulseCount(0, 0, null)`'s signature, carrying the pre-Idle state it had read.
+- **Both directions.** Cancel → the Idle is lost and the cancelled sale is resumed on restart;
+  for a dispense that would re-open the relay toward the authorised litres. Mid-dispense → a state
+  write rolls the pulse count and anchor back, an under-count on resume. Whether that explains 7h's
+  #28/#36 is a suspicion only.
+- **Fix by shape, not by ordering.** Column-scoped `UPDATE`s behind an `INSERT OR IGNORE`; the DAO's
+  full-row `save` is removed so nothing can reach for it. No schema change, no migration.
+  `currentTransactionRef` keeps the `COALESCE` semantics a null ref always had, and the reconciler
+  still leaves `lastPulseTimeMs` alone.
+- **Instrumented, on the tablet.** `PulseRepositoryConcurrencyTest` runs the real SQL on an in-memory
+  Room database: two racing tests (500 iterations each) and four contract tests. Against the pre-fix
+  files both racing tests failed on **iteration 0** — this race loses by default. The throwaway
+  `debug` + test packages it installs were confirmed gone afterwards; `.prod` and `.realhw` untouched.
+- **Pre-existing**, older than phase 10. Phase 10's cancel paths and 10d's resume are where it bites.
+- **Smoke-test results, step 1:** cash fill-ups (three rows, ₦1,490/L, correctly not uploaded),
+  digital-to-QR-and-cancel, kill-mid-dispense resumed without crashing (unrecoverable gap on mock
+  hardware, as expected), pre-pay expiry with the abandonment row written by the poller. **Not seen
+  on a device:** the fill-up expiry half of #R10 — the unit test covers it.
+- **Correction to a standing note:** logcat is usable on this tablet on a mock build; only the Arduino
+  bench run takes the USB port.
+- Verified: **510 JVM tests / 48 classes**, **25 instrumented tests on the SM-T220**; `lintDebug`,
+  `assembleDebugProd` and `compileDebugRealHwKotlin` clean.
+
+**Next:**
+Install `c963e81` on the tablet, cancel one digital fill-up at its QR, and read `pulse_state` — it
+must say Idle. Then merge to `main` and push.
+
+
+---
+
+### Phase 10h (round 7) — a fill-up past shutoff can be paid another way, never cancelled
+**Date:** 2026-09-21
+**Status:** done (device check of the fix pending)
+**Commit(s):** `2389d36`; this board/log update. Preceded by the on-device re-check of #R12 (`2b91aa4`).
+
+**Summary (plain language):**
+In a fill-up the customer gets the fuel first and pays after. If they started paying by QR and then
+changed their mind, the screen had a button saying "Cancel · collect cash instead" — but it did not
+collect cash. It sent the pump back to its idle screen and kept no record at all, as if the fuel had
+never been pumped. The cash-collection screen also had a Cancel button the customer could press and
+simply drive off. Both are fixed: changing your mind now moves the sale to cash collection, which
+only the attendant can close. How an attendant should record a customer who genuinely drives off is
+a question for the boss, because the approved design has no button for it.
+
+**Technical notes:**
+- **#R13 (`2389d36`).** `FillupDigitalAwaitingPaymentScreen`'s button → new
+  `onFillupDigitalCancel()`, which stops the poller and countdown and sets
+  `FillupAwaitingCashConfirm` from the stashed `FillupTankFull` (local ref, pump price — the same
+  settlement the expiry fall-back makes; `fillupDigitalSource` is set in `startFillupDigitalExpiry`,
+  which the fresh and resumed paths both run). It then writes `PAYMENT_ABANDONED` on its own
+  coroutine, worded "cancelled at the pump", against the server's id and figure (#R4's rule). That is
+  the fill-up half of #R8.
+- **The customer-facing Cancel on cash-confirm is removed**, matching the design, and `onCancel`
+  refuses `FillupTankFull` / `FillupAwaitingCashConfirm` and routes `FillupDigitalAwaitingPayment` to
+  cash — so the invariant is the view model's, not a property of today's screens. The back button was
+  already a no-op, so there is no other route.
+- **Authorities checked first:** the Flow 3 design screen has no cancel on the QR; `state-machine.md`
+  gives Flow 3 no Idle exit and Flow 2's cash-confirm leaves only on CASH RECEIVED. The button and its
+  wiring date from Phase 3e (`61f65d9`).
+- **Evidence:** two fill-up cancels on the tablet that evening (18:50, 20:19) left no transaction and
+  no event.
+- **Not built, boarded as #R14:** an attendant "unpaid / drive-off" exit. A fourth attendant action
+  deviates from the three-action design, so it is the boss's call. Until then a drive-off leaves the
+  pump on cash-confirm; a 0 L fill-up closes as a zero cash sale.
+- Six new tests, all failing against the pre-fix code with the old wiring (`onCancel`) substituted in.
+  **516 JVM tests / 48 classes** green; `lintDebug`, `assembleDebugProd`,
+  `compileDebugRealHwKotlin` clean. Instrumented suite unaffected (no data-layer change).
+
+**Next:**
+Install `2389d36`; run a digital fill-up to the QR, tap "Cancel · collect cash instead", confirm the
+cash screen has no Cancel, tap CASH RECEIVED, and read back a `FILLUP_CASH` row and a "cancelled"
+`PAYMENT_ABANDONED` row. Then merge, on the user's go. Ask the boss #R11 and #R14 together.
+
+
+---
+
+### Phase 10h (round 8) — the fill-up QR wait
+**Date:** 2026-09-21
+**Status:** done (device check pending)
+**Commit(s):** `de1e976`; this board/log update
+
+**Summary (plain language):**
+Tapping "pay digitally" after a fill-up took one to three seconds to show the QR, and the screen gave
+no sign the tap had worked. The pump was asking Balancee's server two questions one after the
+other — the current price, then the payment link — and each question travels to a server in the
+United States and back. The pump now asks the first question the moment the nozzle shuts, while the
+customer is still reading their total, so the tap only waits for the second. The button also says
+"Preparing QR…" straight away. Asking Balancee to host the server closer to Nigeria would speed up
+every request the pump makes; that is on the list of things to ask them.
+
+**Technical notes:**
+- **Measured (logcat, SM-T220):** tap → `/config` 382 ms → `/authorise` 828 ms (≈1.3 s); a cold run:
+  `/config` 1,913 ms → `/authorise` 1,075 ms (≈3.2 s). Response headers `x-vercel-id: cpt1::iad1`.
+- **Prefetch at shutoff:** `PaymentProcessor.prepareToAuthorise()` (default no-op; the Balancee
+  processor calls `PumpConfigSync.prefetchForNextAuthorise()`), launched untracked from
+  `fillupShutoff` so the pay-digital tap's `cancelInFlightJobs()` leaves it running.
+  `fetchForAuthorise()` uses the prefetch once, only within `PREFETCH_MAX_AGE_MS` (60 s), awaits it
+  if still in flight, and fetches afresh if it failed. The slot is completed **empty**, not
+  cancelled, when its coroutine dies — awaiting a cancelled Deferred would throw a
+  CancellationException into the payment flow. OQ #8's guarantee (a fresh price per authorise)
+  holds; a backend price change inside the window is at worst a recoverable `AMOUNT_MISMATCH`.
+- **Feedback:** `CustomerUiState.preparingQr`, on at the tap, off at the first result and on job
+  completion; the digital button reads "Preparing QR…" and is disabled meanwhile.
+- **A decision kept, not overridden:** I first greyed out Pay cash as well; a review-#5 test
+  (`an in-flight authorise does not block the cash button`) records the opposite choice, so cash
+  stays live during the wait.
+- **Not done:** pre-pay holds ModeSelect for the same round trip; the region is a Balancee setting
+  (TODO item 11).
+- Nine new tests; four mutation-checked (undo the change, the test fails). **525 JVM tests / 48
+  classes** green; lint and both variants clean.
+
+**Next:**
+On the tablet: the button should read "Preparing QR…" at once, and logcat should show no `/config`
+between the tap and `/authorise`. Plus the #R13 check. Then the merge, on the user's go.

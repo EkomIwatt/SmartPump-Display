@@ -21,6 +21,7 @@ import org.junit.Before
 import org.junit.Test
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.math.BigDecimal
 
 class PumpLoggingInterceptorTest {
 
@@ -121,7 +122,7 @@ class PumpLoggingInterceptorTest {
             ),
         )
 
-        service().authorise(AuthoriseRequest("P1", "txn_0007", 7000, 10.0, FuelType.PETROL))
+        service().authorise(AuthoriseRequest("P1", "txn_0007", BigDecimal("7000"), 10.0, FuelType.PETROL))
 
         val out = logged.toString()
         assertTrue(out.contains("PENDING_PAYMENT"))       // response body logged
