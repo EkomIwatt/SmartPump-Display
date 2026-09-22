@@ -1,6 +1,16 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22, later (**#R11 merged; next is #R8**)
+## Current status — 2026-09-22, afternoon (**#R11 and #R8 merged; the V1 app work left is items 6–8**)
+
+**`main` = `origin/main`, green (534 JVM tests).** #R8 merged (`9045c3b`): a pre-pay QR cancelled
+at the pump now leaves a `PAYMENT_ABANDONED` row, seen on the tablet. The orphan ₦149 has been
+reported to Balancee (by the user). **Next on the V1 path that is ours to code:** #36 (pulses lost
+per restart), #42 (OkHttp RuntimeException), #15's clock-skew half, #44, then #40 and #34. The long
+pole is still the K-factor (#22, Kelvin), and Olonade's one conversation.
+
+---
+
+## Previous status — 2026-09-22, later (**#R11 merged; next is #R8**)
 
 **`main` green (530 JVM tests), one merge ahead of `origin/main`.** #R11 passed its device check on
 the SM-T220 (the timed-out pre-pay card cleared itself two minutes after expiry) and is merged
@@ -3000,3 +3010,30 @@ version of the app.
 
 **Next:**
 #R8 (pre-pay half) on a small branch off `main`. Then the V1 path in `TODO.md`.
+
+### #R8 — a cancelled pre-pay QR leaves a record (merged)
+**Date:** 2026-09-22
+**Status:** done
+**Commit(s):** `8edab70` on `feature/r8-prepay-cancel-abandoned`; merged to `main` as `9045c3b`
+
+**Summary (plain language):**
+When a customer or attendant cancels a pre-pay while the QR code is showing, the pump now writes a
+note saying the payment was cancelled, with the transaction's id and amount. The payment page stays
+open on the server, so if someone pays it anyway and comes back for fuel, there is a record to check.
+Before this, a cancelled pre-pay left no trace at all. Checked on the real tablet.
+
+**Technical notes:**
+- `onCancel` captures a live `PrepayAwaitingPayment` before the reset and writes the row after the
+  transition on its own coroutine — server id, the checkout page's figure. A failed write still
+  reaches Idle.
+- `recordAbandonedPayment`'s boolean became `AbandonReason` (`TIMED_OUT`, `CASH_INSTEAD`,
+  `CANCELLED`); the fill-up wording ("cash was asked for") was untrue of a pre-pay.
+- Siblings: USSD has no checkout page; no other path cancels a pre-pay QR. The pre-QR `/authorise`
+  window (cancel from ModeSelect while authorise is in flight) has no id to record — unchanged.
+- Four tests; the two asserting the row fail with the capture nulled. 534 green; lintDebug,
+  assembleDebugProd, compileDebugRealHwKotlin clean.
+- Device: event #8 on the SM-T220, `b96d8eb7-…`, ₦1,999.58 (₦2,000 tendered), cancel wording.
+- Also this session: #R11 merged (`08adf2f`); the orphan ₦149 reported to Balancee by the user.
+
+**Next:**
+The V1 path in `TODO.md`, items 6–8: #36, #42, #15's enforcement half, #44, then #40 and #34.

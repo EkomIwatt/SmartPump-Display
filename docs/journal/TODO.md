@@ -19,9 +19,9 @@ each entry.
 
 1. [x] **#R11 — DONE 2026-09-22.** Device check passed on the tablet (the timed-out card cleared
    itself two minutes after expiry); merged to `main` (`08adf2f`). See 4a below.
-2. [ ] **#R8 (pre-pay half) — NEXT, in V1 by the user's decision (2026-09-22).** Make the pre-pay
-   QR's Cancel write the same "cancelled" `PAYMENT_ABANDONED` row the fill-up cancel writes since
-   #R13. Small branch off `main`. See item 5 below. (#51 went to `POST_V1.md` the same day.)
+2. [x] **#R8 (pre-pay half) — DONE 2026-09-22.** The pre-pay QR's Cancel now writes a "cancelled"
+   `PAYMENT_ABANDONED` row (server id, checkout figure); device-checked on the tablet, merged
+   (`9045c3b`). See item 5 below. (#51 went to `POST_V1.md` the same day.)
 3. [x] **Tell Balancee about the orphan ₦149 sale** (item 10) — **told by the user 2026-09-22.**
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
@@ -193,7 +193,7 @@ each entry.
    loses that. Options are a timed auto-dismiss back to Idle, or leaving it and accepting a tap.
    Ask the boss; it is a forecourt-behaviour question, not a code one.
 
-5. [ ] **V1 — by the user's decision, 2026-09-22. NEXT SESSION STARTS HERE.** **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** **Fill-up half DONE in #R13
+5. [x] **DONE 2026-09-22 — pre-pay half built (`8edab70`), device-checked (event #8 on the SM-T220, server id, ₦1,999.58, "cancelled … before it was paid"), merged (`9045c3b`).** **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** **Fill-up half DONE in #R13
    (`2389d36`)** — what remains is the pre-pay cancel. Only the two expiry timers do.
    The backend does not expire transactions, so the checkout URL stays payable after a cancel — the
    exact scenario the event type's own doc describes. Small and additive: the row already has a

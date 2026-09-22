@@ -190,7 +190,7 @@ waiting on was answered **by observation** rather than by a reply. See the PROJE
   guarantee** — and the poll is now proven. Build poll-only; leave the seam.
 
 - [x] **Payment feature flows (#8) — DONE, merged 2026-09-22 (`2d7c06d`).** Gated on real money
-  (10g) and on the tablet; what is left is boarded in `TODO.md` (#R8; #R11 merged 2026-09-22, `08adf2f`; the rest moved to `POST_V1.md`; the `iad1` region and two backend questions for Balancee). Original entry: Authorise →
+  (10g) and on the tablet; what is left is boarded in `TODO.md` (#R8 and #R11 both merged 2026-09-22; the rest moved to `POST_V1.md`; the `iad1` region and two backend questions for Balancee). Original entry: Authorise →
   Paystack QR, `PAID` by poll, the config fetcher, and the upload job (7e) that rides on it. The
   transport half is built, merged and now *demonstrated*; the feature half is not started. Carries
   **#43–#46** and **#48** with it.
