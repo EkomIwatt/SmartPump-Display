@@ -158,6 +158,16 @@ wanted._
 
 ### After the merge — improvements, roughly in value order
 
+4c. [ ] **#R15 — the 20-minute QR window feels too long** (raised by the user, 2026-09-22). It is not
+   the app's number: it is the `expiresAt` Balancee issues with every authorise, and the app honours
+   it on purpose — until #43 the app gave up at 5 min while the checkout stayed payable, so a
+   customer who scanned at 5:30 was cancelled under them. **Capping it in the app re-creates that**:
+   a customer paying after the pump's cap pays for fuel the pump will not dispense (the abandonment
+   row makes it answerable, but it is a refund). And the server does not enforce `expiresAt` at all
+   (payable 3m16s past it at the 10g gate). **The right fix is Balancee's: a shorter `expiresAt`, and
+   enforced.** Add to the Balancee asks. Meanwhile a customer can always cancel from the QR, and
+   since #R11 an abandoned pre-pay frees the pump 2 min after the window ends.
+
 4b. [ ] **#R14 — a genuine drive-off has no exit.** Since #R13 a fill-up past shutoff can only be
    closed by CASH RECEIVED, so a customer who leaves without paying wedges the pump on cash-confirm:
    the attendant's choices are to record cash nobody received, or restart (which resumes the same
@@ -167,7 +177,7 @@ wanted._
    make. Ask together with #R11: both are "what does an unattended pump do when a customer walks
    away". (A 0 L fill-up is fine — it closes through CASH RECEIVED as a zero sale.)
 
-4a. [ ] **#R11 — a timed-out pre-pay sits on an error card until a person taps it.** `ErrorScreen`
+4a. [x] **#R11 — DECIDED by the boss 2026-09-22: option (b), two minutes. BUILT on `feature/r11-timed-out-card` (`d0181cc`), not yet merged** — the timed-out card now clears itself after 2 min (restart-proof, wall-clock checked). Device check needs a 20-min expiry + 2 min. Original entry: **a timed-out pre-pay sits on an error card until a person taps it.** `ErrorScreen`
    has no auto-dismiss and its button is the only way out (`CustomerStateHost.kt:194`), so an
    unattended pump whose customer walked away stays on "This pump stopped waiting for the payment"
    indefinitely. **Not a lockout** (corrected 2026-09-22): "Start over" is on the customer's screen,
