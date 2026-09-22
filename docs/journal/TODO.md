@@ -5,12 +5,12 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to PROJECT_LOG) · `[·]` deferred/parked
 
-_Last updated: **2026-09-21**, late. **Step 2 found #R9; the tablet found #R10 and #R12; a question
-asked at the tablet found #R13 — all four fixed (`802c1dc`, `aa395e4`, `c963e81`, `2389d36`).**
-Plus the fill-up QR wait (`de1e976`). Branch `feature/phase-10-payments`, **59 commits**, **525 JVM tests / 48 classes** and **25
-instrumented tests on the SM-T220** green, lint and both variants clean. **Still NOT merged — one
-device check of #R13, then the merge on an explicit go.** What follows is a plan, not a list: do it
-in order._
+_Last updated: **2026-09-22**. **Phase 10 is MERGED** — `main` = `origin/main` = `2d7c06d`, verified on
+`main` (525 JVM tests / 48 classes, lint, `assembleDebugProd`, `compileDebugRealHwKotlin`). The merge
+gate below is closed and kept as the record; **what is next is the "After the merge" section**, each
+as its own small branch off `main`. The feature branch is left in place until it is no longer
+wanted._
+
 
 
 
@@ -55,10 +55,13 @@ in order._
      `/authorise` 20:18:56, polls 20:18:57 and 20:19:08, cancel tapped 20:19:12, no poll after.
      `pulse_state` read back: `{"type":"idle"}`, `updatedAt` 20:19:12, pulses 0, anchor null — the
      Idle and the pulse clear both landed and neither undid the other. #R12's fix, observed.
-   - [ ] **Device check of #R13 on the `2389d36` build:** digital fill-up → QR → *Cancel · collect
+   - [x] **Device check of #R13 — PASSED 2026-09-22** (`FILLUP_CASH BLC-71407` 0.37 L / ₦551.30 and
+     a "cancelled" `PAYMENT_ABANDONED` against `0b5408c7-…`, read off the tablet's database). Was: digital fill-up → QR → *Cancel · collect
      cash instead* must land on **cash collection** (no Cancel on that screen); CASH RECEIVED must
      then write a `FILLUP_CASH` row, and a `PAYMENT_ABANDONED` row worded "cancelled" must exist.
-   - [ ] **Device check of the QR wait on `de1e976`:** tap *Pay digitally* — the button must read
+   - [x] **Device check of the QR wait — PASSED 2026-09-22.** Logcat: `/config` left at shutoff
+     (09:07:55.6); the tap came 1.4 s later with it still in flight, and `/authorise` went out the
+     moment it returned — no second `/config`. Cold server that morning (2.2 s + 1.7 s). Was: tap *Pay digitally* — the button must read
      **"Preparing QR…"** at once, and the QR should follow faster than before (logcat: no `/config`
      between the tap and `/authorise`; it went out at shutoff).
    - Logcat **does** work on this tablet on a mock build: `adb logcat -d -v time --pid=<pid>`. It is
@@ -96,7 +99,7 @@ in order._
      class of defect #R5 was about. Done harness-first: with the `yield()` and without the fix,
      three pre-pay tests fail, including #R5's own `a prepay still returns to Idle when the
      abandonment row cannot be written`.
-3. [ ] **Merge to `main` and push.** Only after 1 and 2. Squash nothing — the commit messages are
+3. [x] **Merged to `main` and pushed — 2026-09-22 (`2d7c06d`).** Only after 1 and 2. Squash nothing — the commit messages are
    where the reasoning lives.
 4. [ ] **Then the improvements, as small branches off `main`** — see the next section. None of them
    blocks the merge and none should ride along with it.

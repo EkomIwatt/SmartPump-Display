@@ -1,6 +1,24 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-21, late (**#R12 observed fixed on the tablet; a question asked there found #R13, now fixed too**)
+## Current status — 2026-09-22 (**Phase 10 is merged to `main`**)
+
+**`main` = `origin/main` = `2d7c06d`.** The digital payment flows — pre-pay and fill-up against the
+production backend, with status polling and the dispense upload — are on `main`, after the 10g gate
+on real money, three review passes and a tablet smoke test that found three defects no review had
+(#R10, #R12, #R13) plus the QR wait. Every fix was observed on the SM-T220 before the merge; the last
+two checks were read off the tablet's own database and logcat on the morning of the merge. Verified
+on `main`: **525 JVM tests / 48 classes**, lint, `assembleDebugProd`, `compileDebugRealHwKotlin`
+(and 25 instrumented tests on the SM-T220 on the branch, unchanged since).
+
+**What is next** is TODO's "After the merge" list, each as its own small branch: #R8's pre-pay half,
+#51, #R3, #52, #50, and the pre-pay "Preparing QR…". **Questions to send:** #R11 and #R14 to the boss
+(both "what does an unattended pump do when a customer walks away"); to Balancee, the orphan ₦149
+sale, the `iad1` region, and the two drafted backend questions. The long pole to live money is
+unchanged: the K-factor, waiting on Kelvin (#22).
+
+---
+
+## Previous status — 2026-09-21, late (**#R12 observed fixed on the tablet; a question asked there found #R13, now fixed too**)
 
 **#R12's fix is observed on the device:** a digital fill-up cancelled at its QR on the `c963e81` build
 left `pulse_state` reading Idle, stamped at the tap. Steps 1 and 2 of the merge gate closed.
@@ -2867,3 +2885,34 @@ every request the pump makes; that is on the list of things to ask them.
 **Next:**
 On the tablet: the button should read "Preparing QR…" at once, and logcat should show no `/config`
 between the tap and `/authorise`. Plus the #R13 check. Then the merge, on the user's go.
+
+
+---
+
+### Phase 10 — merged to `main`
+**Date:** 2026-09-22
+**Status:** done
+**Commit(s):** merge `2d7c06d` (62 commits from `feature/phase-10-payments`, not squashed); this log update
+
+**Summary (plain language):**
+The pump can now take digital payments for real, merged into the main line of the project. A customer
+can pay before fuelling or after a fill-up by scanning a QR code; the pump checks the payment with
+Balancee's server, dispenses, and reports the sale back. It was tested with real money, reviewed three
+times, and then tested by hand on the tablet — which found three more problems that the reviews had
+missed, all fixed and re-checked on the tablet before merging.
+
+**Technical notes:**
+- Merge gate, all three steps closed: (1) tablet smoke test on the fixed builds — found #R10 and
+  #R12, and a question asked at the tablet found #R13; (2) review scoped to round 3's fixes — found
+  #R9; (3) merge. Final device checks on 2026-09-22: #R13 (`FILLUP_CASH BLC-71407`, 0.37 L / ₦551.30,
+  plus a "cancelled" `PAYMENT_ABANDONED` for `0b5408c7-…`) and the QR prefetch (logcat: `/config` at
+  shutoff, awaited by the authorise, no second request).
+- `main` had one commit the branch lacked (`ebe5205`, a `V1_BLOCKERS.md` correction); the merge was
+  clean. Verified on `main` after merging: 525 JVM tests / 48 classes, `lintDebug`,
+  `assembleDebugProd`, `compileDebugRealHwKotlin`, in separate invocations. Pushed.
+- `V1_BLOCKERS.md` updated: #8 done, "Not built" now only release signing.
+- The feature branch is left in place; delete it when no longer wanted.
+
+**Next:**
+TODO's "After the merge" list, one small branch each. Send #R11/#R14 to the boss and the Balancee
+asks. Chase #22 (the K-factor) — it is the long pole to live money.

@@ -1,6 +1,6 @@
 # What is still blocking V1
 
-_Compiled 2026-09-12. Corrected 2026-09-19 — section 1's 7g firmware claim was wrong and is
+_Compiled 2026-09-12. **Updated 2026-09-22: the payment flows (#8) are built, gated and merged (`2d7c06d`).** Corrected 2026-09-19 — section 1's 7g firmware claim was wrong and is
 rewritten below; nothing else moved. Refreshed 2026-09-17, after the gate (#32) closed: the app has completed a
 real paid transaction against production end to end, so **section 4 is empty of anything that blocks
 V1** — nothing on the API line is waiting on the backend any more. What is left there is ours to
@@ -21,10 +21,10 @@ work sorted by a different question: **who is holding it up, and what can move t
 
 | | |
 |---|---|
-| Built and merged | all 5 flows, real Arduino pulse + relay, operator config, persistence/boot-resume, signed network layer, encrypted credentials, device identity, 7h pulse continuity, Phase 9 API work + the activation step, the API probe panel |
+| Built and merged | all 5 flows, **the digital payment flows + upload job (Phase 10, #8, merged 2026-09-22)**, real Arduino pulse + relay, operator config, persistence/boot-resume, signed network layer, encrypted credentials, device identity, 7h pulse continuity, Phase 9 API work + the activation step, the API probe panel |
 | Proven against production | the whole paid lifecycle — activate → `/config` → authorise → Paystack → `PAID` → dispense upload, by observation, on a real ₦149 sale (**#32**, 2026-09-16/17) |
 | Built, unmerged | 7g firmware (bench gate) |
-| Not built | the payment feature flows (**#8**), the upload job that rides on them, release signing |
+| Not built | release signing (deferred to last by decision) |
 | Never measured | the meter K-factor — every litre figure runs on a placeholder |
 
 ---
@@ -187,7 +187,9 @@ waiting on was answered **by observation** rather than by a reply. See the PROJE
   already rules that push is a *freshness optimisation only* and the **poll carries the correctness
   guarantee** — and the poll is now proven. Build poll-only; leave the seam.
 
-- [ ] **Payment feature flows (#8) — now the whole of the API line, and entirely ours.** Authorise →
+- [x] **Payment feature flows (#8) — DONE, merged 2026-09-22 (`2d7c06d`).** Gated on real money
+  (10g) and on the tablet; what is left is boarded in `TODO.md` (#R3, #R8, #50–#52; #R11/#R14 for
+  the boss; the `iad1` region and two backend questions for Balancee). Original entry: Authorise →
   Paystack QR, `PAID` by poll, the config fetcher, and the upload job (7e) that rides on it. The
   transport half is built, merged and now *demonstrated*; the feature half is not started. Carries
   **#43–#46** and **#48** with it.
@@ -228,7 +230,7 @@ Listed so they are not rediscovered as surprises.
 Rewritten 2026-09-17. The old ordering was built around section 4 waiting on a reply; it is not
 waiting any more, which promotes **#8** from "gated/later" to the largest movable thing on the board.
 
-1. **Payment feature flows (#8)** — now unblocked and the biggest remaining build. Every contract
+1. ~~**Payment feature flows (#8)**~~ — **DONE, merged 2026-09-22.** The long pole is now #22 below. Every contract
    question it needed has been answered by observation, and the whole lifecycle has been driven once
    by hand through the probe panel, so this is implementing against *demonstrated* behaviour rather
    than against a PDF. Build **poll-only**; push has no server side and is not needed for
