@@ -22,7 +22,7 @@ each entry.
 2. [ ] **#R8 (pre-pay half) — NEXT, in V1 by the user's decision (2026-09-22).** Make the pre-pay
    QR's Cancel write the same "cancelled" `PAYMENT_ABANDONED` row the fill-up cancel writes since
    #R13. Small branch off `main`. See item 5 below. (#51 went to `POST_V1.md` the same day.)
-3. [ ] **Tell Balancee about the orphan ₦149 sale** (item 10) — real money, unreconciled.
+3. [x] **Tell Balancee about the orphan ₦149 sale** (item 10) — **told by the user 2026-09-22.**
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
 5. [ ] **Olonade — one conversation:** the serial-protocol questions (**#19**, OQ #23/#24/#26), with
@@ -207,7 +207,7 @@ each entry.
 
 ### Not code — unblocked, can go any time
 
-10. [ ] **Tell Balancee about the orphan:** production holds
+10. [x] **Tell Balancee about the orphan — DONE 2026-09-22, the user told them.** Production holds
     `740e2af7-3573-45b1-a92b-813f2730ac93` **PAID with no dispense recorded** (the ₦149 fill-up that
     exposed finding #6 of the sitting). Local row `BLC-77819` is condemned. This is someone's money
     sitting unreconciled; it does not get better by waiting.
