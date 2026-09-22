@@ -194,7 +194,8 @@ _Collected 2026-09-22 when the finished phase sections moved to [`TODO_DONE.md`]
   a blocker — but the parallel run's release build will be the first time the two run together,
   and that should be a deliberate decision rather than a discovery.
 
-- [ ] **54. A completed sale leaves its pulse collector subscribed.** Found at the 11f gate
+- [~] **54. A completed sale leaves its pulse collector subscribed — FIXED 2026-09-22, one
+  device check owed.** Found at the 11f gate
   2026-09-22. When the fill-up hit its ceiling, **two** view models logged a stop: the live fill-up,
   and a cash sale that had finished fifteen minutes earlier and was still collecting
   `pulseSource.observe()`. The stale one read another sale's `STOP` as its own
@@ -207,8 +208,28 @@ _Collected 2026-09-22 when the finished phase sections moved to [`TODO_DONE.md`]
     reconciled exactly (250.74 L counted vs 249.29 L sold, difference fully explained by #56).
   - **Why it still matters before the run.** Two live collectors on one adapter is a coincidence away
     from double-counting: a stale collector whose flow *does* match the current state would advance
-    someone else's sale. Fix the leak (cancel `dispenseJob` when a sale terminates) **and** decide
-    whether the attach filter should relaunch the activity at all while a sale is in flight.
+    someone else's sale.
+  - **FIXED 2026-09-22, both halves.** (1) The cause: `MainActivity` gained
+    `android:launchMode="singleTask"`, so the `USB_DEVICE_ATTACHED` intent goes to the running
+    instance instead of building a second one with its own `ViewModelStore`. (2) The leak: each
+    dispense loop now collects through `takeWhile { !saleEnded }` and raises the flag after its
+    completion call, so the flow ends on the next frame — the adapter's ~2 s heartbeat supplies one
+    whether or not fuel is moving. **Deliberately not `dispenseJob?.cancel()` from inside the
+    collector:** `completeX()` runs *in* that collector, and self-cancelling truncates it at its
+    next suspension point, which is the #R9 trap this branch already paid for once.
+  - **Came out of the fix:** every dispense loop ended with `finally { relay.stopFuelFlow() }`, a
+    **suspending call in a finally block with no `NonCancellable`** — on a cancelled job it throws at
+    its first suspension point and the relay-off never reaches the wire. Exposure was bounded (the
+    callers that cancel also stop the relay separately, and the adapter's 3 s watchdog is the real
+    backstop — measured at 2.98 s at the gate), but the code read as a guarantee it did not provide.
+    Now wrapped in `withContext(NonCancellable)`.
+  - **Tests:** `CustomerViewModelCollectorLifetimeTest` (4). Three fail against the pre-fix view
+    model, as the house rule demands; the fourth passes either way and says so in its KDoc — within
+    one view model the old collector was already cancelled when the next sale started, which is why
+    this needed a *second* view model to show up at all. Suite 603 green.
+  - **Owed:** the device check that a mid-sale replug no longer builds a second activity. Needs the
+    board on the tablet — **Friday, with the Mega**. The merged manifest was confirmed to carry
+    `launchMode="singleTask"`.
 - [ ] **55. Every USB port open re-delivers bytes.** Found at the 11f gate 2026-09-22. On each fresh
   `LINK UP` the app sees the same content several times over: a **30-frame `ARM` burst** for one
   `RLY:1`, glued frames (`ARM:1067473526:1929*5C:2201*31`), and 3–4 identical malformed copies.

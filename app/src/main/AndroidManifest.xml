@@ -26,9 +26,18 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SmartPumpDisplay">
 
+        <!--
+            launchMode=singleTask: one instance, ever. The USB_DEVICE_ATTACHED filter below means a
+            replug delivers an intent here, and under the default launch mode that builds a SECOND
+            activity instance with its own ViewModelStore. Seen at the 11f bench gate (2026-09-22):
+            a mid-sale replug left two CustomerViewModels collecting pulses at once, and the older
+            one read another sale's STOP as its own (TODO #54). singleTask routes the attach intent
+            to the running instance instead.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="fullSensor"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.SmartPumpDisplay">

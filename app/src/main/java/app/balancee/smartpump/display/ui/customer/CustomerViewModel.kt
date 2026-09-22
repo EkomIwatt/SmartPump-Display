@@ -80,6 +80,7 @@ import app.balancee.smartpump.display.ui.util.formatNaira
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -87,8 +88,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.Instant
 import java.util.Locale
@@ -879,6 +882,8 @@ class CustomerViewModel @Inject constructor(
         var lastPulseMs = 0L
         var lastPersistAtPulses = pulseBaseline
         var salePulses = pulseBaseline
+        // Ends this collector once the sale is over — see [saleEnded] at startDispensing.
+        var saleEnded = false
         // The runaway backstop (spec D4) — a fill-up ends on nozzle idle, not here.
         val totalLimit = litresToLimitPulses(FILLUP_CEILING_LITRES)
 
@@ -889,7 +894,7 @@ class CustomerViewModel @Inject constructor(
                     Arming.FINISHED -> { fillupCeilingReached(txnId, totalLimit.toInt()); return@launch }
                     Arming.FAILED -> { onAdapterDidNotStart(cashInHand = false); return@launch }
                 }
-                pulseSource.observe().collect { msg ->
+                pulseSource.observe().takeWhile { !saleEnded }.collect { msg ->
                     when (msg) {
                         is PulseMessage.Pulse -> {
                             lastPulseMs = msg.timestampMs
@@ -910,11 +915,15 @@ class CustomerViewModel @Inject constructor(
                             }
                         }
 
-                        is PulseMessage.Stopped -> fillupCeilingReached(txnId, pulseBaseline + msg.count)
+                        is PulseMessage.Stopped -> {
+                            fillupCeilingReached(txnId, pulseBaseline + msg.count)
+                            saleEnded = true
+                        }
 
                         PulseMessage.SessionLost ->
                             if (rearmAfterLostSession(txnId, totalLimit, salePulses) == Arming.FINISHED) {
                                 fillupCeilingReached(txnId, salePulses)
+                                saleEnded = true
                             }
 
                         is PulseMessage.Heartbeat,
@@ -923,7 +932,12 @@ class CustomerViewModel @Inject constructor(
                     }
                 }
             } finally {
-                relay.stopFuelFlow()
+                // NonCancellable: stopFuelFlow() suspends, and a suspend call in a finally block of
+                // a CANCELLED coroutine throws at its first suspension point and never reaches the
+                // wire — so the relay-off this looks like it guarantees would silently not happen.
+                // Cancelling a dispense is a normal path (a new sale, onCancel, the view model
+                // being cleared), and #54's fix adds another.
+                withContext(NonCancellable) { relay.stopFuelFlow() }
             }
         }
 
@@ -1562,6 +1576,8 @@ class CustomerViewModel @Inject constructor(
         val totalLimit = litresToLimitPulses(litresCutoff)
         var lastPersistAtPulses = pulseBaseline
         var salePulses = pulseBaseline
+        // Ends this collector once the sale is over — see [saleEnded] at startDispensing.
+        var saleEnded = false
         dispenseJob = viewModelScope.launch {
             try {
                 when (openRelay(txnId, totalLimit, resume)) {
@@ -1569,7 +1585,7 @@ class CustomerViewModel @Inject constructor(
                     Arming.FINISHED -> { completeCashFixed(litresCutoff, cashAmountKobo, txnId); return@launch }
                     Arming.FAILED -> { onAdapterDidNotStart(cashInHand = true); return@launch }
                 }
-                pulseSource.observe().collect { msg ->
+                pulseSource.observe().takeWhile { !saleEnded }.collect { msg ->
                     when (msg) {
                         is PulseMessage.Pulse -> {
                             val current = currentState() as? TransactionState.CashFixedDispensing
@@ -1577,6 +1593,7 @@ class CustomerViewModel @Inject constructor(
                             salePulses = pulseBaseline + msg.count
                             if (salePulses >= totalLimit) {
                                 completeCashFixed(litresCutoff, cashAmountKobo, txnId)
+                                saleEnded = true
                                 return@collect
                             }
                             setState(current.copy(litresSoFar = salePulses.toDouble() / PULSES_PER_LITRE))
@@ -1593,11 +1610,15 @@ class CustomerViewModel @Inject constructor(
                             }
                         }
 
-                        is PulseMessage.Stopped -> completeCashFixed(litresCutoff, cashAmountKobo, txnId)
+                        is PulseMessage.Stopped -> {
+                            completeCashFixed(litresCutoff, cashAmountKobo, txnId)
+                            saleEnded = true
+                        }
 
                         PulseMessage.SessionLost ->
                             if (rearmAfterLostSession(txnId, totalLimit, salePulses) == Arming.FINISHED) {
                                 completeCashFixed(litresCutoff, cashAmountKobo, txnId)
+                                saleEnded = true
                             }
 
                         // See startDispensing: no disconnect state; the adapter's watchdog and the
@@ -1608,7 +1629,12 @@ class CustomerViewModel @Inject constructor(
                     }
                 }
             } finally {
-                relay.stopFuelFlow()
+                // NonCancellable: stopFuelFlow() suspends, and a suspend call in a finally block of
+                // a CANCELLED coroutine throws at its first suspension point and never reaches the
+                // wire — so the relay-off this looks like it guarantees would silently not happen.
+                // Cancelling a dispense is a normal path (a new sale, onCancel, the view model
+                // being cleared), and #54's fix adds another.
+                withContext(NonCancellable) { relay.stopFuelFlow() }
             }
         }
     }
@@ -2057,6 +2083,14 @@ class CustomerViewModel @Inject constructor(
         val totalLimit = litresToLimitPulses(litresAuthorised)
         var lastPersistAtPulses = pulseBaseline
         var salePulses = pulseBaseline
+        // A finished sale must stop collecting: its collector lives on the view model's scope and
+        // otherwise survives until something else cancels it — at the 11f gate a sale that ended at
+        // 19:20 was still collecting at 19:35 and read another sale's STOP as its own (TODO #54).
+        // Flagged rather than cancelled from inside the collector: completeX() is called from in
+        // here, and self-cancelling would stop it at its next suspension point, which is the #R9
+        // trap. takeWhile ends the flow on the next frame instead, after the completion has run —
+        // bounded by the adapter's ~2 s heartbeat, which arrives whether or not fuel is moving.
+        var saleEnded = false
         dispenseJob = viewModelScope.launch {
             try {
                 when (openRelay(txnId, totalLimit, resume)) {
@@ -2066,7 +2100,7 @@ class CustomerViewModel @Inject constructor(
                     // money keeps its record. The event row says the pump was the problem.
                     Arming.FAILED -> return@launch
                 }
-                pulseSource.observe().collect { msg ->
+                pulseSource.observe().takeWhile { !saleEnded }.collect { msg ->
                     when (msg) {
                         is PulseMessage.Pulse -> {
                             val current = currentState() as? TransactionState.FixedDispensing
@@ -2077,6 +2111,7 @@ class CustomerViewModel @Inject constructor(
                             // the same way.
                             if (salePulses >= totalLimit) {
                                 completeFixed(litresAuthorised, method)
+                                saleEnded = true
                                 return@collect
                             }
                             setState(current.copy(litresSoFar = salePulses.toDouble() / PULSES_PER_LITRE))
@@ -2093,11 +2128,15 @@ class CustomerViewModel @Inject constructor(
                             }
                         }
 
-                        is PulseMessage.Stopped -> completeFixed(litresAuthorised, method)
+                        is PulseMessage.Stopped -> {
+                            completeFixed(litresAuthorised, method)
+                            saleEnded = true
+                        }
 
                         PulseMessage.SessionLost ->
                             if (rearmAfterLostSession(txnId, totalLimit, salePulses) == Arming.FINISHED) {
                                 completeFixed(litresAuthorised, method)
+                                saleEnded = true
                             }
 
                         // The USB cable is fixed in the kiosk, so the app no longer models a
@@ -2110,7 +2149,12 @@ class CustomerViewModel @Inject constructor(
                     }
                 }
             } finally {
-                relay.stopFuelFlow()
+                // NonCancellable: stopFuelFlow() suspends, and a suspend call in a finally block of
+                // a CANCELLED coroutine throws at its first suspension point and never reaches the
+                // wire — so the relay-off this looks like it guarantees would silently not happen.
+                // Cancelling a dispense is a normal path (a new sale, onCancel, the view model
+                // being cleared), and #54's fix adds another.
+                withContext(NonCancellable) { relay.stopFuelFlow() }
             }
         }
     }

@@ -76,6 +76,15 @@ class FakePulseSource : PulseSource {
     override fun observe(): Flow<PulseMessage> = flow
 
     /**
+     * How many dispense collectors are subscribed right now (TODO #54).
+     *
+     * The leak this exists to catch is invisible to state assertions: a finished sale's collector
+     * keeps running, and only shows itself when it acts on a LATER sale's frames — which is what it
+     * did on the tablet at the 11f gate. Counting subscribers names it directly.
+     */
+    val collectors: Int get() = flow.subscriptionCount.value
+
+    /**
      * Stand-in for the adapter's free-running lifetime count. Set it before or during a test to
      * control what the VM anchors its writes to. Null models a down link — the adapter's count is
      * unknown, which is NOT the same as zero.
