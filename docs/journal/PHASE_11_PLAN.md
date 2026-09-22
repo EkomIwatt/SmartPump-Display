@@ -139,8 +139,10 @@ checksums. Tests against the worked checksums in `serial-protocol.md`.
 
 ### 11f — the bench gate (the user, on the rig)
 
-**Run it from [`11F_RUN_SHEET.md`](11F_RUN_SHEET.md)** — these steps made concrete for the Uno rig
-(auto-pulse, external power, trace build `bench/11f-trace`, adb over Wi-Fi).
+**RAN 2026-09-22 — PASSED, 7 of 8.** Steps, expectations and results:
+[`11F_RUN_SHEET.md`](11F_RUN_SHEET.md); the narrative is in the log. Step 5 (unplug/replug) is
+partial — a flat bench battery rebooted the Uno — and moves to Friday's Mega along with the
+nozzle-idle shutoff and the real coast figure.
 
 One sitting, the Arduino rig, **pin 2 tied to 5 V** (a floating pin counts noise as fuel). logcat
 is unusable during an Arduino run (one USB-C port), so bring back the 7h on-screen trace by
