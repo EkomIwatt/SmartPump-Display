@@ -84,6 +84,13 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
 
 24. **Session mark — `max(adapter_eeprom, android_persisted)` compares two different scales.** Prototype Specification v1.0 (Software → power-cut transaction recovery) says the system resumes the higher pulse count. As specified this is not implementable against the current data model: the app persists a **per-transaction** cumulative (`pulseBaseline` is zeroed at every transaction start — `CustomerViewModel.kt:380,649,757,864`), whereas the adapter's EEPROM count is a **lifetime free-running totaliser**. The lifetime value is always the larger, so a literal `max()` returns it and the app bills the customer for every litre the pump has ever sold. To make the comparison meaningful the adapter needs a **session mark**: the app signals session-zero at relay-open, the adapter records the lifetime value at that mark, and recovery reads `lifetime_now − lifetime_at_mark`. **This is linked to the open "totaliser vs 10k-entry ring buffer" reading** — if "stores last 10,000 pulse counts" turns out to mean per-dispense records rather than rollover headroom, that ring buffer *is* the session-scoped data and the mark comes for free. Worth putting both to Olonade as one question. See also #25.
 
+    > **2026-09-22 — BUILT AND PROVEN (Phase 11).** The session mark is `ARM:<tag>:<start>`:
+    > the adapter latches its lifetime count when it arms a sale and reports it, so recovery
+    > reads `lifetime_now − start` and the `max()` trap disappears. At the 11f gate the same
+    > `start` came back across three kill/relaunch cycles inside one sale (`ARM start=1929`,
+    > four times) and after a full power cut, and the sale's litres never included the
+    > lifetime total. Moves to Resolved when Phase 11 merges.
+
     > **Partly answered 2026-09-02 by Olonade's bench sketch.** The code implements a **single
     > lifetime totaliser** (`{sequence, pulseCount}`) wear-levelled across `MAX_SLOTS = 100` slots,
     > with recovery scanning for the highest sequence — i.e. **your reading, not the ring-buffer
@@ -160,7 +167,16 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
     > **2026-09-22, later: wire format SETTLED** — [`docs/serial-protocol.md`](../serial-protocol.md)
     > (Phase 11a, confirmed by the user). It differs from the proposal below: the session is tagged
     > by the app (`RLY:1:<limit>:<tag>`), `ARM:<tag>:<start>` is #24's session mark, and the
-    > reconnect sends `RES:<tag>` rather than a remaining-count. Moves to Resolved when 11f passes.
+    > reconnect sends `RES:<tag>` rather than a remaining-count.
+    >
+    > **2026-09-22, later still: ANSWERED ON HARDWARE — 11f passed.** The adapter cut every
+    > fixed sale at its own limit, `cut − start == limit` exactly (200, 229, 1000, 2000 pulses
+    > across cash, pre-pay and resumed sales), and the app's backstop never won the race
+    > (`lastPulse` 199 / 227 / 999 / 1998). The USB round trip is out of the stop path, so the
+    > 35–100 mL overrun this entry was raised about is gone — what remains is the mechanical
+    > coast term, measured as 0 on synthetic pulses and still owed on a real meter (Friday).
+    > Kept here until Phase 11 merges to `main`; the metrology question put to Olonade
+    > ("is a firmware-owned cutoff acceptable") was agreed by him and the boss on 2026-09-22.
  On the fixed/pre-pay/cash-fixed flows the app — not the adapter — decides when to stop: the firmware counts a pulse, frames it, ships it over USB, the app compares litres against the cutoff (`CustomerViewModel.kt:680-682`, and the same shape at `:918`), then sends `RLY:0` back down the wire. Every one of those hops is fuel on the ground. Budget: **0–30 ms** in the firmware's own `PULSE_TX_MIN_MS` throttle before the pulse is even transmitted, **~1–15 ms** of USB plus Android scheduling inbound, a coroutine hop, then `stopFuelFlow()`'s `withContext(Dispatchers.IO)` thread hop and the outbound write (`UsbSerialRelayController.kt:80`), then the firmware's `handleSerial()`. Call it **50–150 ms of controllable latency**, on top of a relay-coil + solenoid + fluid-coast term of 10–50 ms that no software change can touch. At 40 L/min that is **35–100 mL** of unbilled fuel per fixed sale — always in the customer's favour, so the station absorbs it.
 
     **The money is the small half.** On a 10 L run 100 mL is **1%**, which is twice the ±0.5% that `TEST-01-detail` demands and that `docs/FIELD_RUN_SHEET_2026-09-04.md` §0a flags as the pass/fail question. If the relay is gating real fuel during a calibration run, **the round trip alone can fail the accuracy gate** — and it would present as a meter/K-factor problem, which it is not. This is a reason to keep the relay out of the dispenser for the first calibration visit (run sheet §0b already recommends exactly that, for different reasons).

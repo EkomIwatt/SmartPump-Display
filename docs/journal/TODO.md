@@ -6,10 +6,10 @@ Keep it current: check items off, add follow-ups as they surface, and move finis
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done (then move to [`TODO_DONE.md`](TODO_DONE.md)) · `[·]` deferred/parked · `[→]` moved to [`POST_V1.md`](POST_V1.md)
 
-_Last updated: **2026-09-22**. **V1 is the priority.** This board is the road to V1 and holds only
+_Last updated: **2026-09-22** (11f bench gate). **V1 is the priority.** This board is the road to V1 and holds only
 open work. **Non-blocking improvements live in [`POST_V1.md`](POST_V1.md)**; **finished work lives in
 [`TODO_DONE.md`](TODO_DONE.md)** (moved there verbatim 2026-09-22, item numbers unchanged).
-**Next session: Phase 11, 11a** (V1 path, item 5)._
+**Next session: Friday 2026-09-25, Olonade’s Mega** — what 11f could not finish (V1 path, item 5)._
 
 ### ⛳ Start here — the V1 path
 
@@ -26,16 +26,18 @@ each entry.
 3. [x] **Tell Balancee about the orphan ₦149 sale** (item 10) — **told by the user 2026-09-22.**
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
-5. [~] **Phase 11 — the adapter owns the cutoff. 11a–11e DONE 2026-09-22 (all code written,
-   599 green); NEXT: 11f, the bench gate on the Uno rig** (flash the 11b firmware + a `debugRealHw`
-   build of the branch; steps in `PHASE_11_PLAN.md`), then Olonade's Mega on Friday. Instrumented
-   suite 27/27 on the tablet (2026-09-22) — it caught a fresh-install defect, fixed in `7841812`. Firmware compiled + host-tested, **not flashed** — it refuses a
-   pre-Phase-11 app (no fuel), so do not flash a rig still used with one. Branch `feature/phase-11-adapter-cutoff`. Spec confirmed:
-   [`docs/serial-protocol.md`](../serial-protocol.md). OQ #26 agreed by Olonade and the boss; the
-   user writes the Arduino code. Plan: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md). **Olonade's Mega has
-   the power-sense circuit** — one more session on it on **Friday 2026-09-25**, before the 14-day
-   run, to switch on `ENABLE_POWER_FAIL_SAVE`. Retires **#36**, OQ #24/#26 and the **7g firmware gate (#19/#24)**, and
-   possibly **#38**. OQ #23 (`CAL`) stays open.
+5. [~] **Phase 11 — the adapter owns the cutoff. 11a–11e built; 11f BENCH GATE PASSED 2026-09-22**
+   on the Uno rig — 7 of 8 steps, results in [`11F_RUN_SHEET.md`](11F_RUN_SHEET.md), detail in the
+   log. The board cuts at the limit to the pulse, a sale survives five app kills, the #36 offset
+   stayed flat, and the evening reconciled to a single recorded 1.45 L loss (250.74 L counted vs
+   249.29 L sold). **Retired by the run: #19 / the 7g firmware gate, #36, OQ #24, OQ #26.**
+   **Still owed, all on Friday 2026-09-25 (Olonade's Mega):** step 5's resume-under-the-original-limit
+   (the Uno rebooted on a flat battery), the **nozzle-idle shutoff on hardware** (auto-pulse never
+   idles, so it has never been exercised), the real **coast** figure, `ENABLE_POWER_FAIL_SAVE = true`
+   and the power-sense checks. Then merge app + firmware + 7g's totaliser to `main`. New from the
+   gate: **#54**, **#55**, **#56**. Branch `feature/phase-11-adapter-cutoff`; spec
+   [`docs/serial-protocol.md`](../serial-protocol.md); plan [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md).
+   OQ #23 (`CAL`) stays open.
 6. [ ] **Accuracy before the run:** ~~**#36**~~ (folded into Phase 11, fixed in 11d), **#53**
    (cash cutoff short by 0.01 L on some amounts), and the fact that no build
    type is yet both real hardware and production (the "no build type" entry under "Open items carried from finished phases").
@@ -191,6 +193,41 @@ _Collected 2026-09-22 when the finished phase sections moved to [`TODO_DONE.md`]
   can prove the payment path on `debugProd` and 7h's bench gate covered the hardware, so this is not
   a blocker — but the parallel run's release build will be the first time the two run together,
   and that should be a deliberate decision rather than a discovery.
+
+- [ ] **54. A completed sale leaves its pulse collector subscribed.** Found at the 11f gate
+  2026-09-22. When the fill-up hit its ceiling, **two** view models logged a stop: the live fill-up,
+  and a cash sale that had finished fifteen minutes earlier and was still collecting
+  `pulseSource.observe()`. The stale one read another sale's `STOP` as its own
+  (`VM STOP cash stopped=20322 … limit=1000`).
+  - **How it happened.** Replugging USB fires the manifest's `USB_DEVICE_ATTACHED` filter, which
+    relaunched `MainActivity` **mid-sale**; the trace shows a `VM RESUME` with no process restart, so
+    a second view model came up beside the first and the first was never cleared.
+  - **Why it did no harm tonight.** Both worked from the same persisted session tag, so the re-arm
+    was idempotent, and `completeCashFixed` returns early when the state is not its own. The ledger
+    reconciled exactly (250.74 L counted vs 249.29 L sold, difference fully explained by #56).
+  - **Why it still matters before the run.** Two live collectors on one adapter is a coincidence away
+    from double-counting: a stale collector whose flow *does* match the current state would advance
+    someone else's sale. Fix the leak (cancel `dispenseJob` when a sale terminates) **and** decide
+    whether the attach filter should relaunch the activity at all while a sale is in flight.
+- [ ] **55. Every USB port open re-delivers bytes.** Found at the 11f gate 2026-09-22. On each fresh
+  `LINK UP` the app sees the same content several times over: a **30-frame `ARM` burst** for one
+  `RLY:1`, glued frames (`ARM:1067473526:1929*5C:2201*31`), and 3–4 identical malformed copies.
+  - **Benign by construction, which is why it is a `[ ]` and not a blocker:** every frame carries a
+    cumulative count, so a duplicate asserts the same fact; garbled ones fail the checksum and land as
+    `SerialFrame.Invalid`; a same-tag `RLY:1` is an idempotent resume.
+  - **Fix shape:** purge the driver's buffers on open (`purgeHwBuffers`) and/or discard input for the
+    first ~50 ms. Worth doing because the safety argument currently rests on *every* duplicated frame
+    being harmless, which is a property no one is checking when they add a frame type.
+- [ ] **56. The adapter must run on mains or UPS — never a battery.** Learned the expensive way at
+  the 11f gate 2026-09-22: a nearly flat 9 V PP3 on the Uno's barrel jack held the rail for ~3 s
+  after the USB was unplugged, then let the board reboot. The session was discarded (correct, with
+  `ENABLE_POWER_FAIL_SAVE = false`) and **1.45 L of real fuel flowed uncounted** —
+  `ADAPTER_SESSION_LOST`, the whole of the evening's unexplained volume.
+  - **Bench:** a 7–12 V, ≥1 A mains DC adapter before step 5 is re-run. A PP3 cannot feed a linear
+    regulator driving ~50 mA plus a relay for a session.
+  - **Install:** this is an install-checklist item for the 14-day run and for production — a sagging
+    supply costs counted fuel silently, and the loss lands in the station's stock variance, not in an
+    error message.
 
 ## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SPLIT — docs/app on `main`, firmware held)
 

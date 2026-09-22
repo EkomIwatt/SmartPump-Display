@@ -1,16 +1,23 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22 (**Phase 11e done and device-tested: the app side of Phase 11 is built**)
+## Current status — 2026-09-22 (**Phase 11f passed on the bench: the adapter owns the cutoff, proven on hardware**)
 
-**`main` = `origin/main`, green (534 JVM tests).** Phase 11 on `feature/phase-11-adapter-cutoff`
-(local, not pushed): **599 unit tests green, and the whole instrumented suite 27/27 on the SM-T220**
-— which caught a defect that would have silently disabled power-cut recovery on every fresh
-install (fixed, `7841812`). 11a–11e are built; nothing of Phase 11 has run against the adapter yet.
+**`main` = `origin/main` = `fbcaeb3`, green (534 JVM tests). Phase 11
+(`feature/phase-11-adapter-cutoff`, 599 tests) is built AND bench-gated** — 11f ran tonight on the
+Uno rig and 7 of its 8 steps pass outright. The board cuts the fuel itself at the limit, to the
+pulse; a sale survived the app being killed five times; the #36 offset held flat where 7h drifted;
+and the evening reconciles — the board counted **250.74 L**, the sales ledger holds **249.29 L**,
+and the 1.45 L difference is a single recorded `ADAPTER_SESSION_LOST`.
 
-**Next: 11f, the bench gate** — the user, on the Uno rig, with the 11b firmware flashed and a
-`debugRealHw` build of this branch (`PHASE_11_PLAN.md`). Then Olonade's Mega on **Friday
-2026-09-25**. Also open: **#53** (cash cutoff float floor). The long pole to live money is
-unchanged: the K-factor (#22, Kelvin).
+**Step 5 (USB unplug/replug) is partial and moves to Friday's Mega** — a flat 9 V bench battery let
+the board reboot, so `RES` was answered `ERR:NOSESSION`. The app stayed safe, but the
+resume-under-the-original-limit path is still untested. **Three findings to act on:** a stale
+dispense collector outlives a completed sale (**#54**), the USB layer re-delivers bytes on every
+port open (**#55**), and the adapter must never run on a battery (**#56**).
+
+**Next: Friday 2026-09-25 on Olonade's Mega** — power-sense, `ENABLE_POWER_FAIL_SAVE = true`, the
+deferred step 5, nozzle-idle and the real coast figure. Then merge Phase 11 to `main`. The long pole
+to live money is unchanged: the K-factor (#22, Kelvin).
 
 ---
 
@@ -2640,3 +2647,84 @@ device tests pass.
 
 **Next:**
 11f — the bench gate on the Uno rig.
+
+### Phase 11f — the bench gate on the Uno rig
+**Date:** 2026-09-22
+**Status:** done (7 of 8 steps pass; step 5 partial, deferred to the Mega)
+**Commit(s):** app and firmware unchanged — this was a test run. Trace build on the throwaway branch
+`bench/11f-trace` (`c05e54b`, never merged); steps and results in [`11F_RUN_SHEET.md`](11F_RUN_SHEET.md)
+
+**Summary (plain language):**
+Everything Phase 11 built was finally run against real hardware, and it works. The little board now
+stops the fuel itself: on every sale it cut off at exactly the amount paid for, to the pulse, instead
+of waiting for the tablet to notice and send a command. We killed the app in the middle of sales five
+separate times — the fuel still stopped in the right place every time, and when the app came back it
+picked the sale up from the board's own count rather than its own stale one. At the 7h gate the same
+test gave away about 1.5 L of free fuel; tonight it gave away none.
+
+The clearest evidence is the arithmetic for the whole evening. The board's own meter counted 250.74 L
+across eleven sales; the tablet's sales records add up to 249.29 L. The 1.45 L difference is one known
+incident, already written into the fuel log with its size, caused by a flat 9 V battery letting the
+board reboot mid-sale. Nothing else went missing.
+
+One test could not be completed. Unplugging the USB cable mid-sale is supposed to leave the board
+holding the sale so it resumes under its original limit, but the bench battery could not keep the
+board alive, so it rebooted and the session was discarded instead. That moves to Friday's session on
+Olonade's board, which has proper power. Three things to fix came out of the evening, none of them in
+the part being gated.
+
+**Technical notes:**
+- **Setup.** `debugRealHw` build of the Phase 11 branch plus a throwaway trace (`bench/11f-trace`):
+  every serial frame both ways except `PULSE`/`PING`, `HB` only when its count moved, link up/down,
+  and the view model's resume and cut decisions, written to the events table as `TRACE` rows. 7h's
+  `PulseTrace` was not revived — it predates `ARM`/`STOP` and shows none of what 11f checks.
+  **adb over Wi-Fi** made logcat usable during an Arduino run for the first time (the tablet's one
+  USB-C port belongs to the adapter) and gave scripted, millisecond-accurate app kills.
+- **Step 1 — 7g totaliser (closes #19 / the 7g firmware gate).** Count 200 → full power cut → back at
+  200, and the next sale still started from zero litres on the tablet. Confirmed twice more from the
+  Serial Monitor (`BOOT:25074*18`, `BOOT:25522*1E`), checksums verified by hand.
+- **Step 2 — board-owned stop.** Cash-fixed: `RLY:1:200` → `ARM start=0` → `STOP cut=200`. Pre-pay
+  ₦2,000: `RLY:1:229` → `ARM start=300` → `STOP cut=529`. `cut − start == limit` exactly in both, and
+  the app's backstop never fired (`lastPulse` 199 and 227) — the adapter won every race.
+- **Step 3 — app killed mid-sale.** (a) Killed at 1.27 L of a 2 L sale: the board cut itself at
+  `cut=929` (start+200) with the app dead; the relaunched app read `SES?` → `STOP` and closed the sale
+  at 2.00 L. (b) Killed at 2.7 L of a 10 L sale: the dead-man watchdog cut at 3.38 L, `SES?` returned
+  `ARM start=929` (HELD), the app resumed, and the sale ended at `cut=1929` — the original limit, no
+  second allowance. The 3.4 L that flowed while the app was dead was **counted**, because the session
+  start belongs to the adapter.
+- **Step 4 — #36.** One 20 L sale, three kill/relaunch cycles: `ARM start=1929` identical all four
+  times, final `STOP cut=3929`. The app's own checkpoints were 152, 418 and 711 — stale each time, and
+  overridden by the adapter each time. 7h measured this drifting 2389 → 2391 → 2414 → 2436 → 2456.
+- **Step 5 — partial.** `LINK DOWN` at 4251, `RES:<tag>` on link return, `ERR:NOSESSION`, then the app
+  re-armed for the remainder (`RLY:1:678`, new tag) and the sale still ended at exactly 1000 pulses.
+  The board had rebooted: it kept counting 145 pulses (2.9 s) after the unplug, tripped its watchdog
+  and committed 4396 — then a nearly flat 9 V PP3 could not hold the rail. **1.45 L flowed uncounted**,
+  recorded as `ADAPTER_SESSION_LOST` with `pulses=322`. Re-run on the Mega with
+  `ENABLE_POWER_FAIL_SAVE = true`, where §6.4's restore rule should resume it.
+- **Step 6 — bad frames.** `RLY:1*4C` → `ERR:CMD*35` and no fuel; limit 0 → `ERR:CMD`; bad checksum →
+  `ERR:CSUM`; `SES?` after a reset → `ERR:NOSESSION`; control `RLY:1:500:6*4F` → `ARM:6:25522`, relay
+  on. **The watchdog was measured properly for the first time: 149 pulses at 50 pps = 2.98 s** against
+  its 3 s spec. An earlier run that looked like a watchdog failure was a same-tag re-send, which is a
+  resume by design and reseeds the clock — worth remembering before calling it a bug.
+- **Step 7 — fill-up ceiling.** With auto-pulse a fill-up never idles, so it ran to the 200 L backstop:
+  `ARM start=5074` → `STOP cut=25074`, `FILLUP_CEILING_REACHED`, sale recorded 200.00 L. The
+  nozzle-idle shutoff is therefore **still unexercised on hardware** — Friday, with a real signal.
+- **Step 8 — coast = 0** on every sale (synthetic pulses stop with the relay). The real figure needs
+  the meter.
+- **Accounting.** Board totaliser 250.74 L vs eleven recorded sales 249.29 L; difference 1.45 L = the
+  step 5 incident, which has its own event row. This is the property the 14-day run rests on.
+- **Finding — DTR.** The Arduino IDE's Serial Monitor resets the Uno when it opens (`BOOT` every
+  time); Android's driver does **not**, which is why the app could be killed and relaunched five times
+  without losing the adapter's session. Useful and non-obvious: an app restart in production keeps the
+  session, while a laptop plugged in for diagnostics destroys it.
+- **Findings raised:** **#54** (a completed sale leaves its pulse collector subscribed — surfaced when
+  a USB attach relaunched the activity mid-sale and a second view model appeared; harmless tonight
+  because the session tag is authoritative, but two collectors ran), **#55** (every port open
+  re-delivers bytes: a 30-frame `ARM` burst, glued frames like `ARM:…*5C:2201*31`, repeated malformed
+  copies — benign because every frame carries a cumulative, but a buffer purge on open would end it),
+  **#56** (the adapter must run on mains or UPS, never a battery).
+
+**Next:**
+Friday 2026-09-25 on Olonade's Mega: power-sense pin and hold-up, `ENABLE_POWER_FAIL_SAVE = true`, the
+deferred step 5, nozzle-idle, and the real coast figure. Then merge Phase 11 (app + firmware + 7g's
+totaliser) to `main`.
