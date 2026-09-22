@@ -1,14 +1,16 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22 (**Phase 11a done: the serial protocol revision is confirmed**)
+## Current status — 2026-09-22 (**Phase 11b done: the firmware owns the cutoff**)
 
-**`main` = `origin/main`, green (534 JVM tests).** Phase 11 is under way on
-`feature/phase-11-adapter-cutoff`: **11a is done** — [`docs/serial-protocol.md`](../serial-protocol.md),
-confirmed by the user, is the spec for the adapter owning the cutoff. No code yet.
+**`main` = `origin/main`, green (534 JVM tests).** Phase 11 on `feature/phase-11-adapter-cutoff`:
+**11a** (spec, [`docs/serial-protocol.md`](../serial-protocol.md)) and **11b** (firmware, `5e073f6`)
+are done. The firmware compiles clean for the Uno and the Mega and passes a new host-side test;
+it has **not** been flashed — and it must not be flashed on a rig used with a pre-Phase-11 app,
+which it refuses (no fuel, by design).
 
-**Next session starts at 11b (firmware), awaiting an explicit go.** Olonade's Mega rig has the
-power-sense circuit; one more session on it on **Friday 2026-09-25**, before the 14-day run, switches
-on `ENABLE_POWER_FAIL_SAVE`. The long pole to live money is unchanged: the K-factor (#22, Kelvin).
+**Next session starts at 11c (app: parser + frames), awaiting an explicit go.** Olonade's Mega
+session on **Friday 2026-09-25** switches on `ENABLE_POWER_FAIL_SAVE`. The long pole to live money is
+unchanged: the K-factor (#22, Kelvin).
 
 ---
 
@@ -2431,3 +2433,46 @@ user confirmed the whole spec.
 **Next:**
 11b — the firmware, on the 7g sketch (`hardware/` files only from
 `origin/feature/phase-7g-eeprom-totaliser`). Awaiting go.
+
+### Phase 11b — firmware: the adapter owns the cutoff
+**Date:** 2026-09-22
+**Status:** done (compiled and host-tested; not yet flashed — the bench gate is 11f)
+**Commit(s):** 5e073f6 (firmware + README + host test), d02b447 (LF for shell scripts)
+
+**Summary (plain language):**
+The pump's adapter board now stops the fuel by itself. The tablet tells it "open, and stop after N
+pulses"; the board counts and cuts the relay on exactly the Nth pulse, then tells the tablet. It
+remembers each sale (a trip meter), so a tablet crash or a dropped cable can pause a sale but never
+give out more than was paid for. On Olonade's board, with the power-cut circuit switched on, a sale
+can even survive the board losing power — but only when the board can prove its count is current.
+There was no board to hand, so we built a small test that runs the real firmware on the computer
+and checked every case in the spec against it.
+
+**Technical notes:**
+- Base: the 7g sketch, `hardware/` only (`git checkout origin/feature/phase-7g-eeprom-totaliser --
+  hardware/`), so the EEPROM totaliser (#19/#24) now rides in this branch and its gate is 11f step 1.
+- Built to `docs/serial-protocol.md`: tagged `RLY:1:<limit>:<tag>` (strict decimal parse, limit
+  1…1 000 000, tag ≠ 0, else `ERR:CMD`); same-tag `RLY:1` = `RES`; `RLY:0` and the watchdog hold
+  the session; `RES`/`SES?`; `ARM`/`STOP` two-number frames; `ERR:NOSESSION`.
+- The cut is in `countPulseLocked()`, which both the pulse ISR and the demo injectors call, so demo
+  pulses are cut like meter pulses (spec §6.7). `STOP` and its EEPROM commit run from `loop()`;
+  `serviceStop()` runs **before** `handleSerial()` so a new arm cannot clear an unreported stop.
+- EEPROM record 25 B (`tag`, `start`, `limit`, `state` added), 40 slots, `SLOT_MAGIC` 0x5350 →
+  0x5351 (a board's 7g totaliser restarts from zero once — before the run, not during). With the
+  flag on: commit on every relay transition; restore only `HELD`/`DONE` records.
+- **Power-fail hold-up is now ~85 ms worst case** (25 bytes × ~3.4 ms), up from ~40 ms for 7g's
+  12-byte record. Olonade's capacitor must cover it — added to the Friday checks.
+- `hardware/host_test/`: compiles the real `.ino` against Arduino/Serial/EEPROM stubs, runs 7
+  scenarios (flag off and forced on, including a simulated power fail, a no-save power loss, a
+  40-slot ring wrap and a legacy 7g record) and diffs against `expected.txt`. The expected output
+  was checked by hand against the spec; changing the cutoff's `>=` to `>` makes it fail. No host
+  compiler was installed, so it was run with `ziglang` from pip (scratch install, not system-wide).
+- `arduino-cli` (bundled with the Arduino IDE) compiles it clean for `arduino:avr:uno` (8 158 B)
+  and `arduino:avr:mega` (9 470 B), zero warnings from the sketch.
+- `.gitattributes`: `*.sh text eol=lf` — `core.autocrlf=true` would otherwise break `run.sh`.
+- `hardware/README.md` rewritten for revision 2 (protocol table, checksums, record, restore rule,
+  Phase 11 checklist, and a warning that this firmware refuses a pre-Phase-11 app).
+
+**Next:**
+11c — the app's parser and frames (`SerialFrame.Arm`/`Stop` with two numbers, the outbound
+`RLY:1:<n>:<t>` / `RES` / `SES?` writers, tests against the spec's checksums). Awaiting go.

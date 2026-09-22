@@ -4,7 +4,9 @@ _Planned 2026-09-22. **11a DONE 2026-09-22** — [`docs/serial-protocol.md`](../
 confirmed by the user. It departs from the draft below in three places, and the spec wins: the
 session is **tagged by the app** (`RLY:1:<limit>:<tag>`, `ARM:<tag>:<start>`, `STOP:<tag>:<cut>`,
 `RES:<tag>`); **#38 is closed as superseded**, not folded in; and the session is **saved to EEPROM
-behind `ENABLE_POWER_FAIL_SAVE`** (off until Olonade's Friday session). **Next: 11b, awaiting go.**_
+behind `ENABLE_POWER_FAIL_SAVE`** (off until Olonade's Friday session). **11b DONE 2026-09-22**
+(`5e073f6`, compiled for Uno + Mega, `hardware/host_test/` passes; not flashed). **Next: 11c,
+awaiting go.**_
 
 This is a plan, not a log. Completed sub-deliverables get logged in `PROJECT_LOG.md` as usual.
 
@@ -154,7 +156,8 @@ afterwards.
    flows after the cut (spec §6.5). TEST-01 will want its size.
 
 **Then, on Olonade's Mega (Friday, the last session before the 14-day run):** confirm his
-power-sense line is on pin 3 and goes high on power loss; flip `ENABLE_POWER_FAIL_SAVE` to `true`;
+power-sense line is on pin 3 and goes high on power loss, and that his capacitor holds the rail for
+**~85 ms** (the 25-byte record's worst-case commit); flip `ENABLE_POWER_FAIL_SAVE` to `true`;
 cut the power mid-sale and check the sale comes back with its exact count and still stops at its
 **original** limit; then cut it with the sense line disconnected and check the session is
 **discarded** rather than resumed (spec §6.4). The board's 7g totaliser restarts from zero once on
