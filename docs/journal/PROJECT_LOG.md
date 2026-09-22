@@ -11,9 +11,12 @@ and the 1.45 L difference is a single recorded `ADAPTER_SESSION_LOST`.
 
 **Step 5 (USB unplug/replug) is partial and moves to Friday's Mega** — a flat 9 V bench battery let
 the board reboot, so `RES` was answered `ERR:NOSESSION`. The app stayed safe, but the
-resume-under-the-original-limit path is still untested. **Three findings to act on:** a stale
-dispense collector outlives a completed sale (**#54**), the USB layer re-delivers bytes on every
-port open (**#55**), and the adapter must never run on a battery (**#56**).
+resume-under-the-original-limit path is still untested. **Three findings came out of it: #54 is already fixed**
+(same night, `6f2a7ac` — `singleTask` plus a `takeWhile`-ended collector, and the dispense loops'
+`finally { relay.stopFuelFlow() }` wrapped in `NonCancellable`; 603 tests green, one device check
+owed Friday). **Open: #55** (the USB layer re-delivers bytes on every port open — benign, and the
+mechanism is not understood, so Friday gets a diagnostic rather than a guessed fix) and **#56** (the
+adapter must never run on a battery).
 
 **Next: Friday 2026-09-25 on Olonade's Mega** — power-sense, `ENABLE_POWER_FAIL_SAVE = true`, the
 deferred step 5, nozzle-idle and the real coast figure. Then merge Phase 11 to `main`. The long pole
