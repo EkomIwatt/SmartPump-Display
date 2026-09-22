@@ -11,6 +11,8 @@ Before responding to the user's first request, read these in order to ground you
 5. `docs/design-system.md` — visual language (colors, typography, components, layout rules).
 6. `docs/journal/OPEN_QUESTIONS.md` — open decisions.
 
+`docs/journal/POST_V1.md` holds improvements that **do not block V1** (created 2026-09-22). No need to read it at session start — but **V1 is the priority**: new non-blocking work goes there, not onto `TODO.md`.
+
 Skim the screenshots in `docs/Strict design screens/` when the work touches a specific flow.
 
 Do not summarise these docs back to the user unsolicited — just load them as context.

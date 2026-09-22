@@ -6,6 +6,8 @@ real paid transaction against production end to end, so **section 4 is empty of 
 V1** — nothing on the API line is waiting on the backend any more. What is left there is ours to
 build (**#8**) and the backend asks that remain are improvements, not gates._
 
+**What is *not* V1 lives in [`POST_V1.md`](POST_V1.md)** (created 2026-09-22) — non-blocking improvements, parked features and backend asks. Nothing there belongs in this file.
+
 **This file is a view, not a second source of truth.** Every item points at its real entry in
 [`TODO.md`](TODO.md) (work items, `#n`) or [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) (decisions,
 `OQ #n`). When something moves, update it **there** and adjust the one-line status here. Do not
