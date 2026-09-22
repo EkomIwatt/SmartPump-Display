@@ -139,6 +139,9 @@ checksums. Tests against the worked checksums in `serial-protocol.md`.
 
 ### 11f — the bench gate (the user, on the rig)
 
+**Run it from [`11F_RUN_SHEET.md`](11F_RUN_SHEET.md)** — these steps made concrete for the Uno rig
+(auto-pulse, external power, trace build `bench/11f-trace`, adb over Wi-Fi).
+
 One sitting, the Arduino rig, **pin 2 tied to 5 V** (a floating pin counts noise as fuel). logcat
 is unusable during an Arduino run (one USB-C port), so bring back the 7h on-screen trace by
 reverting `3631b38` on a throwaway build, and read results off the screen / the tablet's DB
