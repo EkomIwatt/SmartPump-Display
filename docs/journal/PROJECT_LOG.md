@@ -1,6 +1,25 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22 (**Phase 10 is merged to `main`**)
+## Current status — 2026-09-22, session end (**V1 is the priority; the board is split; next is #R8**)
+
+**`main` = `origin/main`, green (525 JVM tests).** Phase 10 merged this morning (`2d7c06d`). Since then:
+
+- **#R11 built, not merged** — the boss chose option (b): the timed-out pre-pay card clears itself
+  after two minutes. On `feature/r11-timed-out-card` (`d0181cc`, pushed), installed on the SM-T220;
+  the device check (a pre-pay left to expire, ~22 min in all) is deferred to a later sitting, then
+  merge.
+- **The board is split at the user's direction:** `TODO.md` is the road to V1 and opens with
+  "Start here — the V1 path"; **19 non-blocking entries moved to the new `POST_V1.md`** (including
+  #R14, #R15, #51, #R3, #52, #50 and every Balancee/boss improvement ask), each leaving a pointer.
+- **Decided:** #R8's pre-pay half is V1; #51 is post-V1.
+
+**Next session starts at #R8** — the pre-pay QR's Cancel writes the same "cancelled"
+`PAYMENT_ABANDONED` row the fill-up's has since #R13. Then the V1 path in order; the long pole is
+still the K-factor (#22, Kelvin).
+
+---
+
+## Previous status — 2026-09-22 (**Phase 10 is merged to `main`**)
 
 **`main` = `origin/main` = `2d7c06d`.** The digital payment flows — pre-pay and fill-up against the
 production backend, with status polling and the dispense upload — are on `main`, after the 10g gate
@@ -2916,3 +2935,38 @@ missed, all fixed and re-checked on the tablet before merging.
 **Next:**
 TODO's "After the merge" list, one small branch each. Send #R11/#R14 to the boss and the Balancee
 asks. Chase #22 (the K-factor) — it is the long pole to live money.
+
+---
+
+### Post-merge — #R11 built, and the board split into V1 and post-V1
+**Date:** 2026-09-22
+**Status:** partial — #R11 built and unit-tested, device check and merge pending; board split done
+**Commit(s):** #R11 on `feature/r11-timed-out-card`: `d0181cc` (the board commit on that branch was
+reverted, `3695fc9`, so the branch carries code only); on `main`: `22a17e7`, `13bbb20`, this commit.
+
+**Summary (plain language):**
+The boss decided that when a customer walks away from a pre-pay QR, the "stopped waiting" message
+should show for two minutes and then the pump should reset itself; that is built and waiting for a
+check on the tablet. The work list was also reorganised so that what stands between the project and
+V1 is on one page and everything that can wait until after V1 is on another, and the next piece of
+work — making a cancelled pre-pay leave a record, as a cancelled fill-up now does — was chosen as V1.
+
+**Technical notes:**
+- **#R11 (`d0181cc`).** `TransactionState.Error.autoDismissAtEpochMs` (defaulted, so no migration)
+  set only on the window-elapsed pre-pay card; `scheduleErrorAutoDismiss` counts ticks and checks the
+  wall clock (#R10's lesson — `delay` stalls while the tablet sleeps), acts only if its own card is
+  still on screen, and is re-armed by boot resume against the persisted deadline. Kept out of
+  `cancelInFlightJobs` because it ends by calling `onCancel` (#R9). Five tests; the three asserting
+  behaviour fail against the pre-fix view model. 530 JVM tests green on the branch.
+- **#R15 raised by the user** (the 20-minute QR window): boarded in `POST_V1.md` as a Balancee ask —
+  the window is the server's `expiresAt`, and an in-app cap would re-create #43's late-payer hazard.
+- **The split.** `POST_V1.md` created; entries moved whole with their numbers, each leaving a `[→]`
+  pointer; every removed line checked present in the new file. `TODO.md` opens with the V1 path;
+  `V1_BLOCKERS.md` and `CLAUDE.md` point at the new file. A feedback memory records the rule.
+- **Decided by the user:** #R8 (pre-pay half) → V1; #51 → post-V1.
+- Housekeeping: `feature/phase-10-payments` still exists locally and on the remote (merged; delete
+  when wanted). The tablet is running the #R11 branch build.
+
+**Next:**
+#R8 on a small branch off `main`. #R11's device check and merge when there is a 25-minute window.
+Then the V1 path: Balancee about the orphan ₦149, Kelvin for the K-factor, Olonade.

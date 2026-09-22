@@ -7,8 +7,8 @@ Keep it current: check items off, add follow-ups as they surface, move finished 
 
 _Last updated: **2026-09-22**. **V1 is the priority.** Phase 10 is merged (`main` = `2d7c06d` + docs).
 **Non-blocking improvements now live in [`POST_V1.md`](POST_V1.md)**, not here — 18 entries moved
-there today, each leaving a `[→]` pointer. New non-blocking work goes straight there. This board is
-the road to V1._
+there today (19 with #51), each leaving a `[→]` pointer. New non-blocking work goes straight there.
+This board is the road to V1. **Next session: start at #R8** (V1 path, item 2)._
 
 ### ⛳ Start here — the V1 path
 
@@ -20,8 +20,9 @@ each entry.
 1. [ ] **#R11 — finish it.** Built on `feature/r11-timed-out-card` (`d0181cc`), installed on the
    tablet; needs one device check (a pre-pay left to expire: ~20 min, then the card clears itself 2
    min later), then merge. See 4a below.
-2. [ ] **Your call — #R8 (pre-pay half) and #51:** V1 or post-V1? Both are below with a
-   recommendation. Whatever is not V1 moves to `POST_V1.md`.
+2. [ ] **#R8 (pre-pay half) — next, in V1 by the user's decision (2026-09-22).** Make the pre-pay
+   QR's Cancel write the same "cancelled" `PAYMENT_ABANDONED` row the fill-up cancel writes since
+   #R13. Small branch off `main`. See item 5 below. (#51 went to `POST_V1.md` the same day.)
 3. [ ] **Tell Balancee about the orphan ₦149 sale** (item 10) — real money, unreconciled.
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
@@ -193,19 +194,14 @@ each entry.
    loses that. Options are a timed auto-dismiss back to Idle, or leaving it and accepting a tap.
    Ask the boss; it is a forecourt-behaviour question, not a code one.
 
-5. [ ] **V1 or post-V1? — recommendation: V1** (about 30 minutes; a money-path audit gap, not litres). **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** **Fill-up half DONE in #R13
+5. [ ] **V1 — by the user's decision, 2026-09-22. NEXT SESSION STARTS HERE.** **#R8 — cancelling a live QR writes no `PAYMENT_ABANDONED`.** **Fill-up half DONE in #R13
    (`2389d36`)** — what remains is the pre-pay cancel. Only the two expiry timers do.
    The backend does not expire transactions, so the checkout URL stays payable after a cancel — the
    exact scenario the event type's own doc describes. Small and additive: the row already has a
    writer (`recordAbandonedPayment`), it just needs calling from the cancel path with wording that
    says *cancelled* rather than *timed out*. **Do #R8 before #51** — it closes a real gap in the
    audit trail, where #51 only improves an existing one.
-6. [ ] **V1 or post-V1? — recommendation: post-V1** (uploads are not what the parallel run measures, and a revoked pump's digital sales fail visibly at authorise anyway). **#51 — a permanently-401 pump retries forever with nothing in the log.**
-   `DISPENSE_UPLOAD_FAILED` is written only on a TERMINAL refusal, so a pump whose credentials are
-   genuinely revoked keeps a full queue and says nothing to anyone. `NotActivated` has had this
-   shape since 10f; the R1 fix widened it rather than creating it. **Wants a "this queue has been
-   stuck for N runs" event, not a change to the taxonomy** — the taxonomy is right and changing it
-   is how R1 happened.
+6. [→] **#51 — a permanently-401 pump retries forever with nothing in the log.** — moved to [`POST_V1.md`](POST_V1.md) 2026-09-22: post-V1 by the user's decision.
 7. [→] **#R3 — `KEEP` discards an upload request for a sale completing during an in-flight drain.** — moved to [`POST_V1.md`](POST_V1.md) 2026-09-22: not V1-blocking.
 8. [→] **#52 — `runCatching` on a coroutine path swallows cancellation.** — moved to [`POST_V1.md`](POST_V1.md) 2026-09-22: not V1-blocking.
 9. [→] **#50 — three screens read `uiState.priceKoboPerLitre` while holding a struck figure.** — moved to [`POST_V1.md`](POST_V1.md) 2026-09-22: not V1-blocking.

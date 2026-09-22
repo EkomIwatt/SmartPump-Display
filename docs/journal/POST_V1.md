@@ -107,6 +107,13 @@ Each is its own small branch off `main` when its time comes. None is a defect to
   - **Do not build speculatively.** It is cheap, but which of the three forms dev answers with
     decides whether it is needed at all.
 
+6. [ ] **Post-V1 by the user's decision, 2026-09-22** (uploads are not what the parallel run measures, and a revoked pump's digital sales fail visibly at authorise anyway). **#51 — a permanently-401 pump retries forever with nothing in the log.**
+   `DISPENSE_UPLOAD_FAILED` is written only on a TERMINAL refusal, so a pump whose credentials are
+   genuinely revoked keeps a full queue and says nothing to anyone. `NotActivated` has had this
+   shape since 10f; the R1 fix widened it rather than creating it. **Wants a "this queue has been
+   stuck for N runs" event, not a change to the taxonomy** — the taxonomy is right and changing it
+   is how R1 happened.
+
 ## Balancee and boss asks — improvements, send together
 
 None of these gates V1: the payment lifecycle was proven against production by observation (#32,
