@@ -32,17 +32,17 @@ not have to transcribe anything the screen shows.
 
 ## Laptop link — adb over Wi-Fi (set up 2026-09-22)
 
-The tablet's USB-C port belongs to the Uno during the run, so adb goes over Wi-Fi (tablet
-`192.168.100.42`, laptop on the same `192.168.100.x`). Set with `adb tcpip 5555` + `adb connect`;
-it lasts until the tablet reboots or changes network — if `adb devices` loses it, re-plug the
-tablet into the laptop and run `adb tcpip 5555` again, then `adb connect 192.168.100.42:5555`.
+The tablet's USB-C port belongs to the Uno during the run, so adb goes over Wi-Fi. **The address
+changes with the network** — it was `192.168.100.42:5555`, and after the tablet moved networks it
+is `10.48.35.57:39517`. Always read the current one out of `adb devices`; if it is gone, re-plug
+the tablet into the laptop, `adb tcpip 5555`, then `adb connect <tablet ip>:5555`.
 
 ```
 # live trace — leave running in its own terminal (logcat IS usable this time)
-adb -s 192.168.100.42:5555 logcat -s BenchTrace
+adb -s 10.48.35.57:39517 logcat -s BenchTrace
 
 # the instant app kill for steps 3 and 4
-adb -s 192.168.100.42:5555 shell am force-stop app.balancee.smartpump.display.realhw
+adb -s 10.48.35.57:39517 shell am force-stop app.balancee.smartpump.display.realhw
 ```
 
 Force-stop kills the process, so no PING → the board's 3 s watchdog; relaunch from the launcher.
