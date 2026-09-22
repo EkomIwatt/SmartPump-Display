@@ -1,16 +1,17 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22 (**Phase 11c done: the app speaks the new frames**)
+## Current status — 2026-09-22 (**Phase 11d done: the app runs on the adapter's session**)
 
 **`main` = `origin/main`, green (534 JVM tests).** Phase 11 on `feature/phase-11-adapter-cutoff`
-(local, not pushed), green at **554**: **11a** spec ([`docs/serial-protocol.md`](../serial-protocol.md)),
-**11b** firmware (`5e073f6`, compiled + host-tested, **not flashed**), **11c** app parser + outbound
-frames (`f0233e5`). Nothing yet *uses* the new frames — the app still sends a bare `RLY:1`, which
-the new firmware refuses, so do not flash a rig used with this build until 11d/11e land.
+(local, not pushed), green at **585**: 11a spec, 11b firmware (`5e073f6`, **not flashed**), 11c
+parser (`f0233e5`), **11d** relay controller + pulse source + mocks (`8bf9245`). The app now arms
+the adapter with a limit and counts `count − start`; what it does not yet do is *act* on the
+adapter's `STOP` / lost session or resume a held session on boot — that is 11e.
 
-**Next session starts at 11d (relay controller + pulse source), awaiting an explicit go.** Olonade's
-Mega session on **Friday 2026-09-25** switches on `ENABLE_POWER_FAIL_SAVE`. The long pole to live
-money is unchanged: the K-factor (#22, Kelvin).
+**Next session starts at 11e (view model), awaiting an explicit go.** New on the board: **#53**, a
+pre-existing floating-point floor in `DeviceConfig.litresCutoff` that short-changes some cash
+sales by 0.01 L. Olonade's Mega session on **Friday 2026-09-25**. The long pole to live money is
+unchanged: the K-factor (#22, Kelvin).
 
 ---
 
@@ -2509,3 +2510,53 @@ conversation.
 11d — `RelayController.startFuelFlow(limitPulses, tag)`, the reconnect sends `RES`, the pulse
 source counts `count − start` from `ARM`, `STOP` surfaces to the VM, and the mocks emulate the
 board. Awaiting go.
+
+### Phase 11d — relay controller + pulse source run on the adapter's session
+**Date:** 2026-09-22
+**Status:** done
+**Commit(s):** 8bf9245
+
+**Summary (plain language):**
+The tablet now opens the pump only under a limit the adapter enforces, and waits for the adapter
+to confirm before believing fuel is flowing. It counts each sale from the adapter's own trip meter,
+which fixes the small under-count on every restart (#36). If the cable blips, the adapter's watchdog
+trips or the adapter reboots, the tablet asks it to carry on with the same sale — never to start a
+fresh one. The debug build's pretend pump now behaves like the real one, so testing on the tablet
+without an Arduino follows the same path.
+
+**Technical notes:**
+- `RelayController`: `startFuelFlow(limitPulses, tag)`, `resumeFuelFlow(tag)`, `querySession()`,
+  all returning `SessionReply` (`Armed` / `Stopped` / `NoSession` / `Refused` / `NoReply`), plus
+  `session` (the acknowledged tag + start). Domain helpers in `AdapterSession.kt`.
+- `UsbSerialRelayController`: request/reply with subscribe-before-write; a lost `ARM` is re-sent
+  with the **same** frame (3 × 500 ms) then the relay is forced off. Automatic `RES` on link-up,
+  `ERR:WDOG` (D5) and `BOOT` — and only for a sale still active: the automatic path does not claim
+  the sale, so a stop that lands in between wins (a race caught while writing it).
+- `UsbSerialPulseSource`: sale pulses = `count − start`; `PulseAccumulator` (and its first-frame-
+  counts-zero branch, the #36 root cause) deleted. Emits `PulseMessage.Stopped` / `SessionLost`.
+- A `SerialLink` interface now fronts `UsbSerialConnection`, so the controller and pulse source
+  are unit-tested against a fake link instead of a `UsbManager`.
+- `MockRelayController` is the simulated board (lifetime count, tagged session, cut at the limit);
+  `MockPulseSource` drives each pulse through it.
+- VM: the three relay-open sites arm for **what is left** of the sale (`total − pulseBaseline`, so
+  a resumed sale is never handed its full allowance again) with a fresh tag. `Stopped` /
+  `SessionLost` are explicit no-ops until 11e; meanwhile the adapter's cut still completes a fixed
+  sale because its final `PULSE` frame carries the limit.
+- **Litres → pulses needs an epsilon.** `floor(1.15 × 100.0)` is 114 — as are 137 of the 2 000
+  figures from 0.01 L to 20 L. The adapter would stop a pulse short and the sale would never reach
+  its cutoff. `litresToLimitPulses` adds 1e-6 of a pulse; a test sweeps all 2 000.
+- **Found, not fixed — #53.** `DeviceConfig.litresCutoff` has the same floating-point floor, and it
+  is live today: ₦1,150 cash at ₦1,000/L pours and records 1.14 L. It also feeds `expectedLitres`,
+  so it touches the payment path and wants its own change. Boarded.
+- **Test gotcha:** `advanceUntilIdle()` does not run `backgroundScope` work in this
+  kotlinx-coroutines-test, so tests of the controller's listeners must use `runCurrent()`. Before
+  that was found, two "nothing is resumed" tests were passing because nothing ran at all.
+- 37 new tests, **585 green**, `assembleDebug` builds (Hilt resolves `SerialLink`). Mutations
+  caught: dropping the epsilon, dropping the stop check in the retry loop, and counting `cumulative`
+  instead of `count − start`.
+
+**Next:**
+11e — the view model acts on the session: `Stopped` completes a sale, `SessionLost` re-arms for
+what is left, a refused/unacknowledged arm leaves the dispensing screen, the backstop compares
+pulses with the limit (an event row if it ever fires first), and boot resume persists the tag and
+uses `SES?` / `RES` instead of arming a new session. Awaiting go.

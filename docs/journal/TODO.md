@@ -26,15 +26,16 @@ each entry.
 3. [x] **Tell Balancee about the orphan ₦149 sale** (item 10) — **told by the user 2026-09-22.**
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
-5. [~] **Phase 11 — the adapter owns the cutoff. 11a–11c DONE 2026-09-22; NEXT: 11d (relay
-   controller + pulse source), awaiting go.** Firmware compiled + host-tested, **not flashed** — it refuses a
+5. [~] **Phase 11 — the adapter owns the cutoff. 11a–11d DONE 2026-09-22; NEXT: 11e (view
+   model), awaiting go.** Firmware compiled + host-tested, **not flashed** — it refuses a
    pre-Phase-11 app (no fuel), so do not flash a rig still used with one. Branch `feature/phase-11-adapter-cutoff`. Spec confirmed:
    [`docs/serial-protocol.md`](../serial-protocol.md). OQ #26 agreed by Olonade and the boss; the
    user writes the Arduino code. Plan: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md). **Olonade's Mega has
    the power-sense circuit** — one more session on it on **Friday 2026-09-25**, before the 14-day
    run, to switch on `ENABLE_POWER_FAIL_SAVE`. Retires **#36**, OQ #24/#26 and the **7g firmware gate (#19/#24)**, and
    possibly **#38**. OQ #23 (`CAL`) stays open.
-6. [ ] **Accuracy before the run:** ~~**#36**~~ (folded into Phase 11), and the fact that no build
+6. [ ] **Accuracy before the run:** ~~**#36**~~ (folded into Phase 11, fixed in 11d), **#53**
+   (cash cutoff short by 0.01 L on some amounts), and the fact that no build
    type is yet both real hardware and production (the "no build type" entry under "Open items carried from finished phases").
 7. [ ] **Robustness:** **#42** (a RuntimeException in the OkHttp chain kills the process), **#15**'s
    enforcement half (clock skew), **#44**.
@@ -161,6 +162,20 @@ _Collected 2026-09-22 when the finished phase sections moved to [`TODO_DONE.md`]
   is three missed pings; two would still tolerate a hiccup and would **halve** the give-away
   measured in step 8. One-line firmware change, so it belongs with **#19**'s firmware work rather
   than on its own. Not a substitute for **OQ #26** — see there.
+
+### from Phase 11
+
+- [ ] **53. `DeviceConfig.litresCutoff` floors in floating point and short-changes some cash sales.**
+  Found 2026-09-22 (11d). `floor((amountKobo / koboPerLitre) × 100) / 100` in `Double`:
+  ₦1,150 at ₦1,000/L is `1.15 × 100 = 114.99999999999999`, so the sale pours **and records**
+  1.14 L. At ₦1,000/L that is 137 of the 2 000 amounts from ₦10 to ₦20,000. Customer-unfavourable
+  by 0.01 L, so it is a real short-change, not a rounding curiosity.
+  - **Fix shape:** both are whole kobo (`Long`), so `(amountKobo * 100 / koboPerLitre) / 100.0` is
+    exact — integer division floors. Needs a sweep test like `AdapterSessionTest`'s.
+  - **Why it was not fixed in 11d:** it also feeds `expectedLitres` (`litresFor`, the pre-10d resume
+    fallback), and `/authorise` checks `amount == expectedLitres × pricePerUnit` exactly — so the
+    change touches the payment path and wants its own test pass over that. The digital quote itself
+    (`SaleQuote`) is exact `BigDecimal` and is not affected.
 
 ### from Phase 10
 

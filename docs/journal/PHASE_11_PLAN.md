@@ -6,7 +6,8 @@ session is **tagged by the app** (`RLY:1:<limit>:<tag>`, `ARM:<tag>:<start>`, `S
 `RES:<tag>`); **#38 is closed as superseded**, not folded in; and the session is **saved to EEPROM
 behind `ENABLE_POWER_FAIL_SAVE`** (off until Olonade's Friday session). **11b DONE 2026-09-22**
 (`5e073f6`, compiled for Uno + Mega, `hardware/host_test/` passes; not flashed). **11c DONE
-2026-09-22** (`f0233e5`, 554 green). **Next: 11d, awaiting go.**_
+2026-09-22** (`f0233e5`, 554 green). **11d DONE 2026-09-22** (`8bf9245`, 585 green — see the log for
+what moved from 11d's list into 11e). **Next: 11e, awaiting go.**_
 
 This is a plan, not a log. Completed sub-deliverables get logged in `PROJECT_LOG.md` as usual.
 
