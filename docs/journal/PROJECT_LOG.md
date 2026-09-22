@@ -1,6 +1,15 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22, session end (**V1 is the priority; the board is split; next is #R8**)
+## Current status — 2026-09-22, later (**#R11 merged; next is #R8**)
+
+**`main` green (530 JVM tests), one merge ahead of `origin/main`.** #R11 passed its device check on
+the SM-T220 (the timed-out pre-pay card cleared itself two minutes after expiry) and is merged
+(`08adf2f`). **Next is #R8** — the pre-pay QR's Cancel writes the same "cancelled"
+`PAYMENT_ABANDONED` row the fill-up's has since #R13.
+
+---
+
+## Previous status — 2026-09-22, session end (**V1 is the priority; the board is split; next is #R8**)
 
 **`main` = `origin/main`, green (525 JVM tests).** Phase 10 merged this morning (`2d7c06d`). Since then:
 
@@ -2970,3 +2979,24 @@ work — making a cancelled pre-pay leave a record, as a cancelled fill-up now d
 **Next:**
 #R8 on a small branch off `main`. #R11's device check and merge when there is a 25-minute window.
 Then the V1 path: Balancee about the orphan ₦149, Kelvin for the K-factor, Olonade.
+
+### #R11 — the timed-out pre-pay card clears itself (merged)
+**Date:** 2026-09-22
+**Status:** done
+**Commit(s):** `d0181cc` on `feature/r11-timed-out-card`; merged to `main` as `08adf2f`
+
+**Summary (plain language):**
+When a customer walks away from a pre-pay QR without paying, the pump now shows the "stopped waiting
+for the payment" message for two minutes and then resets itself to the welcome screen, so the next
+customer does not arrive to an error. This was checked on the real tablet and is now in the main
+version of the app.
+
+**Technical notes:**
+- Device check run by the user on the SM-T220: pre-pay left to expire, timed-out card shown, returned
+  to Idle on its own two minutes later.
+- Merge carried code only (the branch's board commit had been reverted); no conflicts. 530 JVM
+  tests green — 525 plus #R11's five.
+- The branch can be deleted locally and on the remote once `main` is pushed.
+
+**Next:**
+#R8 (pre-pay half) on a small branch off `main`. Then the V1 path in `TODO.md`.

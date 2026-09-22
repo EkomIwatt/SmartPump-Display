@@ -17,10 +17,9 @@ against station stock records, then live money. [`V1_BLOCKERS.md`](V1_BLOCKERS.m
 work by *who is holding it up*; this list is the order to act in. Pointers only — the detail is in
 each entry.
 
-1. [ ] **#R11 — finish it.** Built on `feature/r11-timed-out-card` (`d0181cc`), installed on the
-   tablet; needs one device check (a pre-pay left to expire: ~20 min, then the card clears itself 2
-   min later), then merge. See 4a below.
-2. [ ] **#R8 (pre-pay half) — next, in V1 by the user's decision (2026-09-22).** Make the pre-pay
+1. [x] **#R11 — DONE 2026-09-22.** Device check passed on the tablet (the timed-out card cleared
+   itself two minutes after expiry); merged to `main` (`08adf2f`). See 4a below.
+2. [ ] **#R8 (pre-pay half) — NEXT, in V1 by the user's decision (2026-09-22).** Make the pre-pay
    QR's Cancel write the same "cancelled" `PAYMENT_ABANDONED` row the fill-up cancel writes since
    #R13. Small branch off `main`. See item 5 below. (#51 went to `POST_V1.md` the same day.)
 3. [ ] **Tell Balancee about the orphan ₦149 sale** (item 10) — real money, unreconciled.
@@ -180,7 +179,7 @@ each entry.
 
 4b. [→] **#R14 — a genuine drive-off has no exit.** — moved to [`POST_V1.md`](POST_V1.md) 2026-09-22: not V1-blocking.
 
-4a. [~] **#R11 — DECIDED by the boss 2026-09-22: option (b), two minutes. BUILT on `feature/r11-timed-out-card` (`d0181cc`), installed on the tablet, device check and merge pending.** Original entry: **a timed-out pre-pay sits on an error card until a person taps it.** `ErrorScreen`
+4a. [x] **#R11 — DONE 2026-09-22. Boss chose option (b), two minutes; built (`d0181cc`), device check passed on the SM-T220, merged to `main` (`08adf2f`), 530 tests green.** Original entry: **a timed-out pre-pay sits on an error card until a person taps it.** `ErrorScreen`
    has no auto-dismiss and its button is the only way out (`CustomerStateHost.kt:194`), so an
    unattended pump whose customer walked away stays on "This pump stopped waiting for the payment"
    indefinitely. **Not a lockout** (corrected 2026-09-22): "Start over" is on the customer's screen,
