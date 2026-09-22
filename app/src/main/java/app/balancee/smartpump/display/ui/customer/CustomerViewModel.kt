@@ -96,6 +96,14 @@ import javax.inject.Inject
 private const val PREPAY_EXPIRY_SECONDS = 5 * 60
 private const val FILLUP_DIGITAL_EXPIRY_SECONDS = 5 * 60
 private const val USSD_SMS_TIMEOUT_SECONDS = 5 * 60
+
+/**
+ * How long the timed-out pre-pay card stays before the pump returns to Idle by itself (#R11).
+ * **The boss's decision, 2026-09-22: two minutes.** Long enough for a customer standing at the pump
+ * to read "if you have already paid, please see the attendant"; short enough that an empty forecourt
+ * resets itself. The `PAYMENT_ABANDONED` row keeps a late "I paid" answerable after the card is gone.
+ */
+private const val TIMED_OUT_CARD_MS = 2 * 60 * 1_000L
 private const val FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L
 private const val FILLUP_WATCHDOG_POLL_MS = 500L
 
@@ -168,6 +176,14 @@ class CustomerViewModel @Inject constructor(
     val shareReceipt: Flow<String> = _shareReceipt.receiveAsFlow()
 
     private var paymentJob: Job? = null
+
+    /**
+     * Clears a self-dismissing error card (#R11). Deliberately **not** in [cancelInFlightJobs]: the
+     * timer ends by calling [onCancel], which cancels those jobs, and a job that cancels itself stops
+     * at its next suspension point (#R9). A stale timer is harmless instead — it acts only if the
+     * card it was started for is still the state on screen.
+     */
+    private var errorDismissJob: Job? = null
     private var expiryJob: Job? = null
     private var dispenseJob: Job? = null
     private var fillupWatchdogJob: Job? = null
@@ -391,8 +407,14 @@ class CustomerViewModel @Inject constructor(
             }
 
             is TransactionState.Error -> {
-                if (restored.recoverable) setState(restored)
-                else resetToIdle(clearPulses = true)
+                if (restored.recoverable) {
+                    setState(restored)
+                    // Against the persisted deadline, not a fresh two minutes: a card whose time ran
+                    // out while the tablet was off clears at once (#R11).
+                    scheduleErrorAutoDismiss(restored)
+                } else {
+                    resetToIdle(clearPulses = true)
+                }
             }
 
             is TransactionState.Complete -> {
@@ -1649,7 +1671,42 @@ class CustomerViewModel @Inject constructor(
         if (failed.windowElapsed && awaiting != null) {
             recordAbandonedPayment(failed.transactionRef ?: awaiting.txnId, awaiting.amountKobo)
         }
-        setState(failed.failure.toErrorState())
+        // Only the timed-out card clears itself. Any other failure is something a person may need
+        // to read and act on — a missing price, a refused sale — and the boss's decision was about
+        // the customer who walked away, not about every error.
+        val error = failed.failure.toErrorState().let {
+            if (failed.windowElapsed) {
+                it.copy(autoDismissAtEpochMs = System.currentTimeMillis() + TIMED_OUT_CARD_MS)
+            } else {
+                it
+            }
+        }
+        setState(error)
+        scheduleErrorAutoDismiss(error)
+    }
+
+    /**
+     * Return a self-dismissing error card to Idle at its deadline (#R11), exactly as tapping its
+     * "Start over" would.
+     *
+     * **Counts ticks and reads the wall clock, and stops at whichever says the time is up** — #R10's
+     * lesson. `delay` does not advance while the tablet sleeps, so a countdown of one-second delays
+     * alone would still owe its ticks when the next customer wakes the screen, and they would find
+     * the stale card waiting for them. The wall-clock check clears it within a second of waking.
+     * The tick count is what lets a test drive it on virtual time.
+     */
+    private fun scheduleErrorAutoDismiss(error: TransactionState.Error) {
+        val deadline = error.autoDismissAtEpochMs ?: return
+        errorDismissJob?.cancel()
+        errorDismissJob = viewModelScope.launch {
+            // Rounded up, so the card is never cut short of its two minutes by a fraction.
+            var ticks = ((deadline - System.currentTimeMillis() + 999L) / 1_000L).coerceAtLeast(0L)
+            while (ticks > 0 && System.currentTimeMillis() < deadline && currentState() == error) {
+                delay(1_000L)
+                ticks -= 1
+            }
+            if (currentState() == error) onCancel()
+        }
     }
 
     /**

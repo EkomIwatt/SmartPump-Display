@@ -454,6 +454,118 @@ class CustomerViewModelLifecycleTest {
             assertTrue(state(vm) is TransactionState.FillupAwaitingCashConfirm)
         }
 
+    // ---- the timed-out card clears itself (#R11, the boss's decision 2026-09-22) ----------------
+
+    private fun prepayToQr(vm: CustomerViewModel) {
+        vm.onStartTransaction()
+        vm.onModeTileTap(TransactionMode.PRE_PAY)
+        vm.onAmountTileTap(amountNaira = 5000)
+        vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+        vm.onModeConfirm()
+    }
+
+    /**
+     * Two minutes, then Idle. A customer standing at the pump reads "if you have already paid,
+     * please see the attendant"; an empty forecourt resets itself instead of greeting the next
+     * customer with an error.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a timed-out prepay card returns to Idle by itself after two minutes`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            prepayToQr(vm)
+            harness.payment.fail(reason = "the payment window elapsed", windowElapsed = true)
+            runCurrent()
+            assertTrue(state(vm) is TransactionState.Error)
+
+            advanceTimeBy(119_000)
+            runCurrent()
+            assertTrue("cleared before its two minutes", state(vm) is TransactionState.Error)
+
+            advanceTimeBy(2_000)
+            runCurrent()
+            assertTrue("still on the card after two minutes", state(vm) is TransactionState.Idle)
+        }
+
+    /**
+     * Only the timed-out card. A refusal may be something a person has to read and act on, and the
+     * boss's decision was about the customer who walked away, not about every error.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a declined payment's card still waits for a tap`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            prepayToQr(vm)
+            harness.payment.fail(reason = "the card was declined")
+            runCurrent()
+
+            advanceTimeBy(10 * 60_000)
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.Error)
+        }
+
+    /**
+     * A timer left over from a card someone already tapped away must not act on whatever came next.
+     * It clears only the card it was started for.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a stale timer never resets a sale started after Start over`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            prepayToQr(vm)
+            harness.payment.fail(reason = "the payment window elapsed", windowElapsed = true)
+            runCurrent()
+
+            vm.onCancel() // "Start over"
+            vm.onStartTransaction()
+            assertTrue(state(vm) is TransactionState.ModeSelect)
+
+            advanceTimeBy(3 * 60_000)
+            runCurrent()
+
+            assertTrue("the old card's timer reset a new sale", state(vm) is TransactionState.ModeSelect)
+        }
+
+    /** A restart resumes the card's deadline; it does not grant a fresh two minutes. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a restored timed-out card clears at its original deadline`() =
+        runTest(mainRule.dispatcher) {
+            harness.pulseRepo.stateToRestore = TransactionState.Error(
+                message = "This pump stopped waiting for the payment.",
+                recoverable = true,
+                autoDismissAtEpochMs = System.currentTimeMillis() + 30_000,
+            )
+            val vm = harness.build()
+            runCurrent()
+            assertTrue(state(vm) is TransactionState.Error)
+
+            advanceTimeBy(31_000)
+            runCurrent()
+
+            assertTrue("a restart granted a fresh two minutes", state(vm) is TransactionState.Idle)
+        }
+
+    /** And one whose time ran out while the tablet was off clears as soon as the app is back. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a timed-out card whose deadline passed during the outage clears at once`() =
+        runTest(mainRule.dispatcher) {
+            harness.pulseRepo.stateToRestore = TransactionState.Error(
+                message = "This pump stopped waiting for the payment.",
+                recoverable = true,
+                autoDismissAtEpochMs = System.currentTimeMillis() - 1_000,
+            )
+            val vm = harness.build()
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.Idle)
+        }
+
     // ---- when the audit write itself fails (re-review finding #R5) ------------------------------
 
     /**

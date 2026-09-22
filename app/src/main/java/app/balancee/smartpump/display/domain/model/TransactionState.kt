@@ -272,14 +272,22 @@ sealed class TransactionState {
      *                  behind the PIN, never on the customer-facing card. Null when there is
      *                  nothing an attendant could do that the customer line does not already say.
      *
-     * Adding [attendantDetail] needed no Room migration: the whole state is persisted as
-     * kotlinx JSON in one column (`pulse_state.transactionStateJson`), and a new field with a
-     * default decodes cleanly from rows written before it existed.
+     * @param autoDismissAtEpochMs When this card clears itself back to Idle, or null for a card
+     *                  that waits for a tap. Set only on the timed-out pre-pay card (#R11): the
+     *                  boss's decision, 2026-09-22, is that it shows for two minutes and then the pump
+     *                  resets itself, so an unattended pump is not left on an error for the next
+     *                  customer. A wall-clock deadline rather than a duration so that a restart
+     *                  resumes it instead of granting a fresh two minutes.
+     *
+     * Adding [attendantDetail] and [autoDismissAtEpochMs] needed no Room migration: the whole state
+     * is persisted as kotlinx JSON in one column (`pulse_state.transactionStateJson`), and a new field
+     * with a default decodes cleanly from rows written before it existed.
      */
     @Serializable @SerialName("error")
     data class Error(
         val message: String,
         val recoverable: Boolean,
         val attendantDetail: String? = null,
+        val autoDismissAtEpochMs: Long? = null,
     ) : TransactionState()
 }
