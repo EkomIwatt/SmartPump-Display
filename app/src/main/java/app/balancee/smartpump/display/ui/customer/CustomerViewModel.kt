@@ -107,6 +107,16 @@ private const val TIMED_OUT_CARD_MS = 2 * 60 * 1_000L
 private const val FILLUP_SHUTOFF_TIMEOUT_MS = 3_000L
 private const val FILLUP_WATCHDOG_POLL_MS = 500L
 
+/** Why a `PAYMENT_ABANDONED` row was written — each sends whoever reads it somewhere different. */
+private enum class AbandonReason {
+    /** The window ran out; nobody at the pump acted. */
+    TIMED_OUT,
+    /** A fill-up's QR was cancelled for cash — the fuel is in the tank (#R13). */
+    CASH_INSTEAD,
+    /** A pre-pay's QR was cancelled before any fuel moved (#R8). */
+    CANCELLED,
+}
+
 /**
  * Persist pulse count every N pulses during a dispense. Frequent enough that a power-cut
  * resume reconstructs litresSoFar closely, cheap enough not to thrash the SD card on the
@@ -1187,7 +1197,7 @@ class CustomerViewModel @Inject constructor(
         // failed write cannot hold the attendant's screen back. The id and amount are the server's,
         // for #R4's reason — they are what the still-live checkout page will charge.
         viewModelScope.launch {
-            recordAbandonedPayment(awaiting.txnId, awaiting.amountDueKobo, cancelledAtPump = true)
+            recordAbandonedPayment(awaiting.txnId, awaiting.amountDueKobo, AbandonReason.CASH_INSTEAD)
         }
     }
 
@@ -1762,14 +1772,18 @@ class CustomerViewModel @Inject constructor(
          * Said in the row, because "timed out" and "cancelled" send whoever reads it to different
          * people: a window that ran out means nobody acted, a cancel means someone at the pump did.
          */
-        cancelledAtPump: Boolean = false,
+        reason: AbandonReason = AbandonReason.TIMED_OUT,
     ) {
-        val detail = if (cancelledAtPump) {
-            "Payment cancelled at the pump for ${formatNaira(amountKobo)}; cash was asked for " +
-                "instead. The checkout link may still be payable."
-        } else {
-            "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
-                "The pump stopped watching; the checkout link may still be payable."
+        val detail = when (reason) {
+            AbandonReason.TIMED_OUT ->
+                "Payment window closed unpaid for ${formatNaira(amountKobo)}. " +
+                    "The pump stopped watching; the checkout link may still be payable."
+            AbandonReason.CASH_INSTEAD ->
+                "Payment cancelled at the pump for ${formatNaira(amountKobo)}; cash was asked for " +
+                    "instead. The checkout link may still be payable."
+            AbandonReason.CANCELLED ->
+                "Payment cancelled at the pump for ${formatNaira(amountKobo)} before it was paid; " +
+                    "no fuel was dispensed. The checkout link may still be payable."
         }
         // [runCatchingCancellable], not `runCatching`, and the difference is load-bearing here:
         // `expiryJob` is cancelled the instant a payment succeeds, and this coroutine may be
@@ -1896,6 +1910,10 @@ class CustomerViewModel @Inject constructor(
             -> return
             else -> Unit
         }
+        // A pre-pay QR's checkout page stays payable after the cancel — the backend does not close
+        // it — so, as with the fill-up's cancel and both expiries, the abandonment is written down
+        // (#R8). Read before the reset below, which is what loses the id.
+        val abandonedPrepay = currentState() as? TransactionState.PrepayAwaitingPayment
         cancelInFlightJobs()
         viewModelScope.launch { relay.stopFuelFlow() }
         resetToIdle(clearPulses = true)
@@ -1905,6 +1923,18 @@ class CustomerViewModel @Inject constructor(
                 fillupDigitalExpiresInSeconds = 0,
                 ussdExpiresInSeconds = 0,
             )
+        }
+        // After the transition and on its own coroutine, as in [onFillupDigitalCancel]: a slow or
+        // failed write must not hold the pump off Idle. The id and amount are the live state's —
+        // the server's, and what the still-live checkout page will charge.
+        if (abandonedPrepay != null) {
+            viewModelScope.launch {
+                recordAbandonedPayment(
+                    abandonedPrepay.txnId,
+                    abandonedPrepay.amountKobo,
+                    AbandonReason.CANCELLED,
+                )
+            }
         }
     }
 

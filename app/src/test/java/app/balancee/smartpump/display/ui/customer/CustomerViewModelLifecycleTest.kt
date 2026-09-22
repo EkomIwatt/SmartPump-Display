@@ -126,6 +126,95 @@ class CustomerViewModelLifecycleTest {
             assertTrue(harness.events.recorded.none { it.type == EventType.PAYMENT_ABANDONED })
         }
 
+    // ---- the pre-pay cancel (#R8) ---------------------------------------------------------------
+
+    /** Pre-pay ₦5,000 by app and stop on the QR, unpaid. */
+    private fun prepayToUnpaidQr(vm: CustomerViewModel): TransactionState.PrepayAwaitingPayment {
+        vm.onStartTransaction()
+        vm.onModeTileTap(TransactionMode.PRE_PAY)
+        vm.onAmountTileTap(amountNaira = 5000)
+        vm.onMethodTileTap(PaymentMethod.BALANCEE_APP)
+        vm.onModeConfirm()
+        return state(vm) as TransactionState.PrepayAwaitingPayment
+    }
+
+    /**
+     * The checkout page stays payable after a cancel — the backend does not close it — so a
+     * customer who pays it on the way out and comes back for fuel is exactly the case the row
+     * exists to answer. Until #R8 only the two expiries and the fill-up's cancel wrote it; the
+     * pre-pay's Cancel went to Idle and left nothing.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a cancelled prepay is recorded as cancelled, against the server's id and figure`() =
+        runTest(mainRule.dispatcher) {
+            harness.payment.pendingRef = SERVER_TXN_ID
+            harness.payment.pendingAmountKobo = 499_895L
+            val vm = harness.build()
+            prepayToUnpaidQr(vm)
+
+            vm.onCancel()
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.Idle)
+            val row = harness.events.recorded.single { it.type == EventType.PAYMENT_ABANDONED }
+            assertEquals(SERVER_TXN_ID, row.transactionRef)
+            val detail = row.detail.orEmpty()
+            assertTrue("not worded as a cancel: $detail", detail.contains("cancelled"))
+            assertFalse("a pre-pay cancel asks for no cash: $detail", detail.contains("cash"))
+            assertTrue("not the checkout page's figure: $detail", detail.contains("4,998.95"))
+        }
+
+    /** One cancel, one row: neither clock may later add a "window closed" row of its own. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `after a prepay cancel neither the countdown nor the poller records it again`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            prepayToUnpaidQr(vm)
+            vm.onCancel()
+            runCurrent()
+
+            harness.payment.succeed()
+            advanceTimeBy(301_000)
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.Idle)
+            assertEquals(1, harness.events.recorded.count { it.type == EventType.PAYMENT_ABANDONED })
+        }
+
+    /** Leaving before a QR exists abandons nothing — there is no checkout page to pay. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `cancelling before the QR records no abandonment`() =
+        runTest(mainRule.dispatcher) {
+            val vm = harness.build()
+            vm.onStartTransaction()
+            vm.onModeTileTap(TransactionMode.PRE_PAY)
+            vm.onAmountTileTap(amountNaira = 5000)
+
+            vm.onCancel()
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.Idle)
+            assertTrue(harness.events.recorded.none { it.type == EventType.PAYMENT_ABANDONED })
+        }
+
+    /** The row is best-effort; the pump reaching Idle is not. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a cancelled prepay still returns to Idle when the abandonment row cannot be written`() =
+        runTest(mainRule.dispatcher) {
+            harness.events.failOn += EventType.PAYMENT_ABANDONED
+            val vm = harness.build()
+            prepayToUnpaidQr(vm)
+
+            vm.onCancel()
+            runCurrent()
+
+            assertTrue(state(vm) is TransactionState.Idle)
+        }
+
     // ---- the fill-up twin (re-review finding #R4) -----------------------------------------------
 
     /** Deliberately unlike the `BLC-…` shape this pump mints for itself. */
