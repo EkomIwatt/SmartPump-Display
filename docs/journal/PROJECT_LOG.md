@@ -1,15 +1,14 @@
 # SmartPump Display — Project Log
 
-## Current status — 2026-09-22, session end (**Phase 11 planned: the adapter owns the cutoff**)
+## Current status — 2026-09-22 (**Phase 11a done: the serial protocol revision is confirmed**)
 
-**`main` = `origin/main`, green (534 JVM tests).** Today: #R11 and #R8 merged and device-checked; the
-orphan ₦149 reported to Balancee; **OQ #26 agreed by Olonade and the boss** — the adapter will stop
-the relay itself at a limit the app sends, and the user writes the Arduino code.
+**`main` = `origin/main`, green (534 JVM tests).** Phase 11 is under way on
+`feature/phase-11-adapter-cutoff`: **11a is done** — [`docs/serial-protocol.md`](../serial-protocol.md),
+confirmed by the user, is the spec for the adapter owning the cutoff. No code yet.
 
-**Next session starts at Phase 11, sub-deliverable 11a** — a protocol spec for the user to confirm
-before any code: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md). Awaiting an explicit go. It retires #36
-(root cause now confirmed in code), OQ #24/#26 and the 7g firmware gate. The long pole to live money
-is unchanged: the K-factor (#22, Kelvin).
+**Next session starts at 11b (firmware), awaiting an explicit go.** Olonade's Mega rig has the
+power-sense circuit; one more session on it on **Friday 2026-09-25**, before the 14-day run, switches
+on `ENABLE_POWER_FAIL_SAVE`. The long pole to live money is unchanged: the K-factor (#22, Kelvin).
 
 ---
 
@@ -2388,3 +2387,47 @@ to confirm.
 
 **Next:**
 Phase 11a on the user's go.
+
+### Phase 11a — serial protocol revision 2: the adapter owns the cutoff (spec)
+**Date:** 2026-09-22
+**Status:** done (a document; no code)
+**Commit(s):** d3b63d9 (draft), plus the confirmation commit on `feature/phase-11-adapter-cutoff`
+
+**Summary (plain language):**
+We wrote down, frame by frame, how the tablet and the pump's adapter board will talk once the board
+is the one that stops the fuel. The tablet now tells the board "open, and stop after this many
+pulses"; the board stops by itself and reports back, and it keeps a trip meter for the sale so the
+tablet's litre count comes straight from the board's own numbers. If the tablet crashes, the board
+still stops at what was paid for, and on restart the tablet reads back exactly how much flowed. The
+user confirmed the whole spec.
+
+**Technical notes:**
+- New frames: `RLY:1:<limit>:<tag>` (bare `RLY:1` now refused with `ERR:CMD` — no fuel),
+  `ARM:<tag>:<start>`, `STOP:<tag>:<cut>`, `RES:<tag>`, `SES?`, `ERR:NOSESSION`. `RLY:0` bytes
+  unchanged but now **holds** the session rather than ending it, because the VM sends it on every
+  boot. Worked checksums in the spec; the eight existing ones were recomputed and match.
+- **Departures from the plan's draft:** (1) the session is **tagged by the app** (random non-zero
+  32-bit per sale, persisted before `RLY:1` is sent) — without it a lost `ARM` and a stale session
+  look identical and a retry could grant a second allowance; with it, same-tag `RLY:1` behaves as
+  `RES` and every retry is safe. `ARM`/`STOP` therefore carry two numbers — additive parser work in
+  11c. (2) **#38 closed as superseded** (D6): the session removes the app-death give-away it was
+  about, and a shorter watchdog would trip more on the SM-T220. (3) **D3 revised mid-session.**
+- **D3:** originally "do not persist the session" — on the assumption no rig had a power-sense
+  circuit. **Olonade's Mega does** (the user's Uno is the firmware simulator; the sketch comment
+  saying otherwise is stale). Revised: the session is saved in the EEPROM record (25 B, 40 slots)
+  only when `ENABLE_POWER_FAIL_SAVE` is on, and restored on power-up **only from a record written
+  with the relay off** — an `OPEN` record means fuel flowed after it and the count may be stale, so
+  it is discarded. A failed power-fail save therefore degrades to the flag-off behaviour, never to
+  over-dispensing. Flag ships `false`; switched on at Olonade's Friday (2026-09-25) session.
+- The app's backstop cutoff must compare **pulses** against the same limit, not litres: with a
+  non-integer K-factor `limit / PULSES_PER_LITRE` falls just short of `litresCutoff` and a litres
+  test would never fire. Low severity (fuel already cut; attendant can End sale early), but free to
+  get right.
+- Fill-up ceiling 200 L (a guess — must exceed the station's largest single fill). App auto-`RES`
+  on `ERR:WDOG` with the link up. `RLY:0` stays unacknowledged. Nozzle-idle stays in the app.
+- Board updated: TODO item 5 → 11b next; #38 closed; OQ #26 wire format settled (to Resolved when
+  11f passes); plan 11b/11f updated, including the Friday Mega steps and a coast measurement.
+
+**Next:**
+11b — the firmware, on the 7g sketch (`hardware/` files only from
+`origin/feature/phase-7g-eeprom-totaliser`). Awaiting go.

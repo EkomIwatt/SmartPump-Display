@@ -1,8 +1,8 @@
 # SmartPump serial protocol — revision 2 (Phase 11: the adapter owns the cutoff)
 
-_Drafted 2026-09-22 as Phase 11a. **Status: DRAFT — awaiting the user's confirmation.** No firmware or
-app code is written against this until it is confirmed. Decisions still open are collected in
-[§9](#9-decisions-for-you-to-confirm)._
+_Drafted 2026-09-22 as Phase 11a. **Status: CONFIRMED by the user 2026-09-22** — all eight decisions
+in [§9](#9-decisions-confirmed-2026-09-22), with D3 revised the same day once it came out that
+Olonade's Mega rig has the power-sense circuit (§6.4)._
 
 This is the authority for the wire between the Android app and the pulse adapter from Phase 11 on.
 It replaces the framing comments in `hardware/smartpump_pulse_adapter.ino`, `SerialFrame.kt` and the
@@ -135,7 +135,7 @@ which is what made OQ #23's `BOOT:<cum>:<ppl>` dangerous and does not apply here
 | `DONE`, same tag | `RES:<t>` | nothing — **a finished session is never re-opened** | `STOP:t:cut` |
 | none, or other tag | `RES:<t>` | nothing | `ERR:NOSESSION` |
 | any | `SES?` | nothing | `ARM:t:start`, `STOP:t:cut`, or `ERR:NOSESSION` |
-| any | power-up | relay off (unchanged invariant); **no session** | `BOOT:count` |
+| any | power-up | relay off (unchanged invariant); **no session** — unless `ENABLE_POWER_FAIL_SAVE` is on and the newest record is trustworthy, in which case the saved session comes back `HELD` or `DONE` (§6.4) | `BOOT:count` |
 
 Two rules carry the safety of the whole design and are worth stating outright:
 
@@ -185,8 +185,10 @@ sale (§9, D2) and persists it **before** sending `RLY:1`.
   10 L. Rule 1 makes this impossible even if the app got it wrong, but the app should not rely on
   that.)
 - **`ERR:WDOG` during a sale with the link still up:** send `RES:<tag>` (§9, D5).
-- **`BOOT` during a sale, or `ERR:NOSESSION` in reply to `RES`:** the board lost the session (§6.4) —
-  hand to the view model to re-arm (§6.4).
+- **`BOOT` during a sale:** send `SES?`. The board may have brought the session back (§6.4); if so,
+  `RES:<tag>` as after any other interruption.
+- **`ERR:NOSESSION` in reply to `RES`/`SES?` during a sale:** the board lost the session — hand to
+  the view model to re-arm (§6.4).
 - **Boot resume** (§6.2).
 
 ---
@@ -231,14 +233,45 @@ controller sends `RES:<tag>` → `ARM` → fuel resumes, **still under the origi
 
 ### 6.4 The board reboots mid-sale
 
-Power-up clears the session (V1 does not persist it — §9, D3), the relay comes up off, `BOOT` is
-sent. The app learns of it from the `BOOT` frame, or from `ERR:NOSESSION` in reply to `RES`/`SES?`.
+The relay always comes up off and `BOOT` is sent. What happens to the session depends on
+`ENABLE_POWER_FAIL_SAVE` (§9, D3).
 
-This is the **only** case that falls back to the app's own figure: the view model re-arms with a
-**new tag** and `limit = original limit − pulses the app has counted` (its last persisted count
-plus 7h reconciliation, as today). Pulses the board counted but never reported before it rebooted
-are lost to both sides — exactly as today. With no power-fail save wired (`ENABLE_POWER_FAIL_SAVE =
-false`) the board has no better number to offer.
+**Flag off** — your Uno rig, and every build until Olonade's Friday session. Power-up clears the
+session. The app learns of it from `ERR:NOSESSION` in reply to `SES?`/`RES`, and the view model
+re-arms with a **new tag** and `limit = original limit − pulses the app has counted` (its last
+persisted count plus 7h reconciliation, as today). Pulses the board counted but never reported
+before it rebooted are lost to both sides — exactly as today.
+
+**Flag on** — Olonade's Mega, which has the power-sense circuit. The session is saved in the EEPROM
+record alongside the totaliser, and comes back after a reboot **only if the saved count can be
+trusted**:
+
+- **When the board saves.** Every time the relay changes state for a session: on arm and on `RES`
+  (relay going **on**), and on `RLY:0`, the watchdog, `STOP` and the power-fail save (relay going
+  **off**). The record carries the session's state at the moment it was written.
+- **The rule on power-up.** Take the newest valid record. If its session state is `HELD` or `DONE`
+  — the relay was **off** when it was written — no metered fuel could flow after it, so its count is
+  current: restore the session in that state. If its state is `OPEN` — written as the relay came
+  **on** — then fuel flowed after it and the power-fail save never landed (no circuit, a torn
+  write, a capacitor that ran out): the count is stale, so **discard the session** and fall to the
+  flag-off path above.
+- **Why this is safe.** The dangerous case is resuming a session from a stale count, which would
+  re-grant every pulse the board forgot. A stale count can only exist after an `OPEN` record, and an
+  `OPEN` record is never resumed. A power-fail save that fails therefore degrades to the flag-off
+  behaviour, never to over-dispensing.
+
+After a reboot with a restored session, the app's `SES?` gets `ARM` (or `STOP`) and the sale carries
+on exactly as after an app death (§6.2), under its original limit and with its exact count.
+
+**Record layout (11b).** `magic` 2 · `count` 4 · `sequence` 4 · `tag` 4 · `start` 4 · `limit` 4 ·
+`state` 1 · `crc` 2 = **25 bytes**, **40 slots** = 1000 bytes (fits the Uno's 1 KB; the Mega has
+4 KB). `SLOT_MAGIC` is bumped, so a board's existing 7g totaliser is read as absent **once** and
+restarts from zero — acceptable on bench boards, and to be done before the 14-day run, not during
+it. With the flag off the layout is the same and the session fields are simply never trusted.
+
+**Wear.** Flag on: at least two commits per sale (arm, end), two more per resume. EEPROM cells are
+rated ~100 000 writes; 40 slots × 100 000 ÷ 2 ≈ **2 million sales** before the ring wears. Flag
+off: one per sale, as in 7g.
 
 ### 6.5 Fuel after the cut (coast)
 
@@ -295,10 +328,10 @@ tests.
 
 ---
 
-## 9. Decisions for you to confirm
+## 9. Decisions (confirmed 2026-09-22)
 
-Each has a recommendation. Say "confirmed" and 11b starts on these; change any of them and I update
-this document first.
+All eight were confirmed by the user on 2026-09-22. D3 was revised the same day; the original
+recommendation is kept below it for the record.
 
 **D1 — The session is tagged by the app.** `RLY:1:<limit>:<tag>`, and `ARM`/`STOP` echo the tag.
 This is a change from the plan, which had `ARM:<start>` with one number. Without the tag, a lost
@@ -311,12 +344,18 @@ resets on reinstall and could collide with a stale session still on the board; a
 collides about once in four billion sales. It is persisted with the sale, so nothing extra has to
 survive between sales. **Recommended.**
 
-**D3 — The session is not persisted to EEPROM in V1.** A board reboot ends it (§6.4). The wear is
-fine either way (40 slots of a 24-byte record, two commits per sale ≈ 2 million sales). The problem
-is correctness: the power-fail save is off (`ENABLE_POWER_FAIL_SAVE = false`, no sense circuit on
-any rig), so after a power cut the restored `count` is the last *commit*, not the last pulse. A
-persisted session resumed from that count would re-grant every pulse the board lost, which is
-over-dispensing. Revisit when the power-sense circuit exists. **Recommended: do not persist.**
+**D3 — The session is saved to EEPROM only when `ENABLE_POWER_FAIL_SAVE` is on, and restored
+only from a record written with the relay off** (§6.4). 11b builds it; the flag ships `false`; it is
+switched on during **Olonade's Friday session on the Mega**, the last test before the 14-day run,
+and checked there by cutting the power mid-sale. Before that session, confirm his power-sense line
+is on **pin 3** and goes **high** on power loss (`POWER_FAIL_EDGE = RISING`) — otherwise the flip
+also needs that one-line change.
+
+> _Original D3, superseded 2026-09-22:_ do not persist the session in V1, because with the
+> power-fail save off the restored count is the last commit rather than the last pulse, and a
+> resumed session would re-grant the lost pulses. That reasoning assumed no power-sense circuit
+> existed on any rig. Olonade's Mega has one. The revised D3 keeps the reasoning as its safety rule:
+> a record that could be stale is never resumed.
 
 **D4 — Fill-up ceiling: 200 L**, as an app constant in litres. It is a runaway backstop, not a
 cutoff: it only matters if the app is alive (still PINGing) but has stopped acting on the

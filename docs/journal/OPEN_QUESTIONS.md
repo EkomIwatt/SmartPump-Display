@@ -156,6 +156,11 @@ bottom. Sections do not own contiguous ranges either, so find an item by its num
     > is ours, not yet ratified), whether #24's session mark and a board-reported session count ride
     > on the same frame (which would retire #36 by design), and the build + bench gate on top of 7g.
     > Kept here rather than moved to Resolved until the format is settled.
+    >
+    > **2026-09-22, later: wire format SETTLED** — [`docs/serial-protocol.md`](../serial-protocol.md)
+    > (Phase 11a, confirmed by the user). It differs from the proposal below: the session is tagged
+    > by the app (`RLY:1:<limit>:<tag>`), `ARM:<tag>:<start>` is #24's session mark, and the
+    > reconnect sends `RES:<tag>` rather than a remaining-count. Moves to Resolved when 11f passes.
  On the fixed/pre-pay/cash-fixed flows the app — not the adapter — decides when to stop: the firmware counts a pulse, frames it, ships it over USB, the app compares litres against the cutoff (`CustomerViewModel.kt:680-682`, and the same shape at `:918`), then sends `RLY:0` back down the wire. Every one of those hops is fuel on the ground. Budget: **0–30 ms** in the firmware's own `PULSE_TX_MIN_MS` throttle before the pulse is even transmitted, **~1–15 ms** of USB plus Android scheduling inbound, a coroutine hop, then `stopFuelFlow()`'s `withContext(Dispatchers.IO)` thread hop and the outbound write (`UsbSerialRelayController.kt:80`), then the firmware's `handleSerial()`. Call it **50–150 ms of controllable latency**, on top of a relay-coil + solenoid + fluid-coast term of 10–50 ms that no software change can touch. At 40 L/min that is **35–100 mL** of unbilled fuel per fixed sale — always in the customer's favour, so the station absorbs it.
 
     **The money is the small half.** On a 10 L run 100 mL is **1%**, which is twice the ±0.5% that `TEST-01-detail` demands and that `docs/FIELD_RUN_SHEET_2026-09-04.md` §0a flags as the pass/fail question. If the relay is gating real fuel during a calibration run, **the round trip alone can fail the accuracy gate** — and it would present as a meter/K-factor problem, which it is not. This is a reason to keep the relay out of the dispenser for the first calibration visit (run sheet §0b already recommends exactly that, for different reasons).

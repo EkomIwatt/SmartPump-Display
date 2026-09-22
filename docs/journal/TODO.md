@@ -26,10 +26,12 @@ each entry.
 3. [x] **Tell Balancee about the orphan ₦149 sale** (item 10) — **told by the user 2026-09-22.**
 4. [ ] **The K-factor — the long pole.** Chase Kelvin for the meter's output type and voltage
    (**#22**, OQ #1). Nothing measurable runs until it is known; **#28** and **#21** follow from it.
-5. [ ] **Phase 11 — the adapter owns the cutoff. PLANNED 2026-09-22; NEXT SESSION STARTS HERE —
-   awaiting an explicit go.** OQ #26 agreed by Olonade and the boss; the user writes the Arduino
-   code. Plan: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md) — start at **11a** (protocol spec, for the
-   user to confirm). Retires **#36**, OQ #24/#26 and the **7g firmware gate (#19/#24)**, and
+5. [~] **Phase 11 — the adapter owns the cutoff. 11a DONE 2026-09-22; NEXT: 11b (firmware),
+   awaiting go.** Branch `feature/phase-11-adapter-cutoff`. Spec confirmed:
+   [`docs/serial-protocol.md`](../serial-protocol.md). OQ #26 agreed by Olonade and the boss; the
+   user writes the Arduino code. Plan: [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md). **Olonade's Mega has
+   the power-sense circuit** — one more session on it on **Friday 2026-09-25**, before the 14-day
+   run, to switch on `ENABLE_POWER_FAIL_SAVE`. Retires **#36**, OQ #24/#26 and the **7g firmware gate (#19/#24)**, and
    possibly **#38**. OQ #23 (`CAL`) stays open.
 6. [ ] **Accuracy before the run:** ~~**#36**~~ (folded into Phase 11), and the fact that no build
    type is yet both real hardware and production (the "no build type" entry under "Open items carried from finished phases").
@@ -151,7 +153,10 @@ _Collected 2026-09-22 when the finished phase sections moved to [`TODO_DONE.md`]
   the collector attaching, which `PulseAccumulator` swallows in its uninitialised branch. Not fixed:
   it is small, it fails safe, and it wants its own change with its own test.
 
-- [ ] **38. Shorten the firmware watchdog from 3 s to 2 s?** The app PINGs at 1 Hz, so three seconds
+- [x] **38. CLOSED 2026-09-22 — superseded by Phase 11 (spec D6); watchdog stays 3 s.** The
+  board-held session removes the give-away this was about: a fixed sale cannot pass its limit, and
+  fill-up fuel after an app death is counted and billed on restart. Original entry:
+  **Shorten the firmware watchdog from 3 s to 2 s?** The app PINGs at 1 Hz, so three seconds
   is three missed pings; two would still tolerate a hiccup and would **halve** the give-away
   measured in step 8. One-line firmware change, so it belongs with **#19**'s firmware work rather
   than on its own. Not a substitute for **OQ #26** — see there.

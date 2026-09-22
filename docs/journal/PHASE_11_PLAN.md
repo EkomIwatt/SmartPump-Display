@@ -1,7 +1,10 @@
 # Phase 11 — the adapter owns the cutoff (plan)
 
-_Planned 2026-09-22. **Awaiting an explicit go** — start with 11a, which is a document for the user
-to confirm, not code._
+_Planned 2026-09-22. **11a DONE 2026-09-22** — [`docs/serial-protocol.md`](../serial-protocol.md)
+confirmed by the user. It departs from the draft below in three places, and the spec wins: the
+session is **tagged by the app** (`RLY:1:<limit>:<tag>`, `ARM:<tag>:<start>`, `STOP:<tag>:<cut>`,
+`RES:<tag>`); **#38 is closed as superseded**, not folded in; and the session is **saved to EEPROM
+behind `ENABLE_POWER_FAIL_SAVE`** (off until Olonade's Friday session). **Next: 11b, awaiting go.**_
 
 This is a plan, not a log. Completed sub-deliverables get logged in `PROJECT_LOG.md` as usual.
 
@@ -95,7 +98,9 @@ edge below. Our draft, to be confirmed or changed:
 
 ### 11b — firmware
 
-On the 7g sketch. The frames from 11a, the ISR cutoff, `STOP` + EEPROM commit from `loop()`, the
+On the 7g sketch. **Build to [`docs/serial-protocol.md`](../serial-protocol.md), not to the draft
+bullets above** — including the tagged frames, the 25-byte record with the session in it, and the
+restore rule (§6.4) behind `ENABLE_POWER_FAIL_SAVE`, which ships `false`. The frames from 11a, the ISR cutoff, `STOP` + EEPROM commit from `loop()`, the
 resume path, `ERR:CMD` on a bare `RLY:1`. Update the header comment (it currently says the session
 mark is "deliberately NOT invented here — pending Olonade") and `hardware/README.md`.
 
@@ -145,6 +150,15 @@ afterwards.
    fresh allowance.
 6. **Bad frame:** a malformed / bare `RLY:1` → `ERR:CMD`, no fuel.
 7. **Fill-up:** still ends on nozzle idle; the ceiling is not hit in normal use.
+8. **Coast:** after each `STOP`, note the `HB` count once flow settles minus `cut` — the fuel that
+   flows after the cut (spec §6.5). TEST-01 will want its size.
+
+**Then, on Olonade's Mega (Friday, the last session before the 14-day run):** confirm his
+power-sense line is on pin 3 and goes high on power loss; flip `ENABLE_POWER_FAIL_SAVE` to `true`;
+cut the power mid-sale and check the sale comes back with its exact count and still stops at its
+**original** limit; then cut it with the sense line disconnected and check the session is
+**discarded** rather than resumed (spec §6.4). The board's 7g totaliser restarts from zero once on
+first boot of the new record layout — do that before the run, not during it.
 
 Then merge to `main`: the firmware, the app, and 7g's totaliser together.
 
