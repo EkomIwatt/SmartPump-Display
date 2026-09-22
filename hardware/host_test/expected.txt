@@ -1,0 +1,183 @@
+=== 1. frames, cutoff, retries (flag off)
+-- boot
+  < BOOT:0*1C
+> RLY:1*4C
+  < ERR:CMD*35
+> RLY:1:0:7*4B
+  < ERR:CMD*35
+> RLY:1:5:0*49
+  < ERR:CMD*35
+> RLY:1:1000001:7*4B
+  < ERR:CMD*35
+> RLY:1:5:7x*36
+  < ERR:CMD*35
+> RLY:1:-5:7*63
+  < ERR:CMD*35
+> RLY:1:99999999999:7*42
+  < ERR:CMD*35
+> RLY:1:5*43
+  < ERR:CMD*35
+> RES:0*4E
+  < ERR:CMD*35
+> RLY:1:500:7*4F
+  < ERR:CSUM*77
+> SES?
+  < ERR:NOCS*6E
+> SES?*7A
+  < ERR:NOSESSION*20
+> RES:7*49
+  < ERR:NOSESSION*20
+> RLY:1:500:7*4E
+  < ARM:7:0*59
+  [relay ON at count 0]
+  (+3 pulses, count 3)
+> RLY:1:9999:7*7B
+  < ARM:7:0*59
+  state=1 tag=7 start=0 limit=500 count=3 relay=1
+  [relay OFF at count 500]
+  < STOP:7:500*1A
+  (+497 pulses, count 500)
+  (+5 pulses, count 505)
+  state=3 tag=7 start=0 limit=500 count=505 relay=0
+> RES:7*49
+  < STOP:7:500*1A
+> SES?*7A
+  < STOP:7:500*1A
+> RLY:1:500:7*4E
+  < STOP:7:500*1A
+> RLY:1:10:8*75
+  < ARM:8:505*56
+  [relay ON at count 505]
+  (+3 pulses, count 508)
+> RLY:0*4D
+  [relay OFF at count 508]
+  state=2 tag=8 start=505 limit=10 count=508 relay=0
+  (+2 pulses, count 510)
+> SES?*7A
+  < ARM:8:505*56
+> RES:8*46
+  < ARM:8:505*56
+  [relay ON at count 510]
+  [relay OFF at count 515]
+  < STOP:8:515*11
+  (+5 pulses, count 515)
+  state=3 tag=8 start=505 limit=10 count=515 relay=0
+  (+1 pulses, count 516)
+> RES:9*47
+  < ERR:NOSESSION*20
+-- eeprom byte writes this boot: 125
+=== 2. watchdog, then reboot with the flag off
+-- boot
+  < BOOT:0*1C
+> RLY:1:100:5*48
+  < ARM:5:0*5B
+  [relay ON at count 0]
+  (+10 pulses, count 10)
+  (+2000 ms)
+> PING*10
+  (+2500 ms)
+  < ERR:WDOG*64
+  [relay OFF at count 10]
+  (+600 ms)
+  state=2 tag=5 start=0 limit=100 count=10 relay=0
+  (+3 pulses, count 13)
+> RES:5*4B
+  < ARM:5:0*5B
+  [relay ON at count 13]
+> PING*10
+  (+20 pulses, count 33)
+  state=1 tag=5 start=0 limit=100 count=33 relay=1
+> RLY:0*4D
+  [relay OFF at count 33]
+-- eeprom byte writes this boot: 75
+-- boot
+  < BOOT:33*2C
+  state=0 tag=0 start=0 limit=0 count=33 relay=0
+> SES?*7A
+  < ERR:NOSESSION*20
+> RES:5*4B
+  < ERR:NOSESSION*20
+-- eeprom byte writes this boot: 0
+=== 3c. flag on: power fails mid-sale, save lands -> exact resume
+-- boot
+  < BOOT:0*1C
+> RLY:1:100:11*7D
+  < ARM:11:0*6E
+  [relay ON at count 0]
+  (+40 pulses, count 40)
+-- power fail
+  < ERR:PWR*2A
+  [halted, relay OFF]
+-- eeprom byte writes this boot: 50
+-- boot
+  < BOOT:40*28
+  state=2 tag=11 start=0 limit=100 count=40 relay=0
+> SES?*7A
+  < ARM:11:0*6E
+> RLY:0*4D
+> RES:11*7E
+  < ARM:11:0*6E
+  [relay ON at count 40]
+  [relay OFF at count 100]
+  < STOP:11:100*29
+  (+60 pulses, count 100)
+  state=3 tag=11 start=0 limit=100 count=100 relay=0
+-- eeprom byte writes this boot: 50
+=== 3b. flag on: power dies mid-sale with NO save -> session discarded
+-- boot
+  < BOOT:100*1D
+> RLY:1:100:12*7E
+  < ARM:12:100*6C
+  [relay ON at count 100]
+  (+30 pulses, count 130)
+-- eeprom byte writes this boot: 25
+-- boot
+  < BOOT:100*1D
+  state=0 tag=0 start=0 limit=0 count=100 relay=0
+> SES?*7A
+  < ERR:NOSESSION*20
+> RES:12*7D
+  < ERR:NOSESSION*20
+-- eeprom byte writes this boot: 0
+=== 3a. flag on: RLY:0, then power cut -> session restored
+-- boot
+  < BOOT:100*1D
+> RLY:1:50:13*4B
+  < ARM:13:100*6D
+  [relay ON at count 100]
+  (+20 pulses, count 120)
+> RLY:0*4D
+  [relay OFF at count 120]
+-- eeprom byte writes this boot: 50
+-- boot
+  < BOOT:120*1F
+  state=2 tag=13 start=100 limit=50 count=120 relay=0
+> SES?*7A
+  < ARM:13:100*6D
+> RES:13*7C
+  < ARM:13:100*6D
+  [relay ON at count 120]
+  [relay OFF at count 150]
+  < STOP:13:150*2E
+  (+30 pulses, count 150)
+-- eeprom byte writes this boot: 50
+=== 3d. flag on: a DONE session survives a reboot and is never re-opened
+-- boot
+  < BOOT:150*18
+  state=3 tag=13 start=100 limit=50 count=150 relay=0
+> SES?*7A
+  < STOP:13:150*2E
+> RES:13*7C
+  < STOP:13:150*2E
+-- eeprom byte writes this boot: 0
+=== 4. a 7g-layout record (magic 0x5350) is rejected
+-- boot
+  < BOOT:0*1C
+-- eeprom byte writes this boot: 0
+=== 5. flag on: 60 sales wrap the 40-slot ring; the newest record wins
+-- boot
+  < BOOT:300*1F
+  state=3 tag=60 start=295 limit=5 count=300 relay=0
+> SES?*7A
+  < STOP:60:300*2D
+-- eeprom byte writes this boot: 0
