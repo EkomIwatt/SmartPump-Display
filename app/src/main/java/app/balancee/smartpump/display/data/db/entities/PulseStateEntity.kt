@@ -2,6 +2,7 @@
 // Written on every state transition and every N pulses during dispensing.
 package app.balancee.smartpump.display.data.db.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -37,5 +38,14 @@ data class PulseStateEntity(
      */
     val sessionTransactionRef: String? = null,
     val sessionTag: Long? = null,
+    /**
+     * `defaultValue` is load-bearing, not tidy. [PulseStateDao.ensureRow] creates this row with an
+     * explicit column list, and on a database Room creates fresh a NOT NULL column with no SQL
+     * default fails that insert — which `INSERT OR IGNORE` then swallows, so the row never exists
+     * and every state and pulse write after it updates nothing. The migration adds the column with
+     * `DEFAULT 0`; declaring it here makes a fresh v6 database match a migrated one. Found by
+     * PulseRepositoryConcurrencyTest on the SM-T220, 2026-09-22.
+     */
+    @ColumnInfo(defaultValue = "0")
     val sessionBasePulses: Int = 0,
 )

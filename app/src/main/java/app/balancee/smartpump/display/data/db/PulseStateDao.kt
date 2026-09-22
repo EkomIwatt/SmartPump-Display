@@ -29,13 +29,15 @@ interface PulseStateDao {
      * Create the row if there is none, and never touch one that exists.
      *
      * Every writer calls this first, because an UPDATE against a missing row silently does
-     * nothing. [idleJson] is what the row says before any state has been written — the same `Idle`
+     * nothing. **Name every NOT NULL column here** — a missing one fails the insert, and `OR IGNORE`
+     * turns that failure into silence (the v6 defect, 2026-09-22). [idleJson] is what the row says before any state has been written — the same `Idle`
      * the previous full-row writes defaulted to.
      */
     @Query(
         "INSERT OR IGNORE INTO pulse_state " +
-            "(id, transactionStateJson, currentTransactionRef, pulseCount, lastPulseTimeMs, adapterCount, updatedAt) " +
-            "VALUES (1, :idleJson, NULL, 0, 0, NULL, :now)",
+            "(id, transactionStateJson, currentTransactionRef, pulseCount, lastPulseTimeMs, adapterCount, updatedAt, " +
+            "sessionTransactionRef, sessionTag, sessionBasePulses) " +
+            "VALUES (1, :idleJson, NULL, 0, 0, NULL, :now, NULL, NULL, 0)",
     )
     suspend fun ensureRow(idleJson: String, now: Long)
 
