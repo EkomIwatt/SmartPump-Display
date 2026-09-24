@@ -9,7 +9,7 @@ Keep it current: check items off, add follow-ups as they surface, and move finis
 _Last updated: **2026-09-22** (11f bench gate). **V1 is the priority.** This board is the road to V1 and holds only
 open work. **Non-blocking improvements live in [`POST_V1.md`](POST_V1.md)**; **finished work lives in
 [`TODO_DONE.md`](TODO_DONE.md)** (moved there verbatim 2026-09-22, item numbers unchanged).
-**Next session: Friday 2026-09-25, Olonade’s Mega** — what 11f could not finish (V1 path, item 5)._
+**Next session: Friday 2026-09-25, Olonade’s Mega** — what 11f could not finish (V1 path, item 5). Run sheet: [`MEGA_RUN_SHEET.md`](MEGA_RUN_SHEET.md)._
 
 ### ⛳ Start here — the V1 path
 
