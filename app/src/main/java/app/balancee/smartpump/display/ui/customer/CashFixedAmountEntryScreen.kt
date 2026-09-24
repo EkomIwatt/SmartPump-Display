@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import app.balancee.smartpump.display.domain.model.DeviceConfig
 import app.balancee.smartpump.display.ui.components.AmountDisplay
 import app.balancee.smartpump.display.ui.components.BalanceeButton
 import app.balancee.smartpump.display.ui.components.BalanceeButtonVariant
@@ -71,7 +72,7 @@ fun CashFixedAmountEntryScreen(
         typedNaira >= CASH_MIN_NAIRA && typedNaira <= CASH_MAX_NAIRA &&
         priceKoboPerLitre > 0L
     val litresCutoff = if (priceKoboPerLitre > 0L && amountKobo > 0L) {
-        Math.floor((amountKobo.toDouble() / priceKoboPerLitre) * 100.0) / 100.0
+        DeviceConfig.litresCutoff(amountKobo, priceKoboPerLitre)
     } else 0.0
     val accent = BrandBlue
 

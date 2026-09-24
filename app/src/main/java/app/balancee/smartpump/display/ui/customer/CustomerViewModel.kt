@@ -1425,7 +1425,7 @@ class CustomerViewModel @Inject constructor(
         }
         viewModelScope.launch {
             val cutoff = deviceConfig()?.litresCutoff(cashAmountKobo)
-                ?: (Math.floor((cashAmountKobo.toDouble() / priceKoboPerLitre) * 100.0) / 100.0)
+                ?: DeviceConfig.litresCutoff(cashAmountKobo, priceKoboPerLitre)
             if (cutoff <= 0.0) {
                 // Smallest dispensable step is 0.01 L, i.e. priceKoboPerLitre / 100 kobo.
                 setState(

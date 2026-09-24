@@ -46,8 +46,7 @@ data class DeviceConfig(
      * Litre cutoff for a fixed cash/pre-pay amount.
      * Floors to 2 decimal places — never dispense more than was paid.
      */
-    fun litresCutoff(amountKobo: Long): Double =
-        Math.floor((amountKobo.toDouble() / koboPerLitre) * 100.0) / 100.0
+    fun litresCutoff(amountKobo: Long): Double = litresCutoff(amountKobo, koboPerLitre)
 
     /**
      * Total cost in kobo for [litres] dispensed, rounded to the nearest kobo. Kept in kobo
@@ -55,4 +54,18 @@ data class DeviceConfig(
      * 38.1 L → 3_316_605 kobo (₦33,166.05) rather than a truncated ₦33,166.
      */
     fun costKobo(litres: Double): Long = Math.round(litres * koboPerLitre)
+
+    companion object {
+        /**
+         * The floor is taken in whole numbers, not `Double` (TODO #53): `floor(1.15 × 100)` is
+         * `114.99999999999999`, which floored ₦1,150 at ₦1,000/L to 1.14 L — 0.01 L short on 137
+         * of the 2 000 amounts from ₦10 to ₦20,000. Both inputs are whole kobo, so integer
+         * division floors exactly and only the final division by 100 is a `Double`.
+         *
+         * Shared with the cash entry screen, which previews the same figure before a config
+         * lookup and used to carry its own copy of the float formula.
+         */
+        fun litresCutoff(amountKobo: Long, koboPerLitre: Long): Double =
+            (amountKobo * 100 / koboPerLitre) / 100.0
+    }
 }

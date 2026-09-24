@@ -38,8 +38,8 @@ each entry.
    gate: **#54**, **#55**, **#56**. Branch `feature/phase-11-adapter-cutoff`; spec
    [`docs/serial-protocol.md`](../serial-protocol.md); plan [`PHASE_11_PLAN.md`](PHASE_11_PLAN.md).
    OQ #23 (`CAL`) stays open.
-6. [ ] **Accuracy before the run:** ~~**#36**~~ (folded into Phase 11, fixed in 11d), **#53**
-   (cash cutoff short by 0.01 L on some amounts), and the fact that no build
+6. [ ] **Accuracy before the run:** ~~**#36**~~ (folded into Phase 11, fixed in 11d), ~~**#53**~~
+   (fixed 2026-09-24), **#57** (fill-up quote floors in floating point), and the fact that no build
    type is yet both real hardware and production (the "no build type" entry under "Open items carried from finished phases").
 7. [ ] **Robustness:** **#42** (a RuntimeException in the OkHttp chain kills the process), **#15**'s
    enforcement half (clock skew), **#44**.
@@ -174,7 +174,12 @@ _Collected 2026-09-22 when the finished phase sections moved to [`TODO_DONE.md`]
 
 ### from Phase 11
 
-- [ ] **53. `DeviceConfig.litresCutoff` floors in floating point and short-changes some cash sales.**
+- [x] **53. `DeviceConfig.litresCutoff` floors in floating point and short-changes some cash sales.**
+  **FIXED 2026-09-24** — the floor is now integer division on whole kobo, in one shared
+  `DeviceConfig.litresCutoff(amountKobo, koboPerLitre)`. Two siblings carried their own copy of the
+  float formula and are fixed with it: the cash entry screen's preview and the view model's
+  no-config fallback. Sweep test (₦10–₦20,000 at three prices) fails on the old code; 605 green.
+  The same float-floor shape in `quoteForDispensed` is a separate item, **#57**.
   Found 2026-09-22 (11d). `floor((amountKobo / koboPerLitre) × 100) / 100` in `Double`:
   ₦1,150 at ₦1,000/L is `1.15 × 100 = 114.99999999999999`, so the sale pours **and records**
   1.14 L. At ₦1,000/L that is 137 of the 2 000 amounts from ₦10 to ₦20,000. Customer-unfavourable
@@ -249,6 +254,17 @@ _Collected 2026-09-22 when the finished phase sections moved to [`TODO_DONE.md`]
   - **Install:** this is an install-checklist item for the 14-day run and for production — a sagging
     supply costs counted fuel silently, and the loss lands in the station's stock variance, not in an
     error message.
+
+- [ ] **57. `quoteForDispensed` floors measured litres in floating point — fill-ups undercharge.**
+  Found 2026-09-24 while fixing #53 (same shape, the sibling the house rule asks for).
+  `Math.floor(litres * 10_000)` on a meter reading of 1.14 L is `11399.999…` → 11 399, so the
+  fill-up is quoted one litre-step short. **1 227 of the 20 000 readings from 0.01 to 200.00 L**
+  are affected. Station-unfavourable and tiny (≈₦1.49 at ₦1,490/L, 10 kobo at ₦1,000/L), but it
+  is money on every such sale and it feeds `/authorise`.
+  - **Not fixed with #53 on purpose:** this is the payment path, where the server checks
+    `amount == expectedLitres × pricePerUnit` exactly. Fix shape: floor with a small epsilon (as
+    `litresToLimitPulses` does), plus a sweep test and a pass over `SaleQuoteTest`. Not a V1
+    blocker by size, but wanted before live money.
 
 ## 🔧 Phase 7g — adapter EEPROM totaliser + power-cut reconciliation (SPLIT — docs/app on `main`, firmware held)
 
